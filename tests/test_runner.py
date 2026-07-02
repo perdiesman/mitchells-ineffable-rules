@@ -172,6 +172,21 @@ class TestRunnerIntegration(unittest.TestCase):
         with open(path, "r") as f:
             content = f.read()
             self.assertIn("col1,\n", content)
+            
+        # 3. If we explicitly override IR-column-layout's max_length to 100 (while line-length max_length remains 20),
+        # column layout should use its explicit 100 limit, determine it fits on one line, and NOT wrap it.
+        path2 = self.write_temp_file("test2.sql", "SELECT col1, col2, col3 FROM users;")
+        config2 = Config()
+        config2.paths = [path2]
+        config2.rule_configs = {
+            "sql:IR-line-length": {"max_length": 20},
+            "sql:IR-column-layout": {"max_length": 100}
+        }
+        config2.fix = True
+        run_linter(config2)
+        with open(path2, "r") as f:
+            content2 = f.read()
+            self.assertEqual(content2, "SELECT col1, col2, col3 FROM users;")
 
 if __name__ == "__main__":
     unittest.main()
