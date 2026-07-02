@@ -19,6 +19,20 @@ Custom rules are loaded from directory structures representing the target langua
        └── custom_foo_rule.py    # Custom Foo rule
 ```
 
+### Defining Category Headers (`__init__.py`)
+
+To customize the order and friendly display titles of rule categories in generated Markdown documentation and CLI details, define a `CATEGORIES` dictionary mapping category slugs to headers in your language's `__init__.py` file.
+
+For example, inside `/my-custom-rules/foo/__init__.py`:
+```python
+CATEGORIES = {
+    "general": "General Rules",
+    "tags/elements": "Tags and Elements",
+    "namespaces": "Namespaces and Scoping"
+}
+```
+*Note: If a category is used in a rule but is omitted from `CATEGORIES`, the linter dynamically appends it at the end of the guide and formats the slug title automatically.*
+
 ---
 
 ## 2. Rule Definition Interface
