@@ -9,7 +9,18 @@ class IndentRule(BaseRule):
     enabled_by_default = True
     
     default_config = {
-        "indent_size": 4
+        "indent_size": 4,
+        "base_indent": 0
+    }
+    config_options = {
+        "indent_size": {
+            "default": 4,
+            "description": "Indentation size in spaces."
+        },
+        "base_indent": {
+            "default": 0,
+            "description": "Base indentation level (in spaces or leading space string) to expect for all lines."
+        }
     }
     
     examples = [
@@ -21,11 +32,17 @@ class IndentRule(BaseRule):
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         indent_size = rule_config.get("indent_size", self.default_config["indent_size"])
+        base_indent_opt = rule_config.get("base_indent", self.default_config["base_indent"])
+        if isinstance(base_indent_opt, str):
+            base_indent_spaces = len(base_indent_opt.replace("\t", " " * indent_size))
+        elif isinstance(base_indent_opt, int):
+            base_indent_spaces = base_indent_opt
+        else:
+            base_indent_spaces = 0
+            
         violations = []
-        
-        # We split by lines but handle carrying of disablers if comments exist,
-        # but check is purely per-line leading spaces validation.
         lines = content.splitlines()
+        
         for idx, line in enumerate(lines, start=1):
             if not line.strip():
                 continue # Ignore empty lines
@@ -51,12 +68,23 @@ class IndentRule(BaseRule):
                 continue
                 
             num_spaces = len(leading_whitespace)
-            if num_spaces % indent_size != 0:
+            relative_spaces = num_spaces - base_indent_spaces
+            if relative_spaces < 0:
                 violations.append(
                     Violation(
                         rule_id=self.rule_id,
                         line_number=idx,
-                        message=f"Line {idx} indentation is {num_spaces} spaces. Expected a multiple of {indent_size}.",
+                        message=f"Line {idx} indentation is {num_spaces} spaces, which is less than the base indentation of {base_indent_spaces} spaces.",
+                        offending_lines=[line],
+                        is_fixable=True
+                    )
+                )
+            elif relative_spaces % indent_size != 0:
+                violations.append(
+                    Violation(
+                        rule_id=self.rule_id,
+                        line_number=idx,
+                        message=f"Line {idx} indentation is {num_spaces} spaces. Expected a multiple of {indent_size} spaces relative to base indentation {base_indent_spaces}.",
                         offending_lines=[line],
                         is_fixable=True
                     )
@@ -66,6 +94,14 @@ class IndentRule(BaseRule):
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
         indent_size = rule_config.get("indent_size", self.default_config["indent_size"])
+        base_indent_opt = rule_config.get("base_indent", self.default_config["base_indent"])
+        if isinstance(base_indent_opt, str):
+            base_indent_spaces = len(base_indent_opt.replace("\t", " " * indent_size))
+        elif isinstance(base_indent_opt, int):
+            base_indent_spaces = base_indent_opt
+        else:
+            base_indent_spaces = 0
+            
         lines = content.splitlines()
         fixed_lines = []
         
@@ -88,15 +124,19 @@ class IndentRule(BaseRule):
             clean_whitespace = leading_whitespace.replace("\t", " " * indent_size)
             num_spaces = len(clean_whitespace)
             
-            # Round to the nearest multiple of indent_size
-            remainder = num_spaces % indent_size
+            relative_spaces = num_spaces - base_indent_spaces
+            if relative_spaces < 0:
+                relative_spaces = 0
+                
+            remainder = relative_spaces % indent_size
             if remainder != 0:
                 if remainder >= (indent_size / 2):
-                    num_spaces += (indent_size - remainder)
+                    relative_spaces += (indent_size - remainder)
                 else:
-                    num_spaces -= remainder
+                    relative_spaces -= remainder
                     
-            fixed_lines.append(" " * num_spaces + content_part)
+            final_spaces = base_indent_spaces + relative_spaces
+            fixed_lines.append(" " * final_spaces + content_part)
             
         ending = "\r\n" if "\r\n" in content else "\n"
         return ending.join(fixed_lines)

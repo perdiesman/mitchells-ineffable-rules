@@ -22,6 +22,11 @@ class ColumnLayoutRule(BaseRule):
             "default": 4,
             "description": "Number of spaces used for single-level column wrapping indentation.",
             "fallback": "IR-indent:indent_size"
+        },
+        "base_indent": {
+            "default": 0,
+            "description": "Base indentation level (in spaces or leading space string) of the outer container.",
+            "fallback": "IR-indent:base_indent"
         }
     }
     
@@ -305,6 +310,19 @@ class ColumnLayoutRule(BaseRule):
             default_value=4,
             fallbacks=[(IndentRule, "indent_size")]
         )
+        base_indent_opt = self.get_config_value(
+            rule_config,
+            "base_indent",
+            default_value=0,
+            fallbacks=[(IndentRule, "base_indent")]
+        )
+        if isinstance(base_indent_opt, str):
+            base_indent_spaces = len(base_indent_opt.replace("\t", " " * indent_size))
+        elif isinstance(base_indent_opt, int):
+            base_indent_spaces = base_indent_opt
+        else:
+            base_indent_spaces = 0
+            
         violations = []
         
         clauses = self._parse_clauses(content)
@@ -320,7 +338,8 @@ class ColumnLayoutRule(BaseRule):
                 
             # 1. Determine if it fits on a single line
             single_line_clause = f"{keyword} {', '.join(expressions)}"
-            total_len = len(indentation) + len(single_line_clause)
+            effective_indent_len = max(0, len(indentation) - base_indent_spaces)
+            total_len = effective_indent_len + len(single_line_clause)
             
             current_clause_text = content[cl["keyword_start"]:cl["list_end"]]
             
@@ -372,7 +391,19 @@ class ColumnLayoutRule(BaseRule):
             default_value=4,
             fallbacks=[(IndentRule, "indent_size")]
         )
-        
+        base_indent_opt = self.get_config_value(
+            rule_config,
+            "base_indent",
+            default_value=0,
+            fallbacks=[(IndentRule, "base_indent")]
+        )
+        if isinstance(base_indent_opt, str):
+            base_indent_spaces = len(base_indent_opt.replace("\t", " " * indent_size))
+        elif isinstance(base_indent_opt, int):
+            base_indent_spaces = base_indent_opt
+        else:
+            base_indent_spaces = 0
+            
         clauses = self._parse_clauses(content)
         if not clauses:
             return content
@@ -391,7 +422,8 @@ class ColumnLayoutRule(BaseRule):
                 continue
                 
             single_line_clause = f"{keyword} {', '.join(expressions)}"
-            total_len = len(indentation) + len(single_line_clause)
+            effective_indent_len = max(0, len(indentation) - base_indent_spaces)
+            total_len = effective_indent_len + len(single_line_clause)
             
             if total_len <= max_length:
                 formatted = single_line_clause

@@ -188,5 +188,49 @@ class TestRunnerIntegration(unittest.TestCase):
             content2 = f.read()
             self.assertEqual(content2, "SELECT col1, col2, col3 FROM users;")
 
+    def test_base_indent_linting(self):
+        # 1. Test IndentRule with a base indent of 8 spaces
+        query = "        SELECT id, name\n        FROM users;"
+        path_indent = self.write_temp_file("test_indent.sql", query)
+        config_indent = Config()
+        config_indent.paths = [path_indent]
+        config_indent.rule_configs = {
+            "sql:IR-indent": {"base_indent": 8}
+        }
+        exit_code = run_linter(config_indent)
+        self.assertEqual(exit_code, 0)
+        
+        config_indent2 = Config()
+        config_indent2.paths = [path_indent]
+        config_indent2.rule_configs = {
+            "sql:IR-indent": {"base_indent": 6}
+        }
+        exit_code = run_linter(config_indent2)
+        self.assertEqual(exit_code, 1)
+
+        # 2. Test LineLengthRule with a base indent of 20 spaces
+        long_query = "                    SELECT id, name FROM users;"
+        path_len = self.write_temp_file("test_len.sql", long_query)
+        config_len = Config()
+        config_len.paths = [path_len]
+        config_len.rule_configs = {
+            "sql:IR-indent": {"base_indent": 20},
+            "sql:IR-line-length": {"max_length": 30}
+        }
+        exit_code = run_linter(config_len)
+        self.assertEqual(exit_code, 0)
+
+        # 3. Test ColumnLayoutRule with base indent of 20 spaces
+        col_query = "                        SELECT col1, col2, col3\n                        FROM users;"
+        path_col = self.write_temp_file("test_col.sql", col_query)
+        config_col = Config()
+        config_col.paths = [path_col]
+        config_col.rule_configs = {
+            "sql:IR-indent": {"base_indent": 20},
+            "sql:IR-column-layout": {"max_length": 30}
+        }
+        exit_code = run_linter(config_col)
+        self.assertEqual(exit_code, 0)
+
 if __name__ == "__main__":
     unittest.main()

@@ -6,8 +6,9 @@ Indent should be equal amounts of spaces (default 4).
 - **Enabled by Default**: Yes
 - **Category**: General Rules
 - **Configuration Options**:
-  - `enabled`: `true`
-  - `indent_size`: `4`
+  - `enabled` (Default: `true`): Enable or disable this rule.
+  - `indent_size` (Default: `4`): Indentation size in spaces.
+  - `base_indent` (Default: `0`): Base indentation level (in spaces or leading space string) to expect for all lines.
 
 #### ❌ Violating Example
 ```sql

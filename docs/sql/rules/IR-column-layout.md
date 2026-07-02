@@ -9,6 +9,7 @@ On select, order by, group by, if all the columns fit on one line then put them 
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `max_length` (Default: `120`): Maximum line length limit used to determine if columns fit on a single line. *Note: Value dynamically inherited from rule [`IR-line-length`](IR-line-length.md) -> `max_length` if not configured.*
   - `indent_size` (Default: `4`): Number of spaces used for single-level column wrapping indentation. *Note: Value dynamically inherited from rule [`IR-indent`](IR-indent.md) -> `indent_size` if not configured.*
+  - `base_indent` (Default: `0`): Base indentation level (in spaces or leading space string) of the outer container. *Note: Value dynamically inherited from rule [`IR-indent`](IR-indent.md) -> `base_indent` if not configured.*
 
 #### ❌ Violating Example #1
 ```sql
