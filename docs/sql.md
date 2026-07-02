@@ -7,6 +7,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
 | [`IR-line-length`](#ir-line-length) | Lines must not exceed the configured maximum length. | No | [View Details](#ir-line-length) |
+| [`IR-indent`](#ir-indent) | Indent should be equal amounts of spaces (default 4). | Yes | [View Details](#ir-indent) |
 | [`IR-keyword-case`](#ir-keyword-case) | SQL keywords must be in uppercase. | Yes | [View Details](#ir-keyword-case) |
 
 ### IR-line-length
@@ -36,6 +37,34 @@ WHERE status = 'active';
 ```
 
 ---
+### IR-indent
+
+Indent should be equal amounts of spaces (default 4).
+
+- **Auto-Fixable**: Yes
+- **Enabled by Default**: Yes
+- **Category**: General Rules
+- **Default Configuration**:
+  - `enabled`: `true`
+  - `indent_size`: `4`
+
+#### ❌ Violating Example
+```sql
+SELECT
+  id,
+   name
+FROM users;
+```
+
+####  Correct Example
+```sql
+SELECT
+    id,
+    name
+FROM users;
+```
+
+---
 ### IR-keyword-case
 
 SQL keywords must be in uppercase.
@@ -62,13 +91,75 @@ SELECT id, username FROM users WHERE active = true;
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
-| *No rules active* | *Future select/view/materialized view rules will be listed here* | - | - |
+| [`IR-column-layout`](#ir-column-layout) | On select, order by, group by, if all the columns fit on one line then put them on one line, otherwise wrap one per line. | Yes | [View Details](#ir-column-layout) |
+
+### IR-column-layout
+
+On select, order by, group by, if all the columns fit on one line then put them on one line, otherwise wrap one per line.
+
+- **Auto-Fixable**: Yes
+- **Enabled by Default**: Yes
+- **Category**: Select / View / Materialized View Rules
+- **Default Configuration**:
+  - `enabled`: `true`
+  - `max_length`: `120`
+  - `indent_size`: `4`
+
+#### ❌ Violating Example
+```sql
+SELECT
+    id,
+    name
+FROM users;
+SELECT first_name, last_name, email, phone_number, mailing_address, date_of_birth, join_date, another_long_column_name, yet_another_one_to_be_sure FROM users;
+```
+
+####  Correct Example
+```sql
+SELECT id, name FROM users;
+SELECT
+    first_name,
+    last_name,
+    email,
+    phone_number,
+    mailing_address,
+    date_of_birth,
+    join_date,
+    another_long_column_name,
+    yet_another_one_to_be_sure
+FROM users;
+```
+
+---
 
 ## Function / Procedure Rules
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
-| *No rules active* | *Future function/procedure rules will be listed here* | - | - |
+| [`IR-function-case`](#ir-function-case) | Function names should be the same case (default lowercase). | Yes | [View Details](#ir-function-case) |
+
+### IR-function-case
+
+Function names should be the same case (default lowercase).
+
+- **Auto-Fixable**: Yes
+- **Enabled by Default**: Yes
+- **Category**: Function / Procedure Rules
+- **Default Configuration**:
+  - `enabled`: `true`
+  - `case`: `lowercase`
+
+#### ❌ Violating Example
+```sql
+SELECT COUNT(id), Sum(price) FROM orders;
+```
+
+####  Correct Example
+```sql
+SELECT count(id), sum(price) FROM orders;
+```
+
+---
 
 ## Insert / Update / Delete Rules
 

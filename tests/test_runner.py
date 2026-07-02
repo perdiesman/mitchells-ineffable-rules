@@ -50,21 +50,21 @@ class TestRunnerIntegration(unittest.TestCase):
         # 1. Disable globally
         config = Config()
         config.paths = [path]
-        config.rules_to_disable = ["IR-keyword-case"]
+        config.rules_to_disable = ["IR-keyword-case", "IR-column-layout"]
         exit_code = run_linter(config)
         self.assertEqual(exit_code, 0) # Ignored, so exit 0
         
         # 2. Disable only for sql
         config = Config()
         config.paths = [path]
-        config.rules_to_disable = ["sql:IR-keyword-case"]
+        config.rules_to_disable = ["sql:IR-keyword-case", "IR-column-layout"]
         exit_code = run_linter(config)
         self.assertEqual(exit_code, 0) # Ignored for sql, exit 0
         
         # 3. Disable for another language (e.g. java), which shouldn't affect sql
         config = Config()
         config.paths = [path]
-        config.rules_to_disable = ["java:IR-keyword-case"]
+        config.rules_to_disable = ["java:IR-keyword-case", "IR-column-layout"]
         exit_code = run_linter(config)
         self.assertEqual(exit_code, 1) # Not ignored for sql, exit 1
 
@@ -105,7 +105,8 @@ class TestRunnerIntegration(unittest.TestCase):
         config = Config()
         config.paths = [path]
         config.rule_configs = {
-            "IR-keyword-case": False
+            "IR-keyword-case": False,
+            "IR-column-layout": False
         }
         exit_code = run_linter(config)
         self.assertEqual(exit_code, 0) # Ignored, exit 0
@@ -118,7 +119,8 @@ class TestRunnerIntegration(unittest.TestCase):
         config = Config()
         config.paths = [path]
         config.rule_configs = {
-            "IR-keyword-case": {"enabled": False}
+            "IR-keyword-case": {"enabled": False},
+            "IR-column-layout": False
         }
         exit_code = run_linter(config)
         self.assertEqual(exit_code, 0) # Ignored, exit 0
@@ -132,7 +134,8 @@ class TestRunnerIntegration(unittest.TestCase):
         config.paths = [path]
         config.rule_configs = {
             "IR-keyword-case": {"enabled": True},
-            "sql:IR-keyword-case": {"enabled": False}
+            "sql:IR-keyword-case": {"enabled": False},
+            "IR-column-layout": False
         }
         exit_code = run_linter(config)
         self.assertEqual(exit_code, 0) # Ignored for sql, exit 0
@@ -142,7 +145,8 @@ class TestRunnerIntegration(unittest.TestCase):
         config.paths = [path]
         config.rule_configs = {
             "IR-keyword-case": {"enabled": True},
-            "sql:IR-keyword-case": False
+            "sql:IR-keyword-case": False,
+            "IR-column-layout": False
         }
         exit_code = run_linter(config)
         self.assertEqual(exit_code, 0) # Ignored for sql, exit 0
