@@ -232,5 +232,20 @@ class TestRunnerIntegration(unittest.TestCase):
         exit_code = run_linter(config_col)
         self.assertEqual(exit_code, 0)
 
+    def test_clause_alignment(self):
+        query = "SELECT id, name\n  FROM users\nWHERE active = true;"
+        path = self.write_temp_file("test_align.sql", query)
+        
+        config = Config()
+        config.paths = [path]
+        exit_code = run_linter(config)
+        self.assertEqual(exit_code, 1)
+        
+        config.fix = True
+        run_linter(config)
+        with open(path, "r") as f:
+            content = f.read()
+            self.assertEqual(content, "SELECT id, name\nFROM users\nWHERE active = true;")
+
 if __name__ == "__main__":
     unittest.main()

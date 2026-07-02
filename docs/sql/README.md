@@ -21,6 +21,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
+| [`IR-clause-alignment`](rules/IR-clause-alignment.md) | Main query clause keywords (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT) must have the exact same indentation within the same query block when the query spans multiple lines. | Yes | [View Details](rules/IR-clause-alignment.md) |
 | [`IR-column-layout`](rules/IR-column-layout.md) | On select, order by, group by, if all the columns fit on one line then put them on one line, otherwise wrap one per line. | Yes | [View Details](rules/IR-column-layout.md) |
 | [`IR-function-case`](rules/IR-function-case.md) | Function names should be the same case (default lowercase). | Yes | [View Details](rules/IR-function-case.md) |
 
