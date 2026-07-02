@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mitchells-ineffable-rules"
+version = "0.1.0"
+description = "Mitchell's Ineffable Rules (IR) Linter - A modular linter with customizable rules for SQL, Java, and XML."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Quality Assurance",
+    "Development Status :: 4 - Beta",
+]
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+mir = "mir.main:main"
+mir-linter = "mir.main:main"
+
+[tool.setuptools.packages.find]
+include = ["mir*"]
