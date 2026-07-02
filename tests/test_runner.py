@@ -151,5 +151,27 @@ class TestRunnerIntegration(unittest.TestCase):
         exit_code = run_linter(config)
         self.assertEqual(exit_code, 0) # Ignored for sql, exit 0
 
+    def test_column_layout_config_fallback(self):
+        path = self.write_temp_file("test.sql", "SELECT col1, col2, col3 FROM users;")
+        
+        config = Config()
+        config.paths = [path]
+        exit_code = run_linter(config)
+        self.assertEqual(exit_code, 0)
+        
+        config = Config()
+        config.paths = [path]
+        config.rule_configs = {
+            "sql:IR-line-length": {"max_length": 20}
+        }
+        exit_code = run_linter(config)
+        self.assertEqual(exit_code, 1)
+        
+        config.fix = True
+        run_linter(config)
+        with open(path, "r") as f:
+            content = f.read()
+            self.assertIn("col1,\n", content)
+
 if __name__ == "__main__":
     unittest.main()

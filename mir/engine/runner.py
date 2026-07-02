@@ -7,6 +7,20 @@ from mir.engine.rules_loader import load_rules_for_language
 from mir.engine.disabler import get_disabled_rules_map, get_file_language
 from mir.engine.rules_help import get_supported_languages
 
+def resolve_rule_config(config: Config, rule_id: str, lang: str) -> dict:
+    global_config = config.rule_configs.get(rule_id, {})
+    lang_config = config.rule_configs.get(f"{lang}:{rule_id}", {})
+    
+    rule_config = {}
+    if isinstance(global_config, dict):
+        rule_config.update(global_config)
+    if isinstance(lang_config, dict):
+        rule_config.update(lang_config)
+        
+    rule_config["_all_configs"] = config.rule_configs
+    rule_config["_lang"] = lang
+    return rule_config
+
 def find_files(paths: List[str], include_dirs: List[str] = None) -> List[str]:
     """
     Finds all files to lint recursively from the input paths, dynamically resolving
@@ -107,12 +121,8 @@ def run_linter(config: Config) -> int:
             if global_config is False or lang_config is False:
                 continue
                 
-            rule_config = {}
-            if isinstance(global_config, dict):
-                rule_config.update(global_config)
-            if isinstance(lang_config, dict):
-                rule_config.update(lang_config)
-                
+            rule_config = resolve_rule_config(config, rule.rule_id, lang)
+                 
             # Check for explicit enabled parameter, falling back to rule default
             is_enabled = rule_config.get("enabled", rule.enabled_by_default)
             if not is_enabled:
@@ -148,7 +158,7 @@ def run_linter(config: Config) -> int:
                 # on the accumulated content.
                 rules_to_fix = {item[1] for item in fixable}
                 for rule in rules_to_fix:
-                    rule_config = config.rule_configs.get(rule.rule_id, {})
+                    rule_config = resolve_rule_config(config, rule.rule_id, lang)
                     try:
                         current_content = rule.fix(current_content, file_path, rule_config)
                     except Exception as e:
@@ -176,7 +186,7 @@ def run_linter(config: Config) -> int:
                 current_content = content
                 rules_to_fix = {item[1] for item in fixable}
                 for rule in rules_to_fix:
-                    rule_config = config.rule_configs.get(rule.rule_id, {})
+                    rule_config = resolve_rule_config(config, rule.rule_id, lang)
                     try:
                         current_content = rule.fix(current_content, file_path, rule_config)
                     except Exception as e:

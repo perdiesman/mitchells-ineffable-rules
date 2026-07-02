@@ -1,6 +1,8 @@
 import re
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
+from mir.rules.sql.line_length import LineLengthRule
+from mir.rules.sql.indent import IndentRule
 
 class ColumnLayoutRule(BaseRule):
     rule_id = "IR-column-layout"
@@ -9,10 +11,7 @@ class ColumnLayoutRule(BaseRule):
     is_fixable = "yes"
     enabled_by_default = True
     
-    default_config = {
-        "max_length": 120,
-        "indent_size": 4
-    }
+    default_config = {}
     
     examples = [
         {
@@ -282,8 +281,18 @@ class ColumnLayoutRule(BaseRule):
         return clauses
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
-        max_length = rule_config.get("max_length", self.default_config["max_length"])
-        indent_size = rule_config.get("indent_size", self.default_config["indent_size"])
+        max_length = self.get_config_value(
+            rule_config,
+            "max_length",
+            default_value=120,
+            fallbacks=[(LineLengthRule, "max_length")]
+        )
+        indent_size = self.get_config_value(
+            rule_config,
+            "indent_size",
+            default_value=4,
+            fallbacks=[(IndentRule, "indent_size")]
+        )
         violations = []
         
         clauses = self._parse_clauses(content)
@@ -339,8 +348,18 @@ class ColumnLayoutRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        max_length = rule_config.get("max_length", self.default_config["max_length"])
-        indent_size = rule_config.get("indent_size", self.default_config["indent_size"])
+        max_length = self.get_config_value(
+            rule_config,
+            "max_length",
+            default_value=120,
+            fallbacks=[(LineLengthRule, "max_length")]
+        )
+        indent_size = self.get_config_value(
+            rule_config,
+            "indent_size",
+            default_value=4,
+            fallbacks=[(IndentRule, "indent_size")]
+        )
         
         clauses = self._parse_clauses(content)
         if not clauses:

@@ -7,8 +7,6 @@ On select, order by, group by, if all the columns fit on one line then put them 
 - **Category**: Select / View / Materialized View Rules
 - **Default Configuration**:
   - `enabled`: `true`
-  - `max_length`: `120`
-  - `indent_size`: `4`
 
 #### ❌ Violating Example #1
 ```sql
