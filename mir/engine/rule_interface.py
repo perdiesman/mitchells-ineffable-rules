@@ -30,6 +30,7 @@ class BaseRule:
     is_fixable: str = "no"  # Must be "yes", "no", or "sometimes"
     enabled_by_default: bool = True
     default_config: Dict[str, Any] = {}
+    config_options: Dict[str, Dict[str, Any]] = {}
     examples: List[Dict[str, str]] = []
     additional_validations: List[str] = []
 

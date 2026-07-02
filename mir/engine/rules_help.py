@@ -197,13 +197,31 @@ def generate_docs_to_path(
                 rule_md.append(f"- **Enabled by Default**: {enabled_str}")
                 rule_md.append(f"- **Category**: {get_category_title(r.category, lang, include_dirs)}")
                 
-                # Default Configuration parameters
-                default_opts = {"enabled": r.enabled_by_default}
-                default_opts.update(r.default_config)
-                rule_md.append("- **Default Configuration**:")
-                for opt_k, opt_v in default_opts.items():
-                    val_str = str(opt_v).lower() if isinstance(opt_v, bool) else str(opt_v)
-                    rule_md.append(f"  - `{opt_k}`: `{val_str}`")
+                # Configuration parameters
+                rule_md.append("- **Configuration Options**:")
+                if getattr(r, "config_options", None):
+                    enabled_val = "true" if r.enabled_by_default else "false"
+                    rule_md.append(f"  - `enabled` (Default: `{enabled_val}`): Enable or disable this rule.")
+                    for opt_k, opt_v in r.config_options.items():
+                        desc = opt_v.get("description", "")
+                        default_val = opt_v.get("default")
+                        default_str = str(default_val).lower() if isinstance(default_val, bool) else str(default_val)
+                        fallback = opt_v.get("fallback")
+                        
+                        opt_line = f"  - `{opt_k}` (Default: `{default_str}`): {desc}"
+                        if fallback:
+                            parts = fallback.split(":")
+                            if len(parts) == 2:
+                                opt_line += f" *Note: Value dynamically inherited from rule [`{parts[0]}`]({parts[0]}.md) -> `{parts[1]}` if not configured.*"
+                            else:
+                                opt_line += f" *Note: Value dynamically inherited from `{fallback}` if not configured.*"
+                        rule_md.append(opt_line)
+                else:
+                    default_opts = {"enabled": r.enabled_by_default}
+                    default_opts.update(r.default_config)
+                    for opt_k, opt_v in default_opts.items():
+                        val_str = str(opt_v).lower() if isinstance(opt_v, bool) else str(opt_v)
+                        rule_md.append(f"  - `{opt_k}`: `{val_str}`")
                 rule_md.append("")
                 
                 if r.examples:
@@ -360,12 +378,29 @@ def print_rule_details(lang: str, rule, include_dirs: Optional[List[str]] = None
     print(f"Enabled:      {enabled_str} (by default)")
     print(f"Description:  {rule.description}")
     
-    # Print default configuration parameters
-    print("Default Config:")
-    default_opts = {"enabled": rule.enabled_by_default}
-    default_opts.update(rule.default_config)
-    for opt_k, opt_v in default_opts.items():
-        print(f"  {opt_k}: {opt_v}")
+    # Print configuration parameters
+    print("Configuration Options:")
+    if getattr(rule, "config_options", None):
+        enabled_val = "true" if rule.enabled_by_default else "false"
+        print(f"  enabled (Default: {enabled_val}): Enable or disable this rule.")
+        for opt_k, opt_v in rule.config_options.items():
+            desc = opt_v.get("description", "")
+            default_val = opt_v.get("default")
+            fallback = opt_v.get("fallback")
+            
+            opt_line = f"  {opt_k} (Default: {default_val}): {desc}"
+            if fallback:
+                parts = fallback.split(":")
+                if len(parts) == 2:
+                    opt_line += f" (Value dynamically inherited from rule {parts[0]} -> {parts[1]} if not configured)"
+                else:
+                    opt_line += f" (Value dynamically inherited from {fallback} if not configured)"
+            print(opt_line)
+    else:
+        default_opts = {"enabled": rule.enabled_by_default}
+        default_opts.update(rule.default_config)
+        for opt_k, opt_v in default_opts.items():
+            print(f"  {opt_k}: {opt_v}")
     print()
     
     if rule.examples:

@@ -5,7 +5,7 @@ SQL keywords must be in uppercase.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: General Rules
-- **Default Configuration**:
+- **Configuration Options**:
   - `enabled`: `true`
 
 #### ❌ Violating Example

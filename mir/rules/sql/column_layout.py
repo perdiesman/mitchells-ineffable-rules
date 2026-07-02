@@ -12,6 +12,18 @@ class ColumnLayoutRule(BaseRule):
     enabled_by_default = True
     
     default_config = {}
+    config_options = {
+        "max_length": {
+            "default": 120,
+            "description": "Maximum line length limit used to determine if columns fit on a single line.",
+            "fallback": "IR-line-length:max_length"
+        },
+        "indent_size": {
+            "default": 4,
+            "description": "Number of spaces used for single-level column wrapping indentation.",
+            "fallback": "IR-indent:indent_size"
+        }
+    }
     
     examples = [
         {

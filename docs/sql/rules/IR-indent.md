@@ -5,7 +5,7 @@ Indent should be equal amounts of spaces (default 4).
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: General Rules
-- **Default Configuration**:
+- **Configuration Options**:
   - `enabled`: `true`
   - `indent_size`: `4`
 

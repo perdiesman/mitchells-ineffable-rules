@@ -5,7 +5,7 @@ Function names should be the same case (default lowercase).
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Select / View / Materialized View Rules
-- **Default Configuration**:
+- **Configuration Options**:
   - `enabled`: `true`
   - `case`: `lowercase`
 

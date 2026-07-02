@@ -53,6 +53,22 @@ def validate_rule_class(rule_class: Type[BaseRule]) -> None:
             f"Rule '{rule_id}' (class {rule_class.__name__}) 'default_config' must be a dictionary."
         )
         
+    config_options = getattr(rule_class, "config_options", None)
+    if config_options is not None:
+        if not isinstance(config_options, dict):
+            raise RuleValidationError(
+                f"Rule '{rule_id}' (class {rule_class.__name__}) 'config_options' must be a dictionary."
+            )
+        for opt_name, opt_val in config_options.items():
+            if not isinstance(opt_val, dict):
+                raise RuleValidationError(
+                    f"Rule '{rule_id}' (class {rule_class.__name__}) option '{opt_name}' details must be a dictionary."
+                )
+            if "default" not in opt_val:
+                raise RuleValidationError(
+                    f"Rule '{rule_id}' (class {rule_class.__name__}) option '{opt_name}' must specify a 'default' key."
+                )
+        
     examples = getattr(rule_class, "examples", None)
     if examples is not None:
         if not isinstance(examples, list):

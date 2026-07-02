@@ -5,7 +5,7 @@ Lines must not exceed the configured maximum length.
 - **Auto-Fixable**: No
 - **Enabled by Default**: Yes
 - **Category**: General Rules
-- **Default Configuration**:
+- **Configuration Options**:
   - `enabled`: `true`
   - `max_length`: `120`
 
