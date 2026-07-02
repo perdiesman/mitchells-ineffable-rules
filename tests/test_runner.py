@@ -303,5 +303,34 @@ class TestRunnerIntegration(unittest.TestCase):
             self.assertEqual(exit_code_fix, 0)
             self.assertEqual(captured_stdout.getvalue(), "SELECT id FROM users;")
 
+    def test_disable_all_and_enable(self):
+        query = "select id from users;"
+        path = self.write_temp_file("test_disable.sql", query)
+        
+        config1 = Config()
+        config1.paths = [path]
+        self.assertEqual(run_linter(config1), 1)
+        
+        config2 = Config()
+        config2.paths = [path]
+        config2.disable_all = True
+        self.assertEqual(run_linter(config2), 0)
+        
+        config3 = Config()
+        config3.paths = [path]
+        config3.disable_all = True
+        config3.rules_to_enable = ["IR-keyword-case"]
+        self.assertEqual(run_linter(config3), 1)
+        
+        config4 = Config()
+        config4.paths = [path]
+        config4.disable_all = True
+        config4.rules_to_enable = ["IR-keyword-case"]
+        config4.fix = True
+        run_linter(config4)
+        with open(path, "r") as f:
+            content = f.read()
+            self.assertEqual(content, "SELECT id FROM users;")
+
 if __name__ == "__main__":
     unittest.main()

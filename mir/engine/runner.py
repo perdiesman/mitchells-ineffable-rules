@@ -121,7 +121,15 @@ def run_linter(config: Config) -> int:
                 continue
                 
             rule_config = resolve_rule_config(config, rule.rule_id, lang)
-            is_enabled = rule_config.get("enabled", rule.enabled_by_default)
+            if config.disable_all:
+                is_enabled = (
+                    (rule_config.get("enabled") is True) or
+                    (rule.rule_id in config.rules_to_enable) or
+                    (f"{lang}:{rule.rule_id}" in config.rules_to_enable)
+                )
+            else:
+                is_enabled = rule_config.get("enabled", rule.enabled_by_default)
+                
             if not is_enabled:
                 continue
                 
@@ -240,7 +248,15 @@ def run_linter(config: Config) -> int:
             rule_config = resolve_rule_config(config, rule.rule_id, lang)
                  
             # Check for explicit enabled parameter, falling back to rule default
-            is_enabled = rule_config.get("enabled", rule.enabled_by_default)
+            if config.disable_all:
+                is_enabled = (
+                    (rule_config.get("enabled") is True) or
+                    (rule.rule_id in config.rules_to_enable) or
+                    (f"{lang}:{rule.rule_id}" in config.rules_to_enable)
+                )
+            else:
+                is_enabled = rule_config.get("enabled", rule.enabled_by_default)
+                
             if not is_enabled:
                 continue
             # Run check

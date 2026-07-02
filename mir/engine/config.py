@@ -20,6 +20,8 @@ class Config:
         self.rule_mode: str = "extend"
         self.content: Optional[str] = None
         self.lang: Optional[str] = None
+        self.disable_all: bool = False
+        self.rules_to_enable: List[str] = []
 
 def load_config(args_list: Optional[List[str]] = None) -> Config:
     # 1. Parse CLI arguments first to check for config path, flags, and targets
@@ -43,6 +45,8 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     parser.add_argument("--rule-mode", choices=["extend", "replace"], help="Rule mode: 'extend' (default) or 'replace'")
     parser.add_argument("--content", help="Raw string of content to lint")
     parser.add_argument("--lang", "--language", dest="lang", help="Language of the content (required if using --content or piping stdin)")
+    parser.add_argument("--disable-all", action="store_true", default=None, help="Disable all rules by default")
+    parser.add_argument("--enable", help="Comma-separated list of rule IDs to enable")
     
     parsed_args = parser.parse_args(args_list)
     
@@ -170,6 +174,31 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     # -- content and lang --
     config.content = parsed_args.content
     config.lang = parsed_args.lang or os.environ.get("IR_LANG") or file_config.get("lang")
+    
+    # -- disable_all --
+    if parsed_args.disable_all is not None:
+        config.disable_all = parsed_args.disable_all
+    elif os.environ.get("IR_DISABLE_ALL") is not None:
+        config.disable_all = os.environ.get("IR_DISABLE_ALL").lower() in ("true", "1", "yes")
+    else:
+        config.disable_all = file_config.get("disable_all", False)
+        
+    # -- rules_to_enable --
+    enabled_rules_set = set()
+    file_enabled = file_config.get("enable", [])
+    if isinstance(file_enabled, list):
+        for r in file_enabled:
+            if isinstance(r, str):
+                enabled_rules_set.add(r.strip())
+    env_enable = os.environ.get("IR_ENABLE")
+    if env_enable:
+        for r in env_enable.split(","):
+            enabled_rules_set.add(r.strip())
+    cli_enable = parsed_args.enable
+    if cli_enable:
+        for r in cli_enable.split(","):
+            enabled_rules_set.add(r.strip())
+    config.rules_to_enable = sorted(list(enabled_rules_set))
         
     # 5. Handle rule help AFTER config resolution so that include_dirs and rule_mode are resolved
     if parsed_args.help is not None:
