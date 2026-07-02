@@ -187,6 +187,26 @@ rules:
     max_length: 120
 ```
 
+### Rule Configuration Fallbacks
+
+To keep rules independent and decoupled, certain rules can dynamically inherit configuration parameters from other rules if they are not explicitly set. 
+
+For example, the SQL Column Layout formatter (`IR-column-layout`) dynamically falls back to query its parameters from the canonical rule configurations:
+- `max_length` is inherited from the Line Length rule (`IR-line-length`)
+- `indent_size` is inherited from the Indentation rule (`IR-indent`)
+
+You can override these parameters specifically for the dependent rule or set them once on the canonical rule:
+```yaml
+rules:
+  # Sets line length limit to 80 (affects both IR-line-length and IR-column-layout fallback)
+  IR-line-length:
+    max_length: 80
+
+  # Specifically overrides column layout to use 100 instead
+  IR-column-layout:
+    max_length: 100
+```
+
 ### Order of Precedence
 
 Configuration parameters are merged with the following priority hierarchy (highest overrides lowest):

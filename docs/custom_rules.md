@@ -52,8 +52,9 @@ All rule classes must subclass `BaseRule` (imported from `mir.engine.rule_interf
 ### Optional Fields & Methods
 - **`enabled_by_default`** (boolean, default: `True`): Controls whether the rule runs when not explicitly configured.
 - **`default_config`** (dictionary, default: `{}`): Holds default configuration values for rule options.
-- **`examples_violating`** (list of strings): Code snippet(s) demonstrating style violations.
-- **`examples_correct`** (list of strings): Code snippet(s) showing correct format.
+- **`config_options`** (dictionary, default: `{}`): Declares detailed parameter options, descriptions, default values, and fallback instructions.
+- **`examples`** (list of dictionaries): Paired violating/correct code snippets demonstrating formatting violations and corrections.
+- **`additional_validations`** (list of strings): Compliant code statements that must always pass check verification and remain unchanged.
 - **`fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str`**:
   - Implements the correction logic.
   - Required if `is_fixable` is `"yes"` or `"sometimes"`.
@@ -68,6 +69,7 @@ Here is a full template for implementing a custom SQL rule:
 ```python
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
+from mir.rules.sql.line_length import LineLengthRule
 
 class MyCustomSqlRule(BaseRule):
     rule_id = "IR-my-custom-sql"
@@ -76,34 +78,51 @@ class MyCustomSqlRule(BaseRule):
     is_fixable = "no"
     enabled_by_default = True
     
-    default_config = {
-        "max_columns": 10
+    default_config = {}
+    config_options = {
+        "max_length": {
+            "default": 120,
+            "description": "Maximum line length limit.",
+            "fallback": "IR-line-length:max_length"
+        }
     }
     
-    examples_violating = [
-        "SELECT * FROM large_table;"
+    examples = [
+        {
+            "violating": "SELECT * FROM large_table;",
+            "correct": "SELECT id, name FROM large_table;"
+        }
     ]
-    examples_correct = [
-        "SELECT id, name FROM large_table;"
+    additional_validations = [
+        "SELECT id, name FROM users;"
     ]
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
-        # Implement check logic...
-        # Fall back to default config if parameters are missing
-        max_cols = rule_config.get("max_columns", self.default_config["max_columns"])
-        
-        # Example violation creation
-        # violations.append(
-        #     Violation(
-        #         rule_id=self.rule_id,
-        #         line_number=1,
-        #         message="Do not query all columns.",
-        #         offending_lines=["SELECT * FROM large_table;"]
-        #     )
-        # )
+        # Resolve config with fallback lookup support
+        max_len = self.get_config_value(
+            rule_config,
+            "max_length",
+            default_value=120,
+            fallbacks=[(LineLengthRule, "max_length")]
+        )
+        # Implement check logic using max_len...
         return violations
 ```
+
+### Configuration Value Fallbacks
+
+If your rule depends on parameters managed by other rules (e.g. sharing indentation sizes or line length limits), you can avoid duplicate options by using `self.get_config_value`:
+
+```python
+val = self.get_config_value(
+    rule_config,
+    "local_param_name",
+    default_value=default_val,
+    fallbacks=[(OtherRuleClass, "other_param_name")]
+)
+```
+The helper automatically queries the user's explicit overrides, checks the fallback rule's overrides (respecting language prefixes), and falls back to rule class defaults before using the local default.
 
 ---
 
@@ -158,9 +177,8 @@ The linter will immediately print a `RuleValidationError` and exit with an error
 To simplify development, the project includes an **embedded meta-testing framework** ([tests/test_meta_rules.py](file:///home/me/projects/mitchells-ineffable-rules/tests/test_meta_rules.py)). 
 
 If you include your custom rule directory during testing (e.g. by configuring it or modifying the test run environment), the framework will automatically discover, load, and test your rules:
-- It runs `check()` on each snippet in `examples_violating` and verifies it produces at least one violation.
-- If `is_fixable` is `"yes"` or `"sometimes"`, it runs `fix()` on each violating snippet and asserts that the corrected output produces zero violations.
-- It runs `check()` on each snippet in `examples_correct` and verifies it produces zero violations.
+- It runs `check()` on each snippet in `examples`' `violating` key and verifies it produces at least one violation.
+- If `is_fixable` is `"yes"` or `"sometimes"`, it runs `fix()` on each violating snippet and asserts that the corrected output matches the paired `correct` snippet exactly and produces zero violations.
+- It runs `check()` on each statement in `additional_validations` and verifies it produces zero violations and remains unchanged.
 
 This ensures you can test your rule implementations immediately without having to write separate test scripts.
-
