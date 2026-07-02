@@ -92,6 +92,44 @@ def generate_docs_to_path(
     os.makedirs(target_path, exist_ok=True)
     supported_languages = get_supported_languages(include_dirs)
     
+    # 1. Build root README.md
+    root_md = []
+    root_md.append("# Mitchell's Ineffable Rules - Documentation\n")
+    root_md.append("Welcome to the style guide and rules catalog for the Mitchell's Ineffable Rules (MIR) Linter.\n")
+    root_md.append("## Languages\n")
+    
+    for lang in supported_languages:
+        root_md.append(f"### [{lang.upper()}]({lang}/README.md)")
+        
+        # Resolve all categories for this language
+        lang_cats = get_categories_for_language(lang, include_dirs)
+        rules = load_rules_for_language(lang, include_dirs, rule_mode)
+        grouped_rules = {}
+        for rule in rules:
+            grouped_rules.setdefault(rule.category.lower(), []).append(rule)
+            
+        all_categories = list(lang_cats.keys())
+        for cat in grouped_rules:
+            if cat not in all_categories:
+                all_categories.append(cat)
+                
+        root_md.append("Categories:")
+        for cat in all_categories:
+            cat_title = get_category_title(cat, lang, include_dirs)
+            slug = slugify(cat_title)
+            root_md.append(f"- [{cat_title}]({lang}/README.md#{slug})")
+        root_md.append("")
+        
+    root_md.append("## Additional Guides")
+    root_md.append("- [Custom Rules Guide](custom_rules.md)")
+    root_md.append("- [PyPI Publishing Guide](publishing.md)\n")
+    
+    root_path = os.path.join(target_path, "README.md")
+    with open(root_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(root_md))
+    print(f"Generated root README -> {root_path}")
+    
+    # 2. Build directories and rules for each language
     for lang in supported_languages:
         rules = load_rules_for_language(lang, include_dirs, rule_mode)
         
@@ -100,9 +138,15 @@ def generate_docs_to_path(
         for rule in rules:
             grouped_rules.setdefault(rule.category.lower(), []).append(rule)
             
-        md_content = []
-        md_content.append(f"# {lang.upper()} Style Guide & Rules\n")
-        md_content.append(f"This document describes all {lang.upper()} linting rules supported by Mitchell's Ineffable Rules (IR) Linter.\n")
+        lang_dir = os.path.join(target_path, lang)
+        os.makedirs(lang_dir, exist_ok=True)
+        
+        rules_dir = os.path.join(lang_dir, "rules")
+        os.makedirs(rules_dir, exist_ok=True)
+        
+        lang_md = []
+        lang_md.append(f"# {lang.upper()} Style Guide & Rules\n")
+        lang_md.append(f"This document describes all {lang.upper()} linting rules supported by Mitchell's Ineffable Rules (IR) Linter.\n")
         
         # Load standard categories defined in package init
         lang_cats = get_categories_for_language(lang, include_dirs)
@@ -114,77 +158,87 @@ def generate_docs_to_path(
                 all_categories.append(cat)
                 
         # Build category anchors Table of Contents
-        md_content.append("## Categories\n")
+        lang_md.append("## Categories\n")
         for cat in all_categories:
             cat_title = get_category_title(cat, lang, include_dirs)
             slug = slugify(cat_title)
-            md_content.append(f"- [{cat_title}](#{slug})")
-        md_content.append("")
+            lang_md.append(f"- [{cat_title}](#{slug})")
+        lang_md.append("")
         
         for cat in all_categories:
             cat_rules = grouped_rules.get(cat, [])
             cat_title = get_category_title(cat, lang, include_dirs)
             
-            md_content.append(f"## {cat_title}\n")
+            lang_md.append(f"## {cat_title}\n")
             
             if not cat_rules:
-                md_content.append("| Rule Name | Short Description | Fixable | Details |")
-                md_content.append("| :--- | :--- | :---: | :---: |")
-                md_content.append(f"| *No rules active* | *Future {cat} rules will be listed here* | - | - |\n")
+                lang_md.append("| Rule Name | Short Description | Fixable | Details |")
+                lang_md.append("| :--- | :--- | :---: | :---: |")
+                lang_md.append(f"| *No rules active* | *Future {cat} rules will be listed here* | - | - |\n")
                 continue
                 
             # Print table
-            md_content.append("| Rule Name | Short Description | Fixable | Details |")
-            md_content.append("| :--- | :--- | :---: | :---: |")
+            lang_md.append("| Rule Name | Short Description | Fixable | Details |")
+            lang_md.append("| :--- | :--- | :---: | :---: |")
             for r in cat_rules:
                 fixable_str = r.is_fixable.capitalize()
-                md_content.append(f"| [`{r.rule_id}`](#{r.rule_id.lower()}) | {r.description} | {fixable_str} | [View Details](#{r.rule_id.lower()}) |")
-            md_content.append("")
+                lang_md.append(f"| [`{r.rule_id}`](rules/{r.rule_id}.md) | {r.description} | {fixable_str} | [View Details](rules/{r.rule_id}.md) |")
+            lang_md.append("")
             
-            # Print rule details
+            # Write individual rule files
             for r in cat_rules:
-                md_content.append(f"### {r.rule_id}\n")
-                md_content.append(f"{r.description}\n")
+                rule_md = []
+                rule_md.append(f"# {r.rule_id}\n")
+                rule_md.append(f"{r.description}\n")
+                
                 fixable_str = r.is_fixable.capitalize()
                 enabled_str = "Yes" if r.enabled_by_default else "No"
-                md_content.append(f"- **Auto-Fixable**: {fixable_str}")
-                md_content.append(f"- **Enabled by Default**: {enabled_str}")
-                md_content.append(f"- **Category**: {get_category_title(r.category, lang, include_dirs)}")
+                rule_md.append(f"- **Auto-Fixable**: {fixable_str}")
+                rule_md.append(f"- **Enabled by Default**: {enabled_str}")
+                rule_md.append(f"- **Category**: {get_category_title(r.category, lang, include_dirs)}")
                 
                 # Default Configuration parameters
                 default_opts = {"enabled": r.enabled_by_default}
                 default_opts.update(r.default_config)
-                md_content.append("- **Default Configuration**:")
+                rule_md.append("- **Default Configuration**:")
                 for opt_k, opt_v in default_opts.items():
                     val_str = str(opt_v).lower() if isinstance(opt_v, bool) else str(opt_v)
-                    md_content.append(f"  - `{opt_k}`: `{val_str}`")
-                md_content.append("")
+                    rule_md.append(f"  - `{opt_k}`: `{val_str}`")
+                rule_md.append("")
                 
                 if r.examples:
                     for idx, ex in enumerate(r.examples, start=1):
                         suffix = f" #{idx}" if len(r.examples) > 1 else ""
                         
                         if "violating" in ex and ex["violating"]:
-                            md_content.append(f"#### ❌ Violating Example{suffix}")
-                            md_content.append(f"```{lang}")
-                            md_content.append(ex["violating"])
-                            md_content.append("```\n")
+                            rule_md.append(f"#### ❌ Violating Example{suffix}")
+                            rule_md.append(f"```{lang}")
+                            rule_md.append(ex["violating"])
+                            rule_md.append("```\n")
                             
                         if "correct" in ex and ex["correct"]:
-                            md_content.append(f"####  Correct Example{suffix}")
-                            md_content.append(f"```{lang}")
-                            md_content.append(ex["correct"])
-                            md_content.append("```\n")
-                    
-                md_content.append("---")
-            md_content.append("")
+                            rule_md.append(f"####  Correct Example{suffix}")
+                            rule_md.append(f"```{lang}")
+                            rule_md.append(ex["correct"])
+                            rule_md.append("```\n")
+                            
+                rule_file_path = os.path.join(rules_dir, f"{r.rule_id}.md")
+                with open(rule_file_path, "w", encoding="utf-8") as f:
+                    f.write("\n".join(rule_md))
             
-        # Write to file
-        file_path = os.path.join(target_path, f"{lang}.md")
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(md_content))
-            
-        print(f"Generated docs for {lang} -> {file_path}")
+        lang_readme_path = os.path.join(lang_dir, "README.md")
+        with open(lang_readme_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lang_md))
+        print(f"Generated language docs for {lang} -> {lang_dir}")
+        
+        # Clean up legacy monolithic file if exists
+        legacy_file = os.path.join(target_path, f"{lang}.md")
+        if os.path.exists(legacy_file):
+            try:
+                os.remove(legacy_file)
+                print(f"Removed legacy monolithic file: {legacy_file}")
+            except Exception as e:
+                print(f"Warning: could not remove legacy file '{legacy_file}': {e}")
 
 def handle_rule_help(
     help_arg: str,
