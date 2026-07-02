@@ -2,6 +2,13 @@
 
 This document describes all JAVA linting rules supported by Mitchell's Ineffable Rules (IR) Linter.
 
+## Categories
+
+- [General Rules](#general-rules)
+- [Classes and Interfaces](#classes-and-interfaces)
+- [Method Declarations](#method-declarations)
+- [Variables and Fields](#variables-and-fields)
+
 ## General Rules
 
 | Rule Name | Short Description | Fixable | Details |

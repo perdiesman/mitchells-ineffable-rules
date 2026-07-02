@@ -2,6 +2,13 @@
 
 This document describes all SQL linting rules supported by Mitchell's Ineffable Rules (IR) Linter.
 
+## Categories
+
+- [General Rules](#general-rules)
+- [Select / View / Materialized View Rules](#select-view-materialized-view-rules)
+- [Function / Procedure Rules](#function-procedure-rules)
+- [Insert / Update / Delete Rules](#insert-update-delete-rules)
+
 ## General Rules
 
 | Rule Name | Short Description | Fixable | Details |

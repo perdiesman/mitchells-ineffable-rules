@@ -1,8 +1,19 @@
 import os
 import sys
+import re
 import argparse
 import importlib
 from typing import List, Dict, Optional
+
+def slugify(text: str) -> str:
+    """
+    Convert text to a GitHub markdown compatible anchor slug.
+    """
+    text = text.lower()
+    text = text.replace("/", " ")
+    text = re.sub(r"[^a-z0-9\s-]", "", text)
+    text = re.sub(r"[\s-]+", "-", text)
+    return text.strip("-")
 from mir.engine.rules_loader import load_rules_for_language
 
 def get_supported_languages(include_dirs: Optional[List[str]] = None) -> List[str]:
@@ -101,7 +112,15 @@ def generate_docs_to_path(
         for cat in grouped_rules:
             if cat not in all_categories:
                 all_categories.append(cat)
-            
+                
+        # Build category anchors Table of Contents
+        md_content.append("## Categories\n")
+        for cat in all_categories:
+            cat_title = get_category_title(cat, lang, include_dirs)
+            slug = slugify(cat_title)
+            md_content.append(f"- [{cat_title}](#{slug})")
+        md_content.append("")
+        
         for cat in all_categories:
             cat_rules = grouped_rules.get(cat, [])
             cat_title = get_category_title(cat, lang, include_dirs)

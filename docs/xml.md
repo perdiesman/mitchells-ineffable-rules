@@ -2,6 +2,13 @@
 
 This document describes all XML linting rules supported by Mitchell's Ineffable Rules (IR) Linter.
 
+## Categories
+
+- [General Rules](#general-rules)
+- [Tags and Elements](#tags-and-elements)
+- [Attributes](#attributes)
+- [Namespaces](#namespaces)
+
 ## General Rules
 
 | Rule Name | Short Description | Fixable | Details |
