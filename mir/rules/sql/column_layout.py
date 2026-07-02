@@ -19,7 +19,7 @@ class ColumnLayoutRule(BaseRule):
         "SELECT first_name, last_name, email, phone_number, mailing_address, date_of_birth, join_date, another_long_column_name, yet_another_one_to_be_sure FROM users;"
     ]
     examples_correct = [
-        "SELECT id, name FROM users;",
+        "SELECT id, name\nFROM users;",
         "SELECT\n    first_name,\n    last_name,\n    email,\n    phone_number,\n    mailing_address,\n    date_of_birth,\n    join_date,\n    another_long_column_name,\n    yet_another_one_to_be_sure\nFROM users;"
     ]
 

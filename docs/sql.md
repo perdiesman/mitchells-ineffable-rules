@@ -124,7 +124,8 @@ SELECT first_name, last_name, email, phone_number, mailing_address, date_of_birt
 
 ####  Correct Example
 ```sql
-SELECT id, name FROM users;
+SELECT id, name
+FROM users;
 SELECT
     first_name,
     last_name,
