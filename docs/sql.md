@@ -99,6 +99,7 @@ SELECT id, username FROM users WHERE active = true;
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
 | [`IR-column-layout`](#ir-column-layout) | On select, order by, group by, if all the columns fit on one line then put them on one line, otherwise wrap one per line. | Yes | [View Details](#ir-column-layout) |
+| [`IR-function-case`](#ir-function-case) | Function names should be the same case (default lowercase). | Yes | [View Details](#ir-function-case) |
 
 ### IR-column-layout
 
@@ -138,20 +139,13 @@ FROM users;
 ```
 
 ---
-
-## Function / Procedure Rules
-
-| Rule Name | Short Description | Fixable | Details |
-| :--- | :--- | :---: | :---: |
-| [`IR-function-case`](#ir-function-case) | Function names should be the same case (default lowercase). | Yes | [View Details](#ir-function-case) |
-
 ### IR-function-case
 
 Function names should be the same case (default lowercase).
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Function / Procedure Rules
+- **Category**: Select / View / Materialized View Rules
 - **Default Configuration**:
   - `enabled`: `true`
   - `case`: `lowercase`
@@ -167,6 +161,12 @@ SELECT count(id), sum(price) FROM orders;
 ```
 
 ---
+
+## Function / Procedure Rules
+
+| Rule Name | Short Description | Fixable | Details |
+| :--- | :--- | :---: | :---: |
+| *No rules active* | *Future function/procedure rules will be listed here* | - | - |
 
 ## Insert / Update / Delete Rules
 
