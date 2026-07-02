@@ -53,17 +53,28 @@ def validate_rule_class(rule_class: Type[BaseRule]) -> None:
             f"Rule '{rule_id}' (class {rule_class.__name__}) 'default_config' must be a dictionary."
         )
         
-    examples_violating = getattr(rule_class, "examples_violating", None)
-    if examples_violating is not None and not isinstance(examples_violating, list):
-        raise RuleValidationError(
-            f"Rule '{rule_id}' (class {rule_class.__name__}) 'examples_violating' must be a list of strings."
-        )
-        
-    examples_correct = getattr(rule_class, "examples_correct", None)
-    if examples_correct is not None and not isinstance(examples_correct, list):
-        raise RuleValidationError(
-            f"Rule '{rule_id}' (class {rule_class.__name__}) 'examples_correct' must be a list of strings."
-        )
+    examples = getattr(rule_class, "examples", None)
+    if examples is not None:
+        if not isinstance(examples, list):
+            raise RuleValidationError(
+                f"Rule '{rule_id}' (class {rule_class.__name__}) 'examples' must be a list of dictionaries."
+            )
+        for idx, ex in enumerate(examples):
+            if not isinstance(ex, dict):
+                raise RuleValidationError(
+                    f"Rule '{rule_id}' (class {rule_class.__name__}) example #{idx + 1} must be a dictionary."
+                )
+            if "violating" not in ex or not isinstance(ex["violating"], str):
+                raise RuleValidationError(
+                    f"Rule '{rule_id}' (class {rule_class.__name__}) example #{idx + 1} must have a 'violating' string key."
+                )
+            # If the rule is fixable=yes, then 'correct' key is required
+            is_fixable = getattr(rule_class, "is_fixable", "no")
+            if is_fixable == "yes":
+                if "correct" not in ex or not isinstance(ex["correct"], str) or not ex["correct"].strip():
+                    raise RuleValidationError(
+                        f"Rule '{rule_id}' (class {rule_class.__name__}) example #{idx + 1} must have a non-empty 'correct' string key since is_fixable is 'yes'."
+                    )
 
 def load_rules_from_dir(directory: str, language: str, is_external: bool = False) -> List[BaseRule]:
     """

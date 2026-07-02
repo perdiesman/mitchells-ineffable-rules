@@ -24,34 +24,46 @@ class TestMetaRules(unittest.TestCase):
                 rule_id = rule.rule_id
                 rule_config = dict(rule.default_config)
                 
-                # 1. Verify Violating Examples: check() must yield at least one violation
-                for idx, example in enumerate(rule.examples_violating, start=1):
-                    violations = rule.check(example, f"test_violating_{idx}.{lang}", rule_config)
+                self.assertTrue(hasattr(rule, "examples"), f"Rule '{rule_id}' has no 'examples' property.")
+                
+                for idx, ex in enumerate(rule.examples, start=1):
+                    violating = ex.get("violating")
+                    correct = ex.get("correct")
+                    
+                    self.assertIsNotNone(violating, f"Rule '{rule_id}' example #{idx} must define a 'violating' code block.")
+                    
+                    # 1. Verify Violating Example: check() must yield at least one violation
+                    violations = rule.check(violating, f"test_violating_{idx}.{lang}", rule_config)
                     self.assertTrue(
                         len(violations) > 0,
-                        f"Expected at least one violation for rule '{rule_id}' ({lang}) in violating example #{idx}, but found none.\nCode:\n{example}"
+                        f"Expected at least one violation for rule '{rule_id}' ({lang}) in violating example #{idx}, but found none.\nCode:\n{violating}"
                     )
                     
-                    # If the rule is fixable, verify that calling fix() yields compliant code
-                    if rule.is_fixable in ("yes", "sometimes"):
+                    # 2. If the rule is fixable and 'correct' is defined, verify fix() results
+                    if rule.is_fixable in ("yes", "sometimes") and correct:
                         try:
-                            fixed_content = rule.fix(example, f"test_violating_{idx}.{lang}", rule_config)
+                            fixed_content = rule.fix(violating, f"test_violating_{idx}.{lang}", rule_config)
+                            # Verify that fixed content matches the correct example exactly
+                            self.assertEqual(
+                                fixed_content, correct,
+                                f"Expected fixed content for rule '{rule_id}' in example #{idx} to match the 'correct' example exactly.\nFixed:\n{fixed_content}\nExpected:\n{correct}"
+                            )
+                            # Verify that fixed content has 0 violations
                             post_fix_violations = rule.check(fixed_content, f"test_violating_{idx}.{lang}", rule_config)
                             self.assertEqual(
                                 len(post_fix_violations), 0,
                                 f"Expected zero violations after running fix() on violating example #{idx} for rule '{rule_id}', but found {len(post_fix_violations)}.\nFixed Code:\n{fixed_content}"
                             )
                         except NotImplementedError:
-                            # If is_fixable is 'sometimes' and the rule raises NotImplementedError for this specific example, that's fine.
                             pass
-                
-                # 2. Verify Correct Examples: check() must yield zero violations
-                for idx, example in enumerate(rule.examples_correct, start=1):
-                    violations = rule.check(example, f"test_correct_{idx}.{lang}", rule_config)
-                    self.assertEqual(
-                        len(violations), 0,
-                        f"Expected zero violations for rule '{rule_id}' ({lang}) in correct example #{idx}, but found {len(violations)}.\nCode:\n{example}"
-                    )
+                            
+                    # 3. Verify Correct Example if defined: check() must yield zero violations
+                    if correct:
+                        violations = rule.check(correct, f"test_correct_{idx}.{lang}", rule_config)
+                        self.assertEqual(
+                            len(violations), 0,
+                            f"Expected zero violations for rule '{rule_id}' ({lang}) in correct example #{idx}, but found {len(violations)}.\nCode:\n{correct}"
+                        )
                     
                 rules_checked_count += 1
                 

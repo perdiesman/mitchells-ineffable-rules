@@ -12,11 +12,11 @@ class IndentRule(BaseRule):
         "indent_size": 4
     }
     
-    examples_violating = [
-        "SELECT\n  id,\n   name\nFROM users;"
-    ]
-    examples_correct = [
-        "SELECT\n    id,\n    name\nFROM users;"
+    examples = [
+        {
+            "violating": "SELECT\n  id,\n   name\nFROM users;",
+            "correct": "SELECT\n    id,\n    name\nFROM users;"
+        }
     ]
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:

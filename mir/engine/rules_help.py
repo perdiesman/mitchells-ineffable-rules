@@ -160,19 +160,21 @@ def generate_docs_to_path(
                     md_content.append(f"  - `{opt_k}`: `{val_str}`")
                 md_content.append("")
                 
-                if r.examples_violating:
-                    md_content.append("#### ❌ Violating Example")
-                    md_content.append(f"```{lang}")
-                    for ex in r.examples_violating:
-                        md_content.append(ex)
-                    md_content.append("```\n")
-                    
-                if r.examples_correct:
-                    md_content.append("####  Correct Example")
-                    md_content.append(f"```{lang}")
-                    for ex in r.examples_correct:
-                        md_content.append(ex)
-                    md_content.append("```\n")
+                if r.examples:
+                    for idx, ex in enumerate(r.examples, start=1):
+                        suffix = f" #{idx}" if len(r.examples) > 1 else ""
+                        
+                        if "violating" in ex and ex["violating"]:
+                            md_content.append(f"#### ❌ Violating Example{suffix}")
+                            md_content.append(f"```{lang}")
+                            md_content.append(ex["violating"])
+                            md_content.append("```\n")
+                            
+                        if "correct" in ex and ex["correct"]:
+                            md_content.append(f"####  Correct Example{suffix}")
+                            md_content.append(f"```{lang}")
+                            md_content.append(ex["correct"])
+                            md_content.append("```\n")
                     
                 md_content.append("---")
             md_content.append("")
@@ -304,16 +306,16 @@ def print_rule_details(lang: str, rule, include_dirs: Optional[List[str]] = None
         print(f"  {opt_k}: {opt_v}")
     print()
     
-    if rule.examples_violating:
-        print("Violating Example:")
-        print("------------------")
-        for ex in rule.examples_violating:
-            print(ex)
-        print()
-        
-    if rule.examples_correct:
-        print("Correct Example:")
-        print("----------------")
-        for ex in rule.examples_correct:
-            print(ex)
-        print()
+    if rule.examples:
+        for idx, ex in enumerate(rule.examples, start=1):
+            suffix = f" #{idx}" if len(rule.examples) > 1 else ""
+            if "violating" in ex and ex["violating"]:
+                print(f"Violating Example{suffix}:")
+                print("-" * (18 + len(suffix)))
+                print(ex["violating"])
+                print()
+            if "correct" in ex and ex["correct"]:
+                print(f"Correct Example{suffix}:")
+                print("-" * (16 + len(suffix)))
+                print(ex["correct"])
+                print()

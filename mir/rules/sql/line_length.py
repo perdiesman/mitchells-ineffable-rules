@@ -9,11 +9,11 @@ class LineLengthRule(BaseRule):
     default_config = {
         "max_length": 120
     }
-    examples_violating = [
-        "SELECT first_name, last_name, email, phone_number, mailing_address, date_of_birth, join_date, status, premium_member_flag FROM accounts_primary_table WHERE status = 'active';"
-    ]
-    examples_correct = [
-        "SELECT\n    first_name,\n    last_name,\n    email\nFROM accounts_primary_table\nWHERE status = 'active';"
+    examples = [
+        {
+            "violating": "SELECT first_name, last_name, email, phone_number, mailing_address, date_of_birth, join_date, status, premium_member_flag FROM accounts_primary_table WHERE status = 'active';",
+            "correct": "SELECT\n    first_name,\n    last_name,\n    email\nFROM accounts_primary_table\nWHERE status = 'active';"
+        }
     ]
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:

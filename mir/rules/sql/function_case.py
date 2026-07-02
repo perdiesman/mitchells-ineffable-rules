@@ -22,11 +22,11 @@ class FunctionCaseRule(BaseRule):
         "case": "lowercase"  # "lowercase" or "uppercase"
     }
     
-    examples_violating = [
-        "SELECT COUNT(id), Sum(price) FROM orders;"
-    ]
-    examples_correct = [
-        "SELECT count(id), sum(price) FROM orders;"
+    examples = [
+        {
+            "violating": "SELECT COUNT(id), Sum(price) FROM orders;",
+            "correct": "SELECT count(id), sum(price) FROM orders;"
+        }
     ]
 
     def _find_function_calls(self, content: str) -> List[tuple]:

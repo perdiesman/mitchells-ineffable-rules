@@ -23,11 +23,11 @@ class KeywordCaseRule(BaseRule):
     description = "SQL keywords must be in uppercase."
     category = "general"
     is_fixable = "yes"
-    examples_violating = [
-        "select id, username from users where active = true;"
-    ]
-    examples_correct = [
-        "SELECT id, username FROM users WHERE active = true;"
+    examples = [
+        {
+            "violating": "select id, username from users where active = true;",
+            "correct": "SELECT id, username FROM users WHERE active = true;"
+        }
     ]
 
     def _find_violations_in_text(self, text: str, line_offset: int) -> List[Tuple[int, str]]:

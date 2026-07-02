@@ -30,8 +30,7 @@ class BaseRule:
     is_fixable: str = "no"  # Must be "yes", "no", or "sometimes"
     enabled_by_default: bool = True
     default_config: Dict[str, Any] = {}
-    examples_violating: List[str] = []
-    examples_correct: List[str] = []
+    examples: List[Dict[str, str]] = []
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         """
