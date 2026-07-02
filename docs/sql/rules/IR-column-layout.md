@@ -42,3 +42,8 @@ SELECT
     another_long_column_name,
     yet_another_one_to_be_sure FROM users;
 ```
+
+#### Additional Validations
+```sql
+SELECT id, name FROM users;
+```

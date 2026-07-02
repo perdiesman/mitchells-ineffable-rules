@@ -24,6 +24,9 @@ class ColumnLayoutRule(BaseRule):
             "correct": "SELECT\n    first_name,\n    last_name,\n    email,\n    phone_number,\n    mailing_address,\n    date_of_birth,\n    join_date,\n    another_long_column_name,\n    yet_another_one_to_be_sure FROM users;"
         }
     ]
+    additional_validations = [
+        "SELECT id, name FROM users;"
+    ]
 
     def _parse_clauses(self, content: str) -> List[dict]:
         """

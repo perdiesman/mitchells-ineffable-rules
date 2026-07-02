@@ -65,6 +65,24 @@ class TestMetaRules(unittest.TestCase):
                             f"Expected zero violations for rule '{rule_id}' ({lang}) in correct example #{idx}, but found {len(violations)}.\nCode:\n{correct}"
                         )
                     
+                # 4. Verify Additional Validations: check() must yield zero violations, and fix() must yield same string
+                additional_vals = getattr(rule, "additional_validations", [])
+                for idx, statement in enumerate(additional_vals, start=1):
+                    violations = rule.check(statement, f"test_additional_{idx}.{lang}", rule_config)
+                    self.assertEqual(
+                        len(violations), 0,
+                        f"Expected zero violations for rule '{rule_id}' ({lang}) in additional validation #{idx}, but found {len(violations)}.\nCode:\n{statement}"
+                    )
+                    if rule.is_fixable in ("yes", "sometimes"):
+                        try:
+                            fixed_content = rule.fix(statement, f"test_additional_{idx}.{lang}", rule_config)
+                            self.assertEqual(
+                                fixed_content, statement,
+                                f"Expected fix() to leave additional validation #{idx} unchanged for rule '{rule_id}'.\nFixed:\n{fixed_content}\nOriginal:\n{statement}"
+                            )
+                        except NotImplementedError:
+                            pass
+                    
                 rules_checked_count += 1
                 
         print(f"\n[Meta-Testing] Dynamically validated {rules_checked_count} rules using embedded class examples.")

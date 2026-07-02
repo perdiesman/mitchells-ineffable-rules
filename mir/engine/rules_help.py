@@ -222,6 +222,14 @@ def generate_docs_to_path(
                             rule_md.append(ex["correct"])
                             rule_md.append("```\n")
                             
+                additional_vals = getattr(r, "additional_validations", [])
+                if additional_vals:
+                    rule_md.append("#### Additional Validations")
+                    for val in additional_vals:
+                        rule_md.append(f"```{lang}")
+                        rule_md.append(val)
+                        rule_md.append("```\n")
+                            
                 rule_file_path = os.path.join(rules_dir, f"{r.rule_id}.md")
                 with open(rule_file_path, "w", encoding="utf-8") as f:
                     f.write("\n".join(rule_md))
@@ -373,3 +381,11 @@ def print_rule_details(lang: str, rule, include_dirs: Optional[List[str]] = None
                 print("-" * (16 + len(suffix)))
                 print(ex["correct"])
                 print()
+                
+    additional_vals = getattr(rule, "additional_validations", [])
+    if additional_vals:
+        print("Additional Validations:")
+        print("----------------------")
+        for val in additional_vals:
+            print(val)
+        print()

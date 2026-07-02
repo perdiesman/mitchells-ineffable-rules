@@ -75,6 +75,18 @@ def validate_rule_class(rule_class: Type[BaseRule]) -> None:
                     raise RuleValidationError(
                         f"Rule '{rule_id}' (class {rule_class.__name__}) example #{idx + 1} must have a non-empty 'correct' string key since is_fixable is 'yes'."
                     )
+                    
+    additional_validations = getattr(rule_class, "additional_validations", None)
+    if additional_validations is not None:
+        if not isinstance(additional_validations, list):
+            raise RuleValidationError(
+                f"Rule '{rule_id}' (class {rule_class.__name__}) 'additional_validations' must be a list."
+            )
+        for idx, val in enumerate(additional_validations):
+            if not isinstance(val, str):
+                raise RuleValidationError(
+                    f"Rule '{rule_id}' (class {rule_class.__name__}) additional_validation #{idx + 1} must be a string."
+                )
 
 def load_rules_from_dir(directory: str, language: str, is_external: bool = False) -> List[BaseRule]:
     """

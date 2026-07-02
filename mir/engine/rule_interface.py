@@ -31,6 +31,7 @@ class BaseRule:
     enabled_by_default: bool = True
     default_config: Dict[str, Any] = {}
     examples: List[Dict[str, str]] = []
+    additional_validations: List[str] = []
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         """
