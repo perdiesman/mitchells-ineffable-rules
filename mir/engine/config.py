@@ -18,6 +18,8 @@ class Config:
         self.config_file_path: Optional[str] = None
         self.include_dirs: List[str] = []
         self.rule_mode: str = "extend"
+        self.content: Optional[str] = None
+        self.lang: Optional[str] = None
 
 def load_config(args_list: Optional[List[str]] = None) -> Config:
     # 1. Parse CLI arguments first to check for config path, flags, and targets
@@ -39,6 +41,8 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     parser.add_argument("--disable", help="Comma-separated list of rule IDs to disable globally")
     parser.add_argument("--include-dir", action="append", help="Directory containing custom rules for extending or replacing rule sets")
     parser.add_argument("--rule-mode", choices=["extend", "replace"], help="Rule mode: 'extend' (default) or 'replace'")
+    parser.add_argument("--content", help="Raw string of content to lint")
+    parser.add_argument("--lang", "--language", dest="lang", help="Language of the content (required if using --content or piping stdin)")
     
     parsed_args = parser.parse_args(args_list)
     
@@ -162,6 +166,10 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     config.rule_configs = file_config.get("rules", {})
     if not isinstance(config.rule_configs, dict):
         config.rule_configs = {}
+        
+    # -- content and lang --
+    config.content = parsed_args.content
+    config.lang = parsed_args.lang or os.environ.get("IR_LANG") or file_config.get("lang")
         
     # 5. Handle rule help AFTER config resolution so that include_dirs and rule_mode are resolved
     if parsed_args.help is not None:

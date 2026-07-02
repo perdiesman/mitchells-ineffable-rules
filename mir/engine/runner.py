@@ -1,4 +1,6 @@
 import os
+import sys
+import select
 import difflib
 from typing import List, Dict, Set, Tuple
 from mir.engine.config import Config
@@ -74,6 +76,120 @@ def run_linter(config: Config) -> int:
     Runs the linting engine based on the given configuration.
     Returns exit code (0 for success, 1 for failures).
     """
+    # 1. Check for explicit content parameter or piped stdin
+    content = None
+    lang = None
+    
+    if config.content is not None:
+        if not config.lang:
+            print("Error: Language must be specified when passing raw content (use --lang/--language).", file=sys.stderr)
+            return 1
+        content = config.content
+        lang = config.lang
+    else:
+        # Check stdin
+        stdin_ready = False
+        if not sys.stdin.isatty():
+            try:
+                ready, _, _ = select.select([sys.stdin], [], [], 0.0)
+                if ready:
+                    stdin_ready = True
+            except Exception:
+                pass
+        if stdin_ready:
+            if not config.lang:
+                print("Error: Language must be specified when piping input (use --lang/--language).", file=sys.stderr)
+                return 1
+            content = sys.stdin.read()
+            lang = config.lang
+            
+    if content is not None:
+        file_path = "<stdin>"
+        rules = load_rules_for_language(lang, config.include_dirs, config.rule_mode)
+        active_rules = [
+            rule for rule in rules
+            if rule.rule_id not in config.rules_to_disable and f"{lang}:{rule.rule_id}" not in config.rules_to_disable
+        ]
+        
+        disabled_map = get_disabled_rules_map(content, file_path)
+        file_violations = []
+        
+        for rule in active_rules:
+            global_config = config.rule_configs.get(rule.rule_id, {})
+            lang_config = config.rule_configs.get(f"{lang}:{rule.rule_id}", {})
+            if global_config is False or lang_config is False:
+                continue
+                
+            rule_config = resolve_rule_config(config, rule.rule_id, lang)
+            is_enabled = rule_config.get("enabled", rule.enabled_by_default)
+            if not is_enabled:
+                continue
+                
+            try:
+                violations = rule.check(content, file_path, rule_config)
+            except Exception as e:
+                print(f"Error running rule {rule.rule_id} on {file_path}: {e}", file=sys.stderr)
+                continue
+                
+            rule_disabled_lines = disabled_map.get(rule.rule_id, set())
+            for v in violations:
+                if v.line_number not in rule_disabled_lines:
+                    file_violations.append((v, rule))
+                    
+        if not file_violations:
+            if config.fix:
+                print(content, end="")
+            return 0
+            
+        fixable = [item for item in file_violations if item[0].is_fixable and item[1].is_fixable in ("yes", "sometimes")]
+        unfixable = [item for item in file_violations if not (item[0].is_fixable and item[1].is_fixable in ("yes", "sometimes"))]
+        
+        if config.fix:
+            if fixable:
+                current_content = content
+                rules_to_fix = {item[1] for item in fixable}
+                for rule in rules_to_fix:
+                    rule_config = resolve_rule_config(config, rule.rule_id, lang)
+                    try:
+                        current_content = rule.fix(current_content, file_path, rule_config)
+                    except Exception as e:
+                        print(f"Error applying fix for rule {rule.rule_id}: {e}", file=sys.stderr)
+                print(current_content, end="")
+            else:
+                print(content, end="")
+                
+            for v, rule in unfixable:
+                print(format_violation(v, file_path, config.verbose, rule.description), file=sys.stderr)
+            return 1 if unfixable else 0
+            
+        elif config.dry_run:
+            if fixable:
+                current_content = content
+                rules_to_fix = {item[1] for item in fixable}
+                for rule in rules_to_fix:
+                    rule_config = resolve_rule_config(config, rule.rule_id, lang)
+                    try:
+                        current_content = rule.fix(current_content, file_path, rule_config)
+                    except Exception as e:
+                        pass
+                if current_content != content:
+                    diff = difflib.unified_diff(
+                        content.splitlines(keepends=True),
+                        current_content.splitlines(keepends=True),
+                        fromfile=f"a/{file_path}",
+                        tofile=f"b/{file_path}"
+                    )
+                    sys.stdout.writelines(diff)
+                    
+            for v, rule in file_violations:
+                print(format_violation(v, file_path, config.verbose, rule.description), file=sys.stderr)
+            return 1
+            
+        else:
+            for v, rule in file_violations:
+                print(format_violation(v, file_path, config.verbose, rule.description))
+            return 1
+
     files = find_files(config.paths, config.include_dirs)
     if not files:
         if config.verbose:

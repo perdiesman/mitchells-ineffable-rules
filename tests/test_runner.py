@@ -261,5 +261,47 @@ class TestRunnerIntegration(unittest.TestCase):
             content2 = f.read()
             self.assertEqual(content2, "SELECT id, name\nFROM users\nWHERE active = true;")
 
+    def test_raw_content_string_checking(self):
+        config = Config()
+        config.content = "SELECT id FROM users;"
+        config.lang = "sql"
+        exit_code = run_linter(config)
+        self.assertEqual(exit_code, 0)
+        
+        config = Config()
+        config.content = "select id from users;"
+        config.lang = "sql"
+        exit_code = run_linter(config)
+        self.assertEqual(exit_code, 1)
+        
+        config = Config()
+        config.content = "SELECT id FROM users;"
+        exit_code = run_linter(config)
+        self.assertEqual(exit_code, 1)
+
+    def test_stdin_piping_checking(self):
+        from unittest.mock import patch
+        
+        with patch("sys.stdin.isatty", return_value=False), \
+             patch("select.select", return_value=([sys.stdin], [], [])), \
+             patch("sys.stdin.read", return_value="select id from users;"):
+             
+            config = Config()
+            config.lang = "sql"
+            exit_code = run_linter(config)
+            self.assertEqual(exit_code, 1)
+            
+            config_fix = Config()
+            config_fix.lang = "sql"
+            config_fix.fix = True
+            
+            import io
+            captured_stdout = io.StringIO()
+            with patch("sys.stdout", captured_stdout):
+                exit_code_fix = run_linter(config_fix)
+                
+            self.assertEqual(exit_code_fix, 0)
+            self.assertEqual(captured_stdout.getvalue(), "SELECT id FROM users;")
+
 if __name__ == "__main__":
     unittest.main()
