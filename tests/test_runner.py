@@ -246,6 +246,20 @@ class TestRunnerIntegration(unittest.TestCase):
         with open(path, "r") as f:
             content = f.read()
             self.assertEqual(content, "SELECT id, name\nFROM users\nWHERE active = true;")
+            
+        # Test case where FROM is on the same line as SELECT in a multi-line query (should be wrapped to new line)
+        query2 = "SELECT id, name FROM users\nWHERE active = true;"
+        path2 = self.write_temp_file("test_align2.sql", query2)
+        config2 = Config()
+        config2.paths = [path2]
+        exit_code = run_linter(config2)
+        self.assertEqual(exit_code, 1)
+        
+        config2.fix = True
+        run_linter(config2)
+        with open(path2, "r") as f:
+            content2 = f.read()
+            self.assertEqual(content2, "SELECT id, name\nFROM users\nWHERE active = true;")
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,9 +10,8 @@ Main query clause keywords (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIM
 
 #### ❌ Violating Example #1
 ```sql
-SELECT id, name
-  FROM users
-  WHERE active = true;
+SELECT id, name FROM users
+WHERE active = true;
 ```
 
 ####  Correct Example #1

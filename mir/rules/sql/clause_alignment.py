@@ -13,7 +13,7 @@ class ClauseAlignmentRule(BaseRule):
     
     examples = [
         {
-            "violating": "SELECT id, name\n  FROM users\n  WHERE active = true;",
+            "violating": "SELECT id, name FROM users\nWHERE active = true;",
             "correct": "SELECT id, name\nFROM users\nWHERE active = true;"
         },
         {
@@ -35,7 +35,6 @@ class ClauseAlignmentRule(BaseRule):
         paren_stack = []
         line_number = 1
         line_start_idx = 0
-        seen_token_on_line = False
         
         clauses = []
         
@@ -45,7 +44,6 @@ class ClauseAlignmentRule(BaseRule):
             if c == '\n':
                 line_number += 1
                 line_start_idx = i + 1
-                seen_token_on_line = False
                 i += 1
                 continue
                 
@@ -95,13 +93,11 @@ class ClauseAlignmentRule(BaseRule):
             # Parenthesis tracking
             if c == '(':
                 paren_stack.append(i)
-                seen_token_on_line = True
                 i += 1
                 continue
             if c == ')':
                 if paren_stack:
                     paren_stack.pop()
-                seen_token_on_line = True
                 i += 1
                 continue
                 
@@ -119,7 +115,6 @@ class ClauseAlignmentRule(BaseRule):
                 if word_lower in ("select", "from", "where", "having", "limit"):
                     keyword = word_lower.upper()
                 elif word_lower in ("group", "order"):
-                    # Look ahead for "by"
                     next_idx = i
                     while next_idx < n and content[next_idx].isspace():
                         next_idx += 1
@@ -133,32 +128,33 @@ class ClauseAlignmentRule(BaseRule):
                         i = next_idx
                 
                 if keyword:
-                    if not seen_token_on_line:
-                        # Resolve indentation of current keyword line
-                        line_text = content[line_start_idx:w_start]
+                    # Check if it is the first token on its line
+                    line_text = content[line_start_idx:w_start]
+                    is_first_on_line = (line_text.strip() == "")
+                    
+                    if is_first_on_line:
+                        indentation = line_text
+                        space_start = w_start
+                    else:
                         indentation = ""
-                        for char in line_text:
-                            if char in (" ", "\t"):
-                                indentation += char
-                            else:
-                                indentation = ""
-                                
-                        clauses.append({
-                            "keyword": keyword,
-                            "line_number": line_number,
-                            "line_start_idx": line_start_idx,
-                            "keyword_start": w_start,
-                            "keyword_end": keyword_end,
-                            "indentation": indentation,
-                            "scope": tuple(paren_stack)
-                        })
-                    seen_token_on_line = True
-                else:
-                    seen_token_on_line = True
+                        # Find preceding whitespace index range to replace if we need to put it on a new line
+                        space_start = w_start
+                        while space_start > line_start_idx and content[space_start - 1].isspace():
+                            space_start -= 1
+                            
+                    clauses.append({
+                        "keyword": keyword,
+                        "line_number": line_number,
+                        "line_start_idx": line_start_idx,
+                        "keyword_start": w_start,
+                        "keyword_end": keyword_end,
+                        "space_start": space_start,
+                        "indentation": indentation,
+                        "is_first_on_line": is_first_on_line,
+                        "scope": tuple(paren_stack)
+                    })
                 continue
                 
-            # Any other character is a token
-            seen_token_on_line = True
             i += 1
             
         return clauses
@@ -168,7 +164,6 @@ class ClauseAlignmentRule(BaseRule):
         clauses = self._parse_clauses(content)
         lines = content.splitlines()
         
-        # Group clauses by scope
         scope_groups = {}
         for cl in clauses:
             scope = cl["scope"]
@@ -183,15 +178,23 @@ class ClauseAlignmentRule(BaseRule):
             # Determine if the query spans multiple lines
             line_numbers = [cl["line_number"] for cl in group]
             if max(line_numbers) == min(line_numbers):
-                # Single-line query, alignment is not enforced
                 continue
                 
-            # Align subsequent clauses in the group to match the first clause's indentation
             first_clause = group[0]
             expected_indent = first_clause["indentation"]
             
             for cl in group[1:]:
-                if cl["indentation"] != expected_indent:
+                if not cl["is_first_on_line"]:
+                    violations.append(
+                        Violation(
+                            rule_id=self.rule_id,
+                            line_number=cl["line_number"],
+                            message=f"Query clause {cl['keyword']} must start on a new line and align with the {first_clause['keyword']} clause.",
+                            offending_lines=[lines[cl["line_number"] - 1] if cl["line_number"] - 1 < len(lines) else ""],
+                            is_fixable=True
+                        )
+                    )
+                elif cl["indentation"] != expected_indent:
                     violations.append(
                         Violation(
                             rule_id=self.rule_id,
@@ -220,7 +223,6 @@ class ClauseAlignmentRule(BaseRule):
                 scope_groups[scope] = []
             scope_groups[scope].append(cl)
             
-        # Collect all violating clauses and their expected replacement text
         replacements = []
         for scope, group in scope_groups.items():
             if len(group) < 2:
@@ -234,7 +236,13 @@ class ClauseAlignmentRule(BaseRule):
             expected_indent = first_clause["indentation"]
             
             for cl in group[1:]:
-                if cl["indentation"] != expected_indent:
+                if not cl["is_first_on_line"]:
+                    replacements.append((
+                        cl["space_start"],
+                        cl["keyword_start"],
+                        "\n" + expected_indent
+                    ))
+                elif cl["indentation"] != expected_indent:
                     replacements.append((
                         cl["line_start_idx"],
                         cl["line_start_idx"] + len(cl["indentation"]),
@@ -244,10 +252,8 @@ class ClauseAlignmentRule(BaseRule):
         if not replacements:
             return content
             
-        # Sort replacements from bottom to top to avoid offset shifting
         replacements.sort(key=lambda x: x[0], reverse=True)
         
-        # Apply edits
         chars = list(content)
         for start, end, new_text in replacements:
             chars[start:end] = list(new_text)
