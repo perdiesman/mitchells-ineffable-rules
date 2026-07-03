@@ -1,6 +1,6 @@
-# IR-join-null-coalesce
+# IR-null-coalesce
 
-Standardize predicate checks of form 'x = v OR x IS NULL' to COALESCE(x, -1) = v.
+Standardize nullable equality predicates to COALESCE(x, -1) form.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
@@ -20,10 +20,19 @@ SELECT * FROM users WHERE COALESCE(active, -1) = true;
 
 #### ❌ Violating Example #2
 ```sql
-SELECT * FROM users WHERE active IS NULL OR active = true;
+SELECT * FROM t1 JOIN t2 ON t1.id = t2.id OR (t1.id IS NULL AND t2.id IS NULL);
 ```
 
 ####  Correct Example #2
 ```sql
+SELECT * FROM t1 JOIN t2 ON COALESCE(t1.id, -1) = COALESCE(t2.id, -1);
+```
+
+#### Additional Validations
+```sql
 SELECT * FROM users WHERE COALESCE(active, -1) = true;
+```
+
+```sql
+SELECT * FROM t1 JOIN t2 ON COALESCE(t1.id, -1) = COALESCE(t2.id, -1);
 ```

@@ -23,6 +23,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | :--- | :--- | :---: | :---: |
 | [`IR-create-view-indent`](rules/IR-create-view-indent.md) | SELECT statements under a CREATE VIEW should be indented 4 spaces relative to the CREATE VIEW statement. | Yes | [View Details](rules/IR-create-view-indent.md) |
 | [`IR-subquery-compact`](rules/IR-subquery-compact.md) | Multiline subquery sources inside FROM or JOIN clauses should be compacted to a single line if they fit within 140 characters. | Yes | [View Details](rules/IR-subquery-compact.md) |
+| [`IR-null-coalesce`](rules/IR-null-coalesce.md) | Standardize nullable equality predicates to COALESCE(x, -1) form. | Yes | [View Details](rules/IR-null-coalesce.md) |
 | [`IR-empty-command`](rules/IR-empty-command.md) | Remove empty SQL commands, such as duplicate semicolons or leading semicolons. | Yes | [View Details](rules/IR-empty-command.md) |
 | [`IR-table-alias-as`](rules/IR-table-alias-as.md) | Table and subquery aliases should not use the AS keyword. | Yes | [View Details](rules/IR-table-alias-as.md) |
 | [`IR-from-multi`](rules/IR-from-multi.md) | Multi-table or JOINed FROM entries should be formatted with one entry per line, indented at 4 spaces. | Yes | [View Details](rules/IR-from-multi.md) |
@@ -42,7 +43,6 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-function-case`](rules/IR-function-case.md) | Function names should be the same case (default lowercase). | Yes | [View Details](rules/IR-function-case.md) |
 | [`IR-join-on-multi`](rules/IR-join-on-multi.md) | Split AND or OR conditions in JOIN ON clauses to separate lines, indented 4 spaces. | Yes | [View Details](rules/IR-join-on-multi.md) |
 | [`IR-paren-same-op`](rules/IR-paren-same-op.md) | Unnecessary parentheses around homogeneous logical conditions should be removed. | Yes | [View Details](rules/IR-paren-same-op.md) |
-| [`IR-join-null-coalesce`](rules/IR-join-null-coalesce.md) | Standardize predicate checks of form 'x = v OR x IS NULL' to COALESCE(x, -1) = v. | Yes | [View Details](rules/IR-join-null-coalesce.md) |
 | [`IR-paren-content-indent`](rules/IR-paren-content-indent.md) | Content inside multi-line parentheses should be indented 4 spaces relative to the opening parenthesis, and the closing parenthesis should align with it. | Yes | [View Details](rules/IR-paren-content-indent.md) |
 | [`IR-where-multi`](rules/IR-where-multi.md) | Each AND/OR clause in a multi-condition WHERE clause should start on its own line, indented at 4 spaces. | Yes | [View Details](rules/IR-where-multi.md) |
 | [`IR-case`](rules/IR-case.md) | CASE statements should be formatted with WHEN/THEN on separate lines unless the block is simple (exactly one WHEN condition and an optional ELSE clause) and fits on a single line within length constraints. | Yes | [View Details](rules/IR-case.md) |
