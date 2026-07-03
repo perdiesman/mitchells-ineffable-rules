@@ -14,8 +14,8 @@ class NullCoalesceRule(BaseRule):
     
     examples = [
         {
-            "violating": "SELECT * FROM users WHERE active = true OR active IS NULL;",
-            "correct": "SELECT * FROM users WHERE COALESCE(active, -1) = true;"
+            "violating": "SELECT * FROM users WHERE active = -1 OR active IS NULL;",
+            "correct": "SELECT * FROM users WHERE COALESCE(active, -1) = -1;"
         },
         {
             "violating": "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id OR (t1.id IS NULL AND t2.id IS NULL);",
@@ -23,7 +23,7 @@ class NullCoalesceRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT * FROM users WHERE COALESCE(active, -1) = true;",
+        "SELECT * FROM users WHERE COALESCE(active, -1) = -1;",
         "SELECT * FROM t1 JOIN t2 ON COALESCE(t1.id, -1) = COALESCE(t2.id, -1);"
     ]
 
@@ -42,6 +42,10 @@ class NullCoalesceRule(BaseRule):
         def parse_operand(idx: int) -> tuple:
             if idx >= len(active):
                 return None, None
+            # Support signed numbers e.g. -1
+            if active[idx]["type"] == "OPERATOR" and active[idx]["value"] in ("-", "+"):
+                if idx + 1 < len(active) and active[idx+1]["type"] == "NUMBER":
+                    return f"{active[idx]['value']}{active[idx+1]['value']}", idx + 2
             if active[idx]["type"] == "IDENTIFIER":
                 if idx + 2 < len(active) and active[idx+1]["type"] == "DOT" and active[idx+2]["type"] == "IDENTIFIER":
                     return f"{active[idx]['value']}.{active[idx+2]['value']}", idx + 3
