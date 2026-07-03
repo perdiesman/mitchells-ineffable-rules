@@ -1,10 +1,11 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
+from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths, find_matching_paren
+from mir.rules.sql.indent import IndentRule
 
 class CteFormatRule(BaseRule):
     rule_id = "IR-cte-format"
-    description = "Format layout of CTE WITH blocks: align subquery aliases and the final query block."
+    description = "Format layout of CTE WITH blocks: align subquery aliases, parenthesis and the final query block."
     category = "select/view/materialized view"
     is_fixable = "yes"
     enabled_by_default = True
@@ -14,12 +15,12 @@ class CteFormatRule(BaseRule):
     
     examples = [
         {
-            "violating": "WITH\n    cte1 AS (SELECT * FROM t1), cte2 AS (SELECT * FROM t2) SELECT * FROM cte1;",
-            "correct": "WITH cte1 AS (SELECT * FROM t1),\n    cte2 AS (SELECT * FROM t2)\nSELECT * FROM cte1;"
+            "violating": "WITH cte1 AS (SELECT * FROM t1), cte2 AS (SELECT * FROM t2) SELECT * FROM cte1;",
+            "correct": "WITH cte1 AS (\n    SELECT * FROM t1\n), cte2 AS (\n    SELECT * FROM t2\n)\nSELECT * FROM cte1;"
         }
     ]
     additional_validations = [
-        "WITH cte1 AS (SELECT * FROM t1),\n    cte2 AS (SELECT * FROM t2)\nSELECT * FROM cte1;"
+        "WITH cte1 AS (\n    SELECT * FROM t1\n), cte2 AS (\n    SELECT * FROM t2\n)\nSELECT * FROM cte1;"
     ]
 
     def _find_violations(self, content: str) -> List[dict]:
@@ -28,6 +29,12 @@ class CteFormatRule(BaseRule):
         violations = []
         n = len(tokens)
         
+        def next_active(start_idx: int) -> int:
+            for idx in range(start_idx, n):
+                if tokens[idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                    return idx
+            return n
+
         for i, tok in enumerate(tokens):
             if tok["type"] == "KEYWORD" and tok["value"].upper() == "WITH":
                 outer_depth = depths[i]
@@ -44,77 +51,182 @@ class CteFormatRule(BaseRule):
                         
                 expected_alias_indent = with_indent + "    "
                 
-                first_alias_idx = None
-                for idx in range(i + 1, n):
-                    t = tokens[idx]
-                    d = depths[idx]
-                    if d == outer_depth and t["type"] not in ("WHITESPACE", "COMMENT"):
-                        if t["type"] == "KEYWORD" and t["value"].upper() == "RECURSIVE":
-                            continue
-                        first_alias_idx = idx
-                        break
-                        
-                if first_alias_idx is None:
-                    continue
+                # Find all CTE declarations
+                ctes = []
+                curr = i + 1
+                if curr < n and tokens[curr]["type"] == "KEYWORD" and tokens[curr]["value"].upper() == "RECURSIVE":
+                    curr += 1
+                
+                curr = next_active(curr)
+                while curr < n:
+                    alias_tok = tokens[curr]
                     
-                # The first alias should be on the same line as WITH (separated by a single space)
-                ws_before = None
-                if first_alias_idx - 1 >= 0 and tokens[first_alias_idx - 1]["type"] == "WHITESPACE":
-                    ws_before = tokens[first_alias_idx - 1]
-                expected_ws = " "
-                if not ws_before or ws_before["value"] != expected_ws:
-                    violations.append({
-                        "token": tokens[first_alias_idx],
-                        "ws_start": ws_before["start"] if ws_before else tokens[first_alias_idx]["start"],
-                        "ws_end": tokens[first_alias_idx]["start"],
-                        "replacement": expected_ws
+                    as_idx = next_active(curr + 1)
+                    if as_idx >= n or tokens[as_idx]["type"] != "KEYWORD" or tokens[as_idx]["value"].upper() != "AS":
+                        break
+                    as_tok = tokens[as_idx]
+                    
+                    open_idx = next_active(as_idx + 1)
+                    if open_idx >= n or tokens[open_idx]["type"] != "PAREN" or tokens[open_idx]["value"] != "(":
+                        break
+                    open_tok = tokens[open_idx]
+                    
+                    close_idx = find_matching_paren(tokens, open_idx)
+                    if close_idx is None:
+                        break
+                    close_tok = tokens[close_idx]
+                    
+                    comma_tok = None
+                    next_act = next_active(close_idx + 1)
+                    if next_act < n and tokens[next_act]["type"] == "COMMA":
+                        comma_tok = tokens[next_act]
+                        
+                    ctes.append({
+                        "alias": alias_tok,
+                        "as": as_tok,
+                        "open_paren": open_tok,
+                        "close_paren": close_tok,
+                        "comma": comma_tok
                     })
                     
-                # Walk the rest of the WITH clause
-                idx = first_alias_idx + 1
-                expected_subsequent_ws = "\n" + expected_alias_indent
-                
-                while idx < n:
-                    t = tokens[idx]
-                    d = depths[idx]
+                    if comma_tok:
+                        curr = next_active(next_act + 1)
+                    else:
+                        curr = next_act
+                        break
+                        
+                for idx, cte in enumerate(ctes):
+                    alias = cte["alias"]
+                    as_tok = cte["as"]
+                    open_paren = cte["open_paren"]
+                    close_paren = cte["close_paren"]
+                    comma = cte["comma"]
                     
-                    if d == outer_depth:
-                        if t["type"] == "COMMA":
-                            next_alias_idx = None
-                            for n_idx in range(idx + 1, n):
-                                nt = tokens[n_idx]
-                                nd = depths[n_idx]
-                                if nd == outer_depth and nt["type"] not in ("WHITESPACE", "COMMENT"):
-                                    next_alias_idx = n_idx
-                                    break
-                            if next_alias_idx is not None:
-                                ws_before = None
-                                if next_alias_idx - 1 >= 0 and tokens[next_alias_idx - 1]["type"] == "WHITESPACE":
-                                    ws_before = tokens[next_alias_idx - 1]
-                                if not ws_before or ws_before["value"] != expected_subsequent_ws:
-                                    violations.append({
-                                        "token": tokens[next_alias_idx],
-                                        "ws_start": ws_before["start"] if ws_before else tokens[next_alias_idx]["start"],
-                                        "ws_end": tokens[next_alias_idx]["start"],
-                                        "replacement": expected_subsequent_ws
-                                    })
-                                idx = next_alias_idx
-                                continue
-                        elif t["type"] == "KEYWORD" and t["value"].upper() in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+                    # 1. Space before alias (first CTE only)
+                    if idx == 0:
+                        ws_before = None
+                        alias_idx = tokens.index(alias)
+                        if alias_idx - 1 >= 0 and tokens[alias_idx - 1]["type"] == "WHITESPACE":
+                            ws_before = tokens[alias_idx - 1]
+                        expected_ws = " "
+                        if not ws_before or ws_before["value"] != expected_ws:
+                            violations.append({
+                                "token": alias,
+                                "ws_start": ws_before["start"] if ws_before else alias["start"],
+                                "ws_end": alias["start"],
+                                "replacement": expected_ws
+                            })
+                    else:
+                        # Subsequent CTE: comma was attached to previous close_paren.
+                        # The alias comes after comma, separated by single space.
+                        prev_comma = ctes[idx - 1]["comma"]
+                        if prev_comma:
                             ws_before = None
-                            if idx - 1 >= 0 and tokens[idx - 1]["type"] == "WHITESPACE":
-                                ws_before = tokens[idx - 1]
-                            expected_final_ws = "\n" + with_indent
-                            if not ws_before or ws_before["value"] != expected_final_ws:
+                            alias_idx = tokens.index(alias)
+                            if alias_idx - 1 >= 0 and tokens[alias_idx - 1]["type"] == "WHITESPACE":
+                                ws_before = tokens[alias_idx - 1]
+                            expected_ws = " "
+                            if not ws_before or ws_before["value"] != expected_ws:
                                 violations.append({
-                                    "token": t,
-                                    "ws_start": ws_before["start"] if ws_before else t["start"],
-                                    "ws_end": t["start"],
-                                    "replacement": expected_final_ws
+                                    "token": alias,
+                                    "ws_start": ws_before["start"] if ws_before else alias["start"],
+                                    "ws_end": alias["start"],
+                                    "replacement": expected_ws
                                 })
-                            break
-                    idx += 1
-                    
+
+                    # 2. Space before AS
+                    as_token_idx = tokens.index(as_tok)
+                    ws_before = None
+                    if as_token_idx - 1 >= 0 and tokens[as_token_idx - 1]["type"] == "WHITESPACE":
+                        ws_before = tokens[as_token_idx - 1]
+                    expected_ws = " "
+                    if not ws_before or ws_before["value"] != expected_ws:
+                        violations.append({
+                            "token": as_tok,
+                            "ws_start": ws_before["start"] if ws_before else as_tok["start"],
+                            "ws_end": as_tok["start"],
+                            "replacement": expected_ws
+                        })
+
+                    # 3. Space before open_paren
+                    open_token_idx = tokens.index(open_paren)
+                    ws_before = None
+                    if open_token_idx - 1 >= 0 and tokens[open_token_idx - 1]["type"] == "WHITESPACE":
+                        ws_before = tokens[open_token_idx - 1]
+                    expected_ws = " "
+                    if not ws_before or ws_before["value"] != expected_ws:
+                        violations.append({
+                            "token": open_paren,
+                            "ws_start": ws_before["start"] if ws_before else open_paren["start"],
+                            "ws_end": open_paren["start"],
+                            "replacement": expected_ws
+                        })
+
+                    # 4. Newline + indent before first token of subquery
+                    first_sub = next_active(open_token_idx + 1)
+                    if first_sub < tokens.index(close_paren):
+                        first_sub_tok = tokens[first_sub]
+                        ws_before = None
+                        if first_sub - 1 >= 0 and tokens[first_sub - 1]["type"] == "WHITESPACE":
+                            ws_before = tokens[first_sub - 1]
+                        expected_ws = "\n" + expected_alias_indent
+                        if not ws_before or ws_before["value"] != expected_ws:
+                            violations.append({
+                                "token": first_sub_tok,
+                                "ws_start": ws_before["start"] if ws_before else first_sub_tok["start"],
+                                "ws_end": first_sub_tok["start"],
+                                "replacement": expected_ws
+                            })
+
+                    # 5. Newline + with_indent before close_paren
+                    close_token_idx = tokens.index(close_paren)
+                    ws_before = None
+                    if close_token_idx - 1 >= 0 and tokens[close_token_idx - 1]["type"] == "WHITESPACE":
+                        ws_before = tokens[close_token_idx - 1]
+                    expected_ws = "\n" + with_indent
+                    if not ws_before or ws_before["value"] != expected_ws:
+                        violations.append({
+                            "token": close_paren,
+                            "ws_start": ws_before["start"] if ws_before else close_paren["start"],
+                            "ws_end": close_paren["start"],
+                            "replacement": expected_ws
+                        })
+
+                    # 6. No space before trailing comma
+                    if comma:
+                        comma_idx = tokens.index(comma)
+                        ws_before = None
+                        if comma_idx - 1 >= 0 and tokens[comma_idx - 1]["type"] == "WHITESPACE":
+                            ws_before = tokens[comma_idx - 1]
+                        expected_ws = ""
+                        if ws_before and ws_before["value"] != expected_ws:
+                            violations.append({
+                                "token": comma,
+                                "ws_start": ws_before["start"],
+                                "ws_end": comma["start"],
+                                "replacement": expected_ws
+                            })
+
+                # 7. Final query start
+                if ctes:
+                    last_cte = ctes[-1]
+                    last_tok = last_cte["comma"] if last_cte["comma"] else last_cte["close_paren"]
+                    last_idx = tokens.index(last_tok)
+                    final_query_idx = next_active(last_idx + 1)
+                    if final_query_idx < n:
+                        final_tok = tokens[final_query_idx]
+                        ws_before = None
+                        if final_query_idx - 1 >= 0 and tokens[final_query_idx - 1]["type"] == "WHITESPACE":
+                            ws_before = tokens[final_query_idx - 1]
+                        expected_ws = "\n" + with_indent
+                        if not ws_before or ws_before["value"] != expected_ws:
+                            violations.append({
+                                "token": final_tok,
+                                "ws_start": ws_before["start"] if ws_before else final_tok["start"],
+                                "ws_end": final_tok["start"],
+                                "replacement": expected_ws
+                            })
+                            
         return violations
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:

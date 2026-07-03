@@ -38,7 +38,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-select-comma`](rules/IR-select-comma.md) | Missing commas between SELECT columns split across lines should be inserted. | Yes | [View Details](rules/IR-select-comma.md) |
 | [`IR-column-layout`](rules/IR-column-layout.md) | On select, order by, group by, if all the columns fit on one line then put them on one line, otherwise wrap one per line. | Yes | [View Details](rules/IR-column-layout.md) |
 | [`IR-blank-lines`](rules/IR-blank-lines.md) | Limit consecutive blank lines to a configurable maximum. | Yes | [View Details](rules/IR-blank-lines.md) |
-| [`IR-cte-format`](rules/IR-cte-format.md) | Format layout of CTE WITH blocks: align subquery aliases and the final query block. | Yes | [View Details](rules/IR-cte-format.md) |
+| [`IR-cte-format`](rules/IR-cte-format.md) | Format layout of CTE WITH blocks: align subquery aliases, parenthesis and the final query block. | Yes | [View Details](rules/IR-cte-format.md) |
 | [`IR-paren-single`](rules/IR-paren-single.md) | Unnecessary parentheses around a single condition should be removed. | Yes | [View Details](rules/IR-paren-single.md) |
 | [`IR-in-exists`](rules/IR-in-exists.md) | EXISTS is preferred over IN with a subquery. | No | [View Details](rules/IR-in-exists.md) |
 | [`IR-duplicate-content`](rules/IR-duplicate-content.md) | Duplicate blocks of SQL of length >= 3 lines should be consolidated or simplified. | No | [View Details](rules/IR-duplicate-content.md) |
