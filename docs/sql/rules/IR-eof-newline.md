@@ -32,9 +32,3 @@ SELECT * FROM users;
 SELECT * FROM users;
 
 ```
-
-#### Additional Validations
-```sql
-SELECT * FROM users;
-
-```

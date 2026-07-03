@@ -22,7 +22,3 @@ SELECT * FROM users;
 ```sql
 SELECT * FROM users; -- comment at end
 ```
-
-```sql
-SELECT * FROM users;  
-```

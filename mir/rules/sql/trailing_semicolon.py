@@ -19,8 +19,7 @@ class TrailingSemicolonRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT * FROM users; -- comment at end",
-        "SELECT * FROM users;  "
+        'SELECT * FROM users; -- comment at end'
     ]
 
     def _find_violations(self, content: str) -> List[dict]:

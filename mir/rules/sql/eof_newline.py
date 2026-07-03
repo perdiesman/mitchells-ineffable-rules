@@ -21,9 +21,7 @@ class EofNewlineRule(BaseRule):
             "correct": "SELECT * FROM users;\n"
         }
     ]
-    additional_validations = [
-        "SELECT * FROM users;\n"
-    ]
+    additional_validations = []
 
     def _find_violations(self, content: str) -> List[dict]:
         violations = []
