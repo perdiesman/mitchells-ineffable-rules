@@ -47,9 +47,11 @@ class ParenSameOpRule(BaseRule):
                     
                 # 2. Function call & special keyword check
                 prev_active = None
+                prev_active_idx = -1
                 for idx in range(i - 1, -1, -1):
                     if tokens[idx]["type"] != "WHITESPACE":
                         prev_active = tokens[idx]
+                        prev_active_idx = idx
                         break
                         
                 is_special = False
@@ -58,7 +60,7 @@ class ParenSameOpRule(BaseRule):
                     if val_upper == "ON":
                         # Check DISTINCT ON
                         prev_prev = None
-                        for p_idx in range(prev_active["start"] - 1, -1, -1):
+                        for p_idx in range(prev_active_idx - 1, -1, -1):
                             if tokens[p_idx]["type"] != "WHITESPACE":
                                 prev_prev = tokens[p_idx]
                                 break
