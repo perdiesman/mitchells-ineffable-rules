@@ -38,6 +38,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-subquery-indent`](rules/queries/IR-subquery-indent.md) | Subqueries should be indented 4 spaces relative to their opening parenthesis. | Yes | [View Details](rules/queries/IR-subquery-indent.md) |
 | [`IR-where-single`](rules/queries/IR-where-single.md) | Single WHERE condition should be on the same line as the WHERE keyword. | Yes | [View Details](rules/queries/IR-where-single.md) |
 | [`IR-join-parens`](rules/queries/IR-join-parens.md) | Unnecessary parentheses around a JOIN clause should be removed. | Yes | [View Details](rules/queries/IR-join-parens.md) |
+| [`IR-from-paren-layout`](rules/queries/IR-from-paren-layout.md) | Parenthesized column alias lists in FROM/JOIN clauses should format entries one per line if the line exceeds max length. | Yes | [View Details](rules/queries/IR-from-paren-layout.md) |
 | [`IR-from-single`](rules/queries/IR-from-single.md) | Single FROM entry should be on the same line as the FROM keyword. | Yes | [View Details](rules/queries/IR-from-single.md) |
 | [`IR-is-null`](rules/queries/IR-is-null.md) | Standardize NULL comparison predicates to use IS NULL and IS NOT NULL operators. | Yes | [View Details](rules/queries/IR-is-null.md) |
 | [`IR-distinct-parentheses`](rules/queries/IR-distinct-parentheses.md) | Remove redundant parentheses around DISTINCT arguments, preserving DISTINCT ON (col) syntax. | Yes | [View Details](rules/queries/IR-distinct-parentheses.md) |
