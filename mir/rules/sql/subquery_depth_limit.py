@@ -4,7 +4,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren
 
 class SubqueryDepthLimitRule(BaseRule):
     rule_id = "IR-subquery-depth-limit"
-    description = "Subquery nesting depth should not exceed the configured limit (default: 2). When over the limit, Common Table Expressions (CTEs) are preferred."
+    description = "Subquery nesting depth should not exceed the configured limit (default: 3). When over the limit, Common Table Expressions (CTEs) are preferred."
     category = "queries"
     is_fixable = "no"
     enabled_by_default = True
@@ -12,18 +12,18 @@ class SubqueryDepthLimitRule(BaseRule):
     default_config = {}
     config_options = {
         "max_depth": {
-            "default": 2,
+            "default": 3,
             "description": "Maximum allowed subquery nesting depth."
         }
     }
     
     examples = [
         {
-            "violating": "SELECT * FROM (SELECT * FROM (SELECT * FROM (SELECT * FROM users) u3) u2) u1;"
+            "violating": "SELECT * FROM (SELECT * FROM (SELECT * FROM (SELECT * FROM (SELECT * FROM users) u4) u3) u2) u1;"
         }
     ]
     additional_validations = [
-        "SELECT * FROM (SELECT * FROM (SELECT * FROM users) u2) u1;",
+        "SELECT * FROM (SELECT * FROM (SELECT * FROM (SELECT * FROM users) u3) u2) u1;",
         "WITH u2 AS (SELECT * FROM users) SELECT * FROM u2;"
     ]
 
@@ -31,7 +31,7 @@ class SubqueryDepthLimitRule(BaseRule):
         max_depth = self.get_config_value(
             rule_config,
             "max_depth",
-            default_value=2
+            default_value=3
         )
         
         tokens = tokenize_sql(content)
