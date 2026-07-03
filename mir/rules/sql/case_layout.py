@@ -5,7 +5,11 @@ from mir.rules.sql.indent import IndentRule
 
 class CaseLayoutRule(BaseRule):
     rule_id = "IR-case"
-    description = "CASE statements should be formatted with WHEN/THEN on separate lines unless the entire block fits on a single line."
+    description = (
+        "CASE statements should be formatted with WHEN/THEN on separate lines "
+        "unless the block is simple (exactly one WHEN condition and an optional ELSE clause) "
+        "and fits on a single line within length constraints."
+    )
     category = "select/view/materialized view"
     is_fixable = "yes"
     enabled_by_default = True
@@ -21,6 +25,7 @@ class CaseLayoutRule(BaseRule):
     ]
     additional_validations = [
         "SELECT CASE WHEN x = 1 THEN 'a' END FROM users;",
+        "SELECT CASE WHEN x = 1 THEN 'a' ELSE 'b' END FROM users;",
         "SELECT \n    CASE\n        WHEN x = 1 THEN 'a'\n        ELSE 'b'\n    END;"
     ]
 
@@ -98,10 +103,10 @@ class CaseLayoutRule(BaseRule):
             line_prefix = content[line_start:case_tok["start"]]
             effective_prefix_len = max(0, len(line_prefix) - base_indent_spaces)
             
+            # Simple inline allows exactly one WHEN condition and optional ELSE
             is_simple_inline = (
                 case_tok["line"] == end_tok["line"]
                 and when_count == 1
-                and not has_else
                 and (effective_prefix_len + len(original_text.strip())) <= 140
             )
             

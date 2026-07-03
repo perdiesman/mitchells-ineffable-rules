@@ -48,7 +48,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-paren-content-indent`](rules/IR-paren-content-indent.md) | Content inside multi-line parentheses should be indented 4 spaces relative to the opening parenthesis, and the closing parenthesis should align with it. | Yes | [View Details](rules/IR-paren-content-indent.md) |
 | [`IR-where-multi`](rules/IR-where-multi.md) | Each AND/OR clause in a multi-condition WHERE clause should start on its own line, indented at 4 spaces. | Yes | [View Details](rules/IR-where-multi.md) |
 | [`IR-is-null-space`](rules/IR-is-null-space.md) | Standardize spacing for null predicates (ISNULL -> IS NULL, ISNOTNULL -> IS NOT NULL). | Yes | [View Details](rules/IR-is-null-space.md) |
-| [`IR-case`](rules/IR-case.md) | CASE statements should be formatted with WHEN/THEN on separate lines unless the entire block fits on a single line. | Yes | [View Details](rules/IR-case.md) |
+| [`IR-case`](rules/IR-case.md) | CASE statements should be formatted with WHEN/THEN on separate lines unless the block is simple (exactly one WHEN condition and an optional ELSE clause) and fits on a single line within length constraints. | Yes | [View Details](rules/IR-case.md) |
 
 ## Function / Procedure Rules
 
