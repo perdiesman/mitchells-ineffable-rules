@@ -26,7 +26,6 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-empty-command`](rules/IR-empty-command.md) | Remove empty SQL commands, such as duplicate semicolons or leading semicolons. | Yes | [View Details](rules/IR-empty-command.md) |
 | [`IR-table-alias-as`](rules/IR-table-alias-as.md) | Table and subquery aliases should not use the AS keyword. | Yes | [View Details](rules/IR-table-alias-as.md) |
 | [`IR-from-multi`](rules/IR-from-multi.md) | Multi-table or JOINed FROM entries should be formatted with one entry per line, indented at 4 spaces. | Yes | [View Details](rules/IR-from-multi.md) |
-| [`IR-join-format`](rules/IR-join-format.md) | Standardize formatting of JOIN clauses: collapse split qualifiers (e.g., LEFT JOIN on same line) and align ON indentation. | Yes | [View Details](rules/IR-join-format.md) |
 | [`IR-operator-spacing`](rules/IR-operator-spacing.md) | Operators should have a single space on both sides. | Yes | [View Details](rules/IR-operator-spacing.md) |
 | [`IR-subquery-indent`](rules/IR-subquery-indent.md) | Subqueries should be indented 4 spaces relative to their opening parenthesis. | Yes | [View Details](rules/IR-subquery-indent.md) |
 | [`IR-where-single`](rules/IR-where-single.md) | Single WHERE condition should be on the same line as the WHERE keyword. | Yes | [View Details](rules/IR-where-single.md) |
