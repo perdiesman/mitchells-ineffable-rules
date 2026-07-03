@@ -33,6 +33,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-where-single`](rules/IR-where-single.md) | Single WHERE condition should be on the same line as the WHERE keyword. | Yes | [View Details](rules/IR-where-single.md) |
 | [`IR-join-parens`](rules/IR-join-parens.md) | Unnecessary parentheses around a JOIN clause should be removed. | Yes | [View Details](rules/IR-join-parens.md) |
 | [`IR-from-single`](rules/IR-from-single.md) | Single FROM entry should be on the same line as the FROM keyword. | Yes | [View Details](rules/IR-from-single.md) |
+| [`IR-between`](rules/IR-between.md) | Standardize range predicate check of form 'a >= b AND a <= c' to 'a BETWEEN b AND c'. | Yes | [View Details](rules/IR-between.md) |
 | [`IR-alias-as`](rules/IR-alias-as.md) | Column aliases must use the AS keyword. | Yes | [View Details](rules/IR-alias-as.md) |
 | [`IR-clause-alignment`](rules/IR-clause-alignment.md) | Main query clause keywords (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT) must have the exact same indentation within the same query block when the query spans multiple lines. | Yes | [View Details](rules/IR-clause-alignment.md) |
 | [`IR-column-layout`](rules/IR-column-layout.md) | On select, order by, group by, if all the columns fit on one line then put them on one line, otherwise wrap one per line. | Yes | [View Details](rules/IR-column-layout.md) |
