@@ -28,12 +28,16 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-empty-command`](rules/IR-empty-command.md) | Remove empty SQL commands, such as duplicate semicolons or leading semicolons. | Yes | [View Details](rules/IR-empty-command.md) |
 | [`IR-table-alias-as`](rules/IR-table-alias-as.md) | Table and subquery aliases should not use the AS keyword. | Yes | [View Details](rules/IR-table-alias-as.md) |
 | [`IR-from-multi`](rules/IR-from-multi.md) | Multi-table or JOINed FROM entries should be formatted with one entry per line, indented at 4 spaces. | Yes | [View Details](rules/IR-from-multi.md) |
+| [`IR-count-star`](rules/IR-count-star.md) | Standardize COUNT(1) or row-counting expressions to COUNT(*). | Yes | [View Details](rules/IR-count-star.md) |
 | [`IR-operator-spacing`](rules/IR-operator-spacing.md) | Operators should have a single space on both sides. | Yes | [View Details](rules/IR-operator-spacing.md) |
 | [`IR-subquery-indent`](rules/IR-subquery-indent.md) | Subqueries should be indented 4 spaces relative to their opening parenthesis. | Yes | [View Details](rules/IR-subquery-indent.md) |
 | [`IR-where-single`](rules/IR-where-single.md) | Single WHERE condition should be on the same line as the WHERE keyword. | Yes | [View Details](rules/IR-where-single.md) |
 | [`IR-join-parens`](rules/IR-join-parens.md) | Unnecessary parentheses around a JOIN clause should be removed. | Yes | [View Details](rules/IR-join-parens.md) |
 | [`IR-from-single`](rules/IR-from-single.md) | Single FROM entry should be on the same line as the FROM keyword. | Yes | [View Details](rules/IR-from-single.md) |
+| [`IR-is-null`](rules/IR-is-null.md) | Standardize NULL comparison predicates to use IS NULL and IS NOT NULL operators. | Yes | [View Details](rules/IR-is-null.md) |
+| [`IR-distinct-parentheses`](rules/IR-distinct-parentheses.md) | Remove redundant parentheses around DISTINCT arguments, preserving DISTINCT ON (col) syntax. | Yes | [View Details](rules/IR-distinct-parentheses.md) |
 | [`IR-between`](rules/IR-between.md) | Standardize range predicate check of form 'a >= b AND a <= c' to 'a BETWEEN b AND c'. | Yes | [View Details](rules/IR-between.md) |
+| [`IR-boolean-comparison`](rules/IR-boolean-comparison.md) | Standardize boolean comparison predicates to use idiomatic boolean predicates. | Yes | [View Details](rules/IR-boolean-comparison.md) |
 | [`IR-alias-as`](rules/IR-alias-as.md) | Column aliases must use the AS keyword. | Yes | [View Details](rules/IR-alias-as.md) |
 | [`IR-clause-alignment`](rules/IR-clause-alignment.md) | Main query clause keywords (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT) must have the exact same indentation within the same query block when the query spans multiple lines. | Yes | [View Details](rules/IR-clause-alignment.md) |
 | [`IR-column-layout`](rules/IR-column-layout.md) | On select, order by, group by, if all the columns fit on one line then put them on one line, otherwise wrap one per line. | Yes | [View Details](rules/IR-column-layout.md) |

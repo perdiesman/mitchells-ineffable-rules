@@ -238,6 +238,7 @@ class TestRunnerIntegration(unittest.TestCase):
         
         config = Config()
         config.paths = [path]
+        config.rules_to_disable = ["IR-boolean-comparison"]
         exit_code = run_linter(config)
         self.assertEqual(exit_code, 1)
         
@@ -252,6 +253,7 @@ class TestRunnerIntegration(unittest.TestCase):
         path2 = self.write_temp_file("test_align2.sql", query2)
         config2 = Config()
         config2.paths = [path2]
+        config2.rules_to_disable = ["IR-boolean-comparison"]
         exit_code = run_linter(config2)
         self.assertEqual(exit_code, 1)
         
