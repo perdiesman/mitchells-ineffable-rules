@@ -15,7 +15,8 @@ SELECT id FROM users WHERE active = true AND type = 'admin' OR age > 21;
 
 ####  Correct Example
 ```sql
-SELECT id FROM users WHERE active = true
+SELECT id FROM users WHERE
+    active = true
     AND type = 'admin'
     OR age > 21;
 ```

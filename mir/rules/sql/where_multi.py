@@ -15,11 +15,11 @@ class WhereMultiRule(BaseRule):
     examples = [
         {
             "violating": "SELECT id FROM users WHERE active = true AND type = 'admin' OR age > 21;",
-            "correct": "SELECT id FROM users WHERE active = true\n    AND type = 'admin'\n    OR age > 21;"
+            "correct": "SELECT id FROM users WHERE\n    active = true\n    AND type = 'admin'\n    OR age > 21;"
         }
     ]
     additional_validations = [
-        'SELECT id FROM users WHERE active = true;'
+        "SELECT id FROM users WHERE active = true;"
     ]
 
     def _find_violations(self, content: str) -> List[dict]:
@@ -60,23 +60,53 @@ class WhereMultiRule(BaseRule):
                 clause_tokens = tokens[i + 1:clause_end]
                 clause_depths = depths[i + 1:clause_end]
                 
-                for j_idx, (t, d) in enumerate(zip(clause_tokens, clause_depths)):
-                    if d == outer_depth and t["type"] == "KEYWORD":
-                        val_upper = t["value"].upper()
-                        if val_upper in ("AND", "OR"):
-                            actual_idx = i + 1 + j_idx
-                            ws_tok = None
-                            if actual_idx - 1 >= 0 and tokens[actual_idx - 1]["type"] == "WHITESPACE":
-                                ws_tok = tokens[actual_idx - 1]
-                                
-                            expected_replacement = "\n" + expected_indent
-                            if not ws_tok or ws_tok["value"] != expected_replacement:
-                                violations.append({
-                                    "token": t,
-                                    "ws_start": ws_tok["start"] if ws_tok else t["start"],
-                                    "ws_end": t["start"],
-                                    "replacement": expected_replacement
-                                })
+                has_multi = False
+                for t, d in zip(clause_tokens, clause_depths):
+                    if d == outer_depth and t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
+                        has_multi = True
+                        break
+                        
+                if has_multi:
+                    # 1. Format the first condition after WHERE onto its own line
+                    first_cond_idx = None
+                    for idx in range(i + 1, clause_end):
+                        if tokens[idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                            first_cond_idx = idx
+                            break
+                            
+                    if first_cond_idx is not None:
+                        fc_tok = tokens[first_cond_idx]
+                        ws_before = None
+                        if first_cond_idx - 1 >= 0 and tokens[first_cond_idx - 1]["type"] == "WHITESPACE":
+                            ws_before = tokens[first_cond_idx - 1]
+                            
+                        expected_replacement = "\n" + expected_indent
+                        if not ws_before or ws_before["value"] != expected_replacement:
+                            violations.append({
+                                "token": fc_tok,
+                                "ws_start": ws_before["start"] if ws_before else fc_tok["start"],
+                                "ws_end": fc_tok["start"],
+                                "replacement": expected_replacement
+                            })
+                            
+                    # 2. Format subsequent AND/OR keywords onto their own lines
+                    for j_idx, (t, d) in enumerate(zip(clause_tokens, clause_depths)):
+                        if d == outer_depth and t["type"] == "KEYWORD":
+                            val_upper = t["value"].upper()
+                            if val_upper in ("AND", "OR"):
+                                actual_idx = i + 1 + j_idx
+                                ws_tok = None
+                                if actual_idx - 1 >= 0 and tokens[actual_idx - 1]["type"] == "WHITESPACE":
+                                    ws_tok = tokens[actual_idx - 1]
+                                    
+                                expected_replacement = "\n" + expected_indent
+                                if not ws_tok or ws_tok["value"] != expected_replacement:
+                                    violations.append({
+                                        "token": t,
+                                        "ws_start": ws_tok["start"] if ws_tok else t["start"],
+                                        "ws_end": t["start"],
+                                        "replacement": expected_replacement
+                                    })
                                 
         return violations
 
