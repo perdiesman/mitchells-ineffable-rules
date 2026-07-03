@@ -224,6 +224,30 @@ def generate_docs_to_path(
                         rule_md.append(f"  - `{opt_k}`: `{val_str}`")
                 rule_md.append("")
                 
+                # Check for module-level globals (lists/sets/dicts)
+                try:
+                    module = importlib.import_module(r.__class__.__module__)
+                    globals_to_doc = []
+                    for attr_name in dir(module):
+                        if attr_name.isupper() and not attr_name.startswith("_"):
+                            val = getattr(module, attr_name)
+                            if isinstance(val, (list, set, dict)):
+                                globals_to_doc.append((attr_name, val))
+                                
+                    if globals_to_doc:
+                        for g_name, g_val in sorted(globals_to_doc):
+                            rule_md.append(f"#### Default `{g_name}`")
+                            if isinstance(g_val, (list, set)):
+                                sorted_items = sorted(list(g_val))
+                                items_str = ", ".join([f"`{x}`" for x in sorted_items])
+                                rule_md.append(items_str)
+                            elif isinstance(g_val, dict):
+                                for k, v in sorted(g_val.items()):
+                                    rule_md.append(f"- `{k}`: `{v}`")
+                            rule_md.append("")
+                except Exception:
+                    pass
+
                 if r.examples:
                     for idx, ex in enumerate(r.examples, start=1):
                         suffix = f" #{idx}" if len(r.examples) > 1 else ""
@@ -403,6 +427,32 @@ def print_rule_details(lang: str, rule, include_dirs: Optional[List[str]] = None
             print(f"  {opt_k}: {opt_v}")
     print()
     
+    # Check for module-level globals (lists/sets/dicts)
+    try:
+        import importlib
+        module = importlib.import_module(rule.__class__.__module__)
+        globals_to_doc = []
+        for attr_name in dir(module):
+            if attr_name.isupper() and not attr_name.startswith("_"):
+                val = getattr(module, attr_name)
+                if isinstance(val, (list, set, dict)):
+                    globals_to_doc.append((attr_name, val))
+                    
+        if globals_to_doc:
+            print("Default Values:")
+            for g_name, g_val in sorted(globals_to_doc):
+                if isinstance(g_val, (list, set)):
+                    sorted_items = sorted(list(g_val))
+                    items_str = ", ".join([str(x) for x in sorted_items])
+                    print(f"  {g_name}: {items_str}")
+                elif isinstance(g_val, dict):
+                    print(f"  {g_name}:")
+                    for k, v in sorted(g_val.items()):
+                        print(f"    {k}: {v}")
+            print()
+    except Exception:
+        pass
+
     if rule.examples:
         for idx, ex in enumerate(rule.examples, start=1):
             suffix = f" #{idx}" if len(rule.examples) > 1 else ""
