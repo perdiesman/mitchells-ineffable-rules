@@ -14,6 +14,9 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
 | [`IR-redundant-keywords`](rules/IR-redundant-keywords.md) | Remove redundant implied keywords like INNER, OUTER, and ASC. | Yes | [View Details](rules/IR-redundant-keywords.md) |
+| [`IR-trailing-semicolon`](rules/IR-trailing-semicolon.md) | Enforce that the last SQL statement ends with a trailing semicolon. | Yes | [View Details](rules/IR-trailing-semicolon.md) |
+| [`IR-comment-spacing`](rules/IR-comment-spacing.md) | Enforce a single space after the double-dash comment prefix. | Yes | [View Details](rules/IR-comment-spacing.md) |
+| [`IR-eof-newline`](rules/IR-eof-newline.md) | Enforce that every SQL file ends with exactly one newline character. | Yes | [View Details](rules/IR-eof-newline.md) |
 | [`IR-line-length`](rules/IR-line-length.md) | Lines must not exceed the configured maximum length. | No | [View Details](rules/IR-line-length.md) |
 | [`IR-keyword-case`](rules/IR-keyword-case.md) | SQL keywords must be in uppercase. | Yes | [View Details](rules/IR-keyword-case.md) |
 | [`IR-indent`](rules/IR-indent.md) | Indent should be equal amounts of spaces (default 4). | Yes | [View Details](rules/IR-indent.md) |
