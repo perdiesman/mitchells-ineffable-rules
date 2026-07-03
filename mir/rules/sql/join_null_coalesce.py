@@ -4,7 +4,7 @@ from mir.rules.sql.sql_utils import tokenize_sql
 
 class JoinNullCoalesceRule(BaseRule):
     rule_id = "IR-join-null-coalesce"
-    description = "Standardize predicate checks of form 'x = v OR x IS NULL' to COALESCE(x, v) = v."
+    description = "Standardize predicate checks of form 'x = v OR x IS NULL' to COALESCE(x, -1) = v."
     category = "select/view/materialized view"
     is_fixable = "yes"
     enabled_by_default = True
@@ -15,11 +15,11 @@ class JoinNullCoalesceRule(BaseRule):
     examples = [
         {
             "violating": "SELECT * FROM users WHERE active = true OR active IS NULL;",
-            "correct": "SELECT * FROM users WHERE COALESCE(active, true) = true;"
+            "correct": "SELECT * FROM users WHERE COALESCE(active, -1) = true;"
         },
         {
             "violating": "SELECT * FROM users WHERE active IS NULL OR active = true;",
-            "correct": "SELECT * FROM users WHERE COALESCE(active, true) = true;"
+            "correct": "SELECT * FROM users WHERE COALESCE(active, -1) = true;"
         }
     ]
     additional_validations = []
@@ -60,7 +60,7 @@ class JoinNullCoalesceRule(BaseRule):
                         "start_offset": t1["start"],
                         "end_offset": t7["end"],
                         "line": t1["line"],
-                        "replacement": f"COALESCE({t1['value']}, {t3['value']}) = {t3['value']}"
+                        "replacement": f"COALESCE({t1['value']}, -1) = {t3['value']}"
                     })
                     i += 7
                     continue
@@ -88,7 +88,7 @@ class JoinNullCoalesceRule(BaseRule):
                         "start_offset": t1["start"],
                         "end_offset": t7["end"],
                         "line": t1["line"],
-                        "replacement": f"COALESCE({t1['value']}, {t7['value']}) = {t7['value']}"
+                        "replacement": f"COALESCE({t1['value']}, -1) = {t7['value']}"
                     })
                     i += 7
                     continue
