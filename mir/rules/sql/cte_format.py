@@ -14,12 +14,12 @@ class CteFormatRule(BaseRule):
     
     examples = [
         {
-            "violating": "WITH cte1 AS (SELECT * FROM t1), cte2 AS (SELECT * FROM t2) SELECT * FROM cte1;",
-            "correct": "WITH\n    cte1 AS (SELECT * FROM t1),\n    cte2 AS (SELECT * FROM t2)\nSELECT * FROM cte1;"
+            "violating": "WITH\n    cte1 AS (SELECT * FROM t1), cte2 AS (SELECT * FROM t2) SELECT * FROM cte1;",
+            "correct": "WITH cte1 AS (SELECT * FROM t1),\n    cte2 AS (SELECT * FROM t2)\nSELECT * FROM cte1;"
         }
     ]
     additional_validations = [
-        "WITH\n    cte1 AS (SELECT * FROM t1),\n    cte2 AS (SELECT * FROM t2)\nSELECT * FROM cte1;"
+        "WITH cte1 AS (SELECT * FROM t1),\n    cte2 AS (SELECT * FROM t2)\nSELECT * FROM cte1;"
     ]
 
     def _find_violations(self, content: str) -> List[dict]:
@@ -44,13 +44,6 @@ class CteFormatRule(BaseRule):
                         
                 expected_alias_indent = with_indent + "    "
                 
-                # Find all CTE items and the final query start
-                # Walk tokens at depth outer_depth after WITH
-                # We want to identify:
-                # - First CTE item alias (the token after WITH/RECURSIVE)
-                # - Subsequent CTE item aliases (the first active token after each depth-0 comma before the final query starts)
-                # - Final query start (the first depth-0 SELECT/INSERT/UPDATE/DELETE after the CTE)
-                
                 first_alias_idx = None
                 for idx in range(i + 1, n):
                     t = tokens[idx]
@@ -64,11 +57,11 @@ class CteFormatRule(BaseRule):
                 if first_alias_idx is None:
                     continue
                     
-                # Format first alias to start on a new line at expected_alias_indent
+                # The first alias should be on the same line as WITH (separated by a single space)
                 ws_before = None
                 if first_alias_idx - 1 >= 0 and tokens[first_alias_idx - 1]["type"] == "WHITESPACE":
                     ws_before = tokens[first_alias_idx - 1]
-                expected_ws = "\n" + expected_alias_indent
+                expected_ws = " "
                 if not ws_before or ws_before["value"] != expected_ws:
                     violations.append({
                         "token": tokens[first_alias_idx],
@@ -78,16 +71,15 @@ class CteFormatRule(BaseRule):
                     })
                     
                 # Walk the rest of the WITH clause
-                # We need to find commas at depth 0 and the final query
-                last_closing_paren_idx = None
                 idx = first_alias_idx + 1
+                expected_subsequent_ws = "\n" + expected_alias_indent
+                
                 while idx < n:
                     t = tokens[idx]
                     d = depths[idx]
                     
                     if d == outer_depth:
                         if t["type"] == "COMMA":
-                            # Find next alias start
                             next_alias_idx = None
                             for n_idx in range(idx + 1, n):
                                 nt = tokens[n_idx]
@@ -99,21 +91,16 @@ class CteFormatRule(BaseRule):
                                 ws_before = None
                                 if next_alias_idx - 1 >= 0 and tokens[next_alias_idx - 1]["type"] == "WHITESPACE":
                                     ws_before = tokens[next_alias_idx - 1]
-                                if not ws_before or ws_before["value"] != expected_ws:
+                                if not ws_before or ws_before["value"] != expected_subsequent_ws:
                                     violations.append({
                                         "token": tokens[next_alias_idx],
                                         "ws_start": ws_before["start"] if ws_before else tokens[next_alias_idx]["start"],
                                         "ws_end": tokens[next_alias_idx]["start"],
-                                        "replacement": expected_ws
+                                        "replacement": expected_subsequent_ws
                                     })
                                 idx = next_alias_idx
                                 continue
-                        elif t["type"] == "PAREN" and t["value"] == ")":
-                            last_closing_paren_idx = idx
-                            
-                        # If we hit the final query keyword at depth 0 after the last CTE paren
                         elif t["type"] == "KEYWORD" and t["value"].upper() in ("SELECT", "INSERT", "UPDATE", "DELETE"):
-                            # This is the final query!
                             ws_before = None
                             if idx - 1 >= 0 and tokens[idx - 1]["type"] == "WHITESPACE":
                                 ws_before = tokens[idx - 1]
@@ -153,7 +140,6 @@ class CteFormatRule(BaseRule):
         if not offending:
             return content
             
-        # Apply edits in reverse order
         edits = []
         for item in offending:
             edits.append((item["ws_start"], item["ws_end"], item["replacement"]))

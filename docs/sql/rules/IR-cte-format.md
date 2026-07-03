@@ -10,21 +10,20 @@ Format layout of CTE WITH blocks: align subquery aliases and the final query blo
 
 #### ❌ Violating Example
 ```sql
-WITH cte1 AS (SELECT * FROM t1), cte2 AS (SELECT * FROM t2) SELECT * FROM cte1;
+WITH
+    cte1 AS (SELECT * FROM t1), cte2 AS (SELECT * FROM t2) SELECT * FROM cte1;
 ```
 
 ####  Correct Example
 ```sql
-WITH
-    cte1 AS (SELECT * FROM t1),
+WITH cte1 AS (SELECT * FROM t1),
     cte2 AS (SELECT * FROM t2)
 SELECT * FROM cte1;
 ```
 
 #### Additional Validations
 ```sql
-WITH
-    cte1 AS (SELECT * FROM t1),
+WITH cte1 AS (SELECT * FROM t1),
     cte2 AS (SELECT * FROM t2)
 SELECT * FROM cte1;
 ```
