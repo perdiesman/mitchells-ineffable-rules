@@ -15,7 +15,7 @@ class SubqueryIndentRule(BaseRule):
     examples = [
         {
             "violating": "SELECT * FROM (\nSELECT a FROM t\n) sub;",
-            "correct": "SELECT * FROM (\n    SELECT a FROM t\n    ) sub;"
+            "correct": "SELECT * FROM (\n        SELECT a FROM t\n    ) sub;"
         },
         {
             "violating": "SELECT * FROM users WHERE id IN (\nSELECT user_id FROM roles\n);",
@@ -67,7 +67,7 @@ class SubqueryIndentRule(BaseRule):
                             break
                             
                     expected_close_indent = open_indent + "    " if is_from_join else open_indent
-                    expected_content_indent = open_indent + "    "
+                    expected_content_indent = expected_close_indent + "    "
                     
                     lines = content.splitlines()
                     start_line = tok["line"] + 1

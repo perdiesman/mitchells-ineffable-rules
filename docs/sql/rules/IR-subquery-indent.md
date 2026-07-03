@@ -18,7 +18,7 @@ SELECT a FROM t
 ####  Correct Example #1
 ```sql
 SELECT * FROM (
-    SELECT a FROM t
+        SELECT a FROM t
     ) sub;
 ```
 
