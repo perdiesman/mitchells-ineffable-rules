@@ -1,6 +1,6 @@
 # IR-keyword-case
 
-SQL keywords must be in uppercase.
+SQL keywords must be in uppercase. Default keywords checked: select, from, where, join, on, and, or, limit, group by, order by, insert, into, values, update, set, delete, create, table, drop, alter, index, left, right, inner, outer, as, having, union, with, distinct, recursive, case, when, then, else, end.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes

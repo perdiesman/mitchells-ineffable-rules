@@ -12,7 +12,13 @@ KEYWORDS = [
 
 class KeywordCaseRule(BaseRule):
     rule_id = "IR-keyword-case"
-    description = "SQL keywords must be in uppercase."
+    description = (
+        "SQL keywords must be in uppercase. "
+        "Default keywords checked: select, from, where, join, on, and, or, limit, "
+        "group by, order by, insert, into, values, update, set, delete, create, "
+        "table, drop, alter, index, left, right, inner, outer, as, having, union, "
+        "with, distinct, recursive, case, when, then, else, end."
+    )
     category = "general"
     is_fixable = "yes"
     enabled_by_default = True
