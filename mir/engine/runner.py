@@ -171,22 +171,74 @@ def run_linter(config: Config) -> int:
         unfixable = [item for item in file_violations if not (item[0].is_fixable and item[1].is_fixable in ("yes", "sometimes"))]
         
         if config.fix:
-            if fixable:
-                current_content = content
-                rules_to_fix = {item[1] for item in fixable}
-                for rule in rules_to_fix:
-                    rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
-                    try:
-                        current_content = rule.fix(current_content, file_path, rule_config)
-                    except Exception as e:
-                        print(f"Error applying fix for rule {rule.rule_id}: {e}", file=sys.stderr)
-                print(current_content, end="")
-            else:
-                print(content, end="")
+            current_content = content
+            has_changes = True
+            pass_num = 0
+            max_passes = 5
+            unfixable_violations = unfixable
+            
+            while has_changes and pass_num < max_passes:
+                pass_num += 1
+                has_changes = False
                 
-            for v, rule in unfixable:
+                disabled_map = get_disabled_rules_map(current_content, file_path)
+                detected_base_indent = detect_base_indent(current_content)
+                
+                iter_violations = []
+                for rule in active_rules:
+                    global_config = config.rule_configs.get(rule.rule_id, {})
+                    lang_config = config.rule_configs.get(f"{lang}:{rule.rule_id}", {})
+                    if global_config is False or lang_config is False:
+                        continue
+                        
+                    rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
+                    if config.disable_all:
+                        is_enabled = (
+                            (rule_config.get("enabled") is True) or
+                            (rule.rule_id in config.rules_to_enable) or
+                            (f"{lang}:{rule.rule_id}" in config.rules_to_enable)
+                        )
+                    else:
+                        is_enabled = rule_config.get("enabled", rule.enabled_by_default)
+                    if not is_enabled:
+                        continue
+                        
+                    try:
+                        violations = rule.check(current_content, file_path, rule_config)
+                    except Exception as e:
+                        continue
+                        
+                    rule_disabled_lines = disabled_map.get(rule.rule_id, set())
+                    for v in violations:
+                        if v.line_number not in rule_disabled_lines:
+                            iter_violations.append((v, rule))
+                            
+                if not iter_violations:
+                    break
+                    
+                fixable = [item for item in iter_violations if item[0].is_fixable and item[1].is_fixable in ("yes", "sometimes")]
+                unfixable = [item for item in iter_violations if not (item[0].is_fixable and item[1].is_fixable in ("yes", "sometimes"))]
+                
+                unfixable_violations = unfixable
+                
+                if fixable:
+                    old_content = current_content
+                    rules_to_fix = {item[1] for item in fixable}
+                    for rule in rules_to_fix:
+                        rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
+                        try:
+                            current_content = rule.fix(current_content, file_path, rule_config)
+                        except Exception as e:
+                            pass
+                    if current_content != old_content:
+                        has_changes = True
+                else:
+                    break
+            
+            print(current_content, end="")
+            for v, rule in unfixable_violations:
                 print(format_violation(v, file_path, config.verbose, rule.description), file=sys.stderr)
-            return 1 if unfixable else 0
+            return 1 if unfixable_violations else 0
             
         elif config.dry_run:
             if fixable:
@@ -300,33 +352,83 @@ def run_linter(config: Config) -> int:
         
         if config.fix:
             # Fix mode:
-            # 1. Apply fixes for fixable rules
-            if fixable:
-                current_content = content
-                # Sort rules or apply them sequentially
-                # To prevent conflicts, we apply them one by one.
-                # Since multiple rules might touch the same content, we run each rule's fix
-                # on the accumulated content.
-                rules_to_fix = {item[1] for item in fixable}
-                for rule in rules_to_fix:
-                    rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
-                    try:
-                        current_content = rule.fix(current_content, file_path, rule_config)
-                    except Exception as e:
-                        print(f"Error applying fix for rule {rule.rule_id} on {file_path}: {e}")
+            # 1. Apply fixes for fixable rules with convergence looping
+            current_content = content
+            has_changes = True
+            pass_num = 0
+            max_passes = 5
+            unfixable_violations = unfixable
+            
+            while has_changes and pass_num < max_passes:
+                pass_num += 1
+                has_changes = False
+                
+                disabled_map = get_disabled_rules_map(current_content, file_path)
+                detected_base_indent = detect_base_indent(current_content)
+                
+                iter_violations = []
+                for rule in active_rules:
+                    global_config = config.rule_configs.get(rule.rule_id, {})
+                    lang_config = config.rule_configs.get(f"{lang}:{rule.rule_id}", {})
+                    if global_config is False or lang_config is False:
+                        continue
                         
-                # Write back if changed
-                if current_content != content:
+                    rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
+                    if config.disable_all:
+                        is_enabled = (
+                            (rule_config.get("enabled") is True) or
+                            (rule.rule_id in config.rules_to_enable) or
+                            (f"{lang}:{rule.rule_id}" in config.rules_to_enable)
+                        )
+                    else:
+                        is_enabled = rule_config.get("enabled", rule.enabled_by_default)
+                    if not is_enabled:
+                        continue
+                        
                     try:
-                        with open(file_path, "w", encoding="utf-8") as f:
-                            f.write(current_content)
-                        if config.verbose:
-                            print(f"Fixed issues in {file_path}")
+                        violations = rule.check(current_content, file_path, rule_config)
                     except Exception as e:
-                        print(f"Error writing fixed content to '{file_path}': {e}")
+                        continue
+                        
+                    rule_disabled_lines = disabled_map.get(rule.rule_id, set())
+                    for v in violations:
+                        if v.line_number not in rule_disabled_lines:
+                            iter_violations.append((v, rule))
+                            
+                if not iter_violations:
+                    break
+                    
+                fixable = [item for item in iter_violations if item[0].is_fixable and item[1].is_fixable in ("yes", "sometimes")]
+                unfixable = [item for item in iter_violations if not (item[0].is_fixable and item[1].is_fixable in ("yes", "sometimes"))]
+                
+                unfixable_violations = unfixable
+                
+                if fixable:
+                    old_content = current_content
+                    rules_to_fix = {item[1] for item in fixable}
+                    for rule in rules_to_fix:
+                        rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
+                        try:
+                            current_content = rule.fix(current_content, file_path, rule_config)
+                        except Exception as e:
+                            pass
+                    if current_content != old_content:
+                        has_changes = True
+                else:
+                    break
+            
+            # Write back if changed
+            if current_content != content:
+                try:
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(current_content)
+                    if config.verbose:
+                        print(f"Fixed issues in {file_path}")
+                except Exception as e:
+                    print(f"Error writing fixed content to '{file_path}': {e}")
             
             # 2. Report unfixable errors
-            for v, rule in unfixable:
+            for v, rule in unfixable_violations:
                 print(format_violation(v, file_path, config.verbose, rule.description))
                 total_violations_reported += 1
                 
