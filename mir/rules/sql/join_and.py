@@ -19,8 +19,7 @@ class JoinAndRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id\n    AND t1.active = t2.active;",
-        "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id;"
+        'SELECT * FROM t1 JOIN t2 ON t1.id = t2.id;'
     ]
 
     def _find_violations(self, content: str) -> List[dict]:

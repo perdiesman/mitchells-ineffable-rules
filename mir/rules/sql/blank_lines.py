@@ -25,9 +25,7 @@ class BlankLinesRule(BaseRule):
             "correct": "SELECT * FROM users;\n\nSELECT * FROM roles;"
         }
     ]
-    additional_validations = [
-        "SELECT * FROM users;\n\nSELECT * FROM roles;"
-    ]
+    additional_validations = []
 
     def _get_max_blank_lines(self, rule_config: Dict[str, Any]) -> int:
         val = rule_config.get("max_blank_lines", 1)

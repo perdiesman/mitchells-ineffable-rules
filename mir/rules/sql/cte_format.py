@@ -20,8 +20,7 @@ class CteFormatRule(BaseRule):
         }
     ]
     additional_validations = [
-        "WITH cte1 AS (\n    SELECT * FROM t1\n), cte2 AS (\n    SELECT * FROM t2\n)\nSELECT * FROM cte1;",
-        "WITH cte1 AS MATERIALIZED (\n    SELECT * FROM t1\n), cte2 (col1, col2) AS (\n    SELECT * FROM t2\n)\nSELECT * FROM cte1;"
+        'WITH cte1 AS MATERIALIZED (\n    SELECT * FROM t1\n), cte2 (col1, col2) AS (\n    SELECT * FROM t2\n)\nSELECT * FROM cte1;'
     ]
 
     def _find_violations(self, content: str) -> List[dict]:

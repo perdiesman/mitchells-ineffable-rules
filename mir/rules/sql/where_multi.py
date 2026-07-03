@@ -19,8 +19,7 @@ class WhereMultiRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT id FROM users WHERE active = true\n    AND type = 'admin'\n    OR age > 21;",
-        "SELECT id FROM users WHERE active = true;"
+        'SELECT id FROM users WHERE active = true;'
     ]
 
     def _find_violations(self, content: str) -> List[dict]:

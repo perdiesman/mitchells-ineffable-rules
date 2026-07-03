@@ -23,8 +23,7 @@ class FromMultiRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT * FROM\n    t1\n    LEFT JOIN t2 ON t1.id = t2.id;",
-        "SELECT * FROM t1;"
+        'SELECT * FROM t1;'
     ]
 
     def _find_violations(self, content: str) -> List[dict]:

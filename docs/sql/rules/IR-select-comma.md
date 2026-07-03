@@ -26,12 +26,5 @@ FROM users;
 
 #### Additional Validations
 ```sql
-SELECT
-    id,
-    name
-FROM users;
-```
-
-```sql
 SELECT id AS user_id FROM users;
 ```

@@ -19,8 +19,3 @@ select id, username from users where active = true;
 ```sql
 SELECT id, username FROM users WHERE active = true;
 ```
-
-#### Additional Validations
-```sql
-SELECT id, username FROM users WHERE active = true;
-```

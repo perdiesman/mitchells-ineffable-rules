@@ -19,8 +19,7 @@ class ParenContentIndentRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT COALESCE(\n    a,\n    b\n) FROM users;",
-        "SELECT COALESCE(a, b) FROM users;"
+        'SELECT COALESCE(a, b) FROM users;'
     ]
 
     def _find_violations(self, content: str) -> List[dict]:

@@ -24,10 +24,3 @@ SELECT * FROM users;
 
 SELECT * FROM roles;
 ```
-
-#### Additional Validations
-```sql
-SELECT * FROM users;
-
-SELECT * FROM roles;
-```

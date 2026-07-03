@@ -22,10 +22,6 @@ SELECT * FROM (SELECT a FROM t) sub;
 
 #### Additional Validations
 ```sql
-SELECT * FROM (SELECT a FROM t) sub;
-```
-
-```sql
 SELECT * FROM (
     SELECT a FROM t -- keep comments
 ) sub;

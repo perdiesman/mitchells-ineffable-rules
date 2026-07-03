@@ -19,8 +19,7 @@ class FromSingleRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT id\nFROM (SELECT * FROM raw_users) AS sub;",
-        "SELECT id\nFROM users;"
+        'SELECT id\nFROM (SELECT * FROM raw_users) AS sub;'
     ]
 
     def _find_violations(self, content: str) -> List[dict]:

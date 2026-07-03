@@ -26,8 +26,3 @@ FROM users;
 SELECT id
 FROM (SELECT * FROM raw_users) AS sub;
 ```
-
-```sql
-SELECT id
-FROM users;
-```

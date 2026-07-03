@@ -23,7 +23,3 @@ SELECT id FROM users;
 ```sql
 SELECT 'a;b' FROM users;
 ```
-
-```sql
-SELECT id FROM users;
-```

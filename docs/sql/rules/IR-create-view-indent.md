@@ -22,11 +22,6 @@ CREATE VIEW v AS
 
 #### Additional Validations
 ```sql
-CREATE VIEW v AS
-    SELECT * FROM users;
-```
-
-```sql
 CREATE MATERIALIZED VIEW mv AS
     SELECT * FROM users;
 ```

@@ -19,8 +19,7 @@ class CreateViewIndentRule(BaseRule):
         }
     ]
     additional_validations = [
-        "CREATE VIEW v AS\n    SELECT * FROM users;",
-        "CREATE MATERIALIZED VIEW mv AS\n    SELECT * FROM users;"
+        'CREATE MATERIALIZED VIEW mv AS\n    SELECT * FROM users;'
     ]
 
     def _find_violations(self, content: str) -> List[dict]:

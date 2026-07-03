@@ -21,10 +21,5 @@ SELECT * FROM t1 JOIN t2 ON t1.id = t2.id
 
 #### Additional Validations
 ```sql
-SELECT * FROM t1 JOIN t2 ON t1.id = t2.id
-    AND t1.active = t2.active;
-```
-
-```sql
 SELECT * FROM t1 JOIN t2 ON t1.id = t2.id;
 ```

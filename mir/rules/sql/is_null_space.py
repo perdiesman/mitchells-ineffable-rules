@@ -24,9 +24,8 @@ class IsNullSpaceRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT * FROM users WHERE age IS NULL;",
-        "SELECT * FROM users WHERE age IS NOT NULL;",
-        "SELECT 'isnull' AS str FROM users;"  # Should not touch strings
+        'SELECT * FROM users WHERE age IS NULL;',
+        "SELECT 'isnull' AS str FROM users;"
     ]
 
     def _find_violations(self, content: str) -> List[dict]:

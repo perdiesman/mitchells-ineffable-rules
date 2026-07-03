@@ -22,11 +22,5 @@ SELECT id FROM users WHERE active = true
 
 #### Additional Validations
 ```sql
-SELECT id FROM users WHERE active = true
-    AND type = 'admin'
-    OR age > 21;
-```
-
-```sql
 SELECT id FROM users WHERE active = true;
 ```

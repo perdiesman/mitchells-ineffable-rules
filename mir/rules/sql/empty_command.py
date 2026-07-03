@@ -19,8 +19,7 @@ class EmptyCommandRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT 'a;b' FROM users;",
-        "SELECT id FROM users;"
+        "SELECT 'a;b' FROM users;"
     ]
 
     def _find_violations(self, content: str) -> List[dict]:

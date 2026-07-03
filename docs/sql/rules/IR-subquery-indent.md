@@ -35,16 +35,3 @@ SELECT * FROM users WHERE id IN (
     SELECT user_id FROM roles
 );
 ```
-
-#### Additional Validations
-```sql
-SELECT * FROM (
-    SELECT a FROM t
-    ) sub;
-```
-
-```sql
-SELECT * FROM users WHERE id IN (
-    SELECT user_id FROM roles
-);
-```

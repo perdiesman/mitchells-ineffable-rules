@@ -40,9 +40,7 @@ class KeywordCaseRule(BaseRule):
             "correct": "SELECT id, username FROM users WHERE active = true;"
         }
     ]
-    additional_validations = [
-        "SELECT id, username FROM users WHERE active = true;"
-    ]
+    additional_validations = []
 
     def _get_keywords(self, rule_config: Dict[str, Any]) -> List[str]:
         override = rule_config.get("override_keywords")

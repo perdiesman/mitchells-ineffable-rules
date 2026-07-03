@@ -20,8 +20,7 @@ class SubqueryCompactRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT * FROM (SELECT a FROM t) sub;",
-        "SELECT * FROM (\n    SELECT a FROM t -- keep comments\n) sub;"
+        'SELECT * FROM (\n    SELECT a FROM t -- keep comments\n) sub;'
     ]
 
     def _compact_tokens(self, tokens: List[dict]) -> str:

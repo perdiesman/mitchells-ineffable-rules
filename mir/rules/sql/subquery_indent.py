@@ -22,10 +22,7 @@ class SubqueryIndentRule(BaseRule):
             "correct": "SELECT * FROM users WHERE id IN (\n    SELECT user_id FROM roles\n);"
         }
     ]
-    additional_validations = [
-        "SELECT * FROM (\n    SELECT a FROM t\n    ) sub;",
-        "SELECT * FROM users WHERE id IN (\n    SELECT user_id FROM roles\n);"
-    ]
+    additional_validations = []
 
     def _find_violations(self, content: str) -> List[dict]:
         tokens = tokenize_sql(content)

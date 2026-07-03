@@ -19,8 +19,7 @@ class SelectCommaRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT\n    id,\n    name\nFROM users;",
-        "SELECT id AS user_id FROM users;"
+        'SELECT id AS user_id FROM users;'
     ]
 
     def _find_violations(self, content: str) -> List[dict]:

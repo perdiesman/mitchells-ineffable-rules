@@ -25,15 +25,6 @@ SELECT * FROM cte1;
 
 #### Additional Validations
 ```sql
-WITH cte1 AS (
-    SELECT * FROM t1
-), cte2 AS (
-    SELECT * FROM t2
-)
-SELECT * FROM cte1;
-```
-
-```sql
 WITH cte1 AS MATERIALIZED (
     SELECT * FROM t1
 ), cte2 (col1, col2) AS (

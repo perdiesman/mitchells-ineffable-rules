@@ -19,8 +19,7 @@ class JoinFormatRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT * FROM t1 LEFT JOIN t2 ON t1.id = t2.id;",
-        "SELECT * FROM t1 LEFT JOIN t2\n    ON t1.id = t2.id;"
+        'SELECT * FROM t1 LEFT JOIN t2 ON t1.id = t2.id;'
     ]
 
     def _find_violations(self, content: str) -> List[dict]:

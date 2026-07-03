@@ -34,9 +34,5 @@ SELECT * FROM users WHERE age IS NULL;
 ```
 
 ```sql
-SELECT * FROM users WHERE age IS NOT NULL;
-```
-
-```sql
 SELECT 'isnull' AS str FROM users;
 ```

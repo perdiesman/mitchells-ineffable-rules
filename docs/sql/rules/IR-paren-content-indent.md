@@ -26,12 +26,5 @@ SELECT COALESCE(
 
 #### Additional Validations
 ```sql
-SELECT COALESCE(
-    a,
-    b
-) FROM users;
-```
-
-```sql
 SELECT COALESCE(a, b) FROM users;
 ```

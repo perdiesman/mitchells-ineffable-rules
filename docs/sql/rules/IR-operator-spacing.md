@@ -20,10 +20,6 @@ SELECT a + b AS c FROM users WHERE id = 1;
 
 #### Additional Validations
 ```sql
-SELECT a + b AS c FROM users WHERE id = 1;
-```
-
-```sql
 SELECT -5 FROM users;
 ```
 

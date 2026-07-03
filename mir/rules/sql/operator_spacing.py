@@ -19,9 +19,8 @@ class OperatorSpacingRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT a + b AS c FROM users WHERE id = 1;",
-        "SELECT -5 FROM users;",
-        "SELECT COUNT(*) FROM users;"
+        'SELECT -5 FROM users;',
+        'SELECT COUNT(*) FROM users;'
     ]
 
     def _find_violations(self, content: str) -> List[dict]:

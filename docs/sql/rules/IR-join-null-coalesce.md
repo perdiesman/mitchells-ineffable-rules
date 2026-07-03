@@ -27,8 +27,3 @@ SELECT * FROM users WHERE active IS NULL OR active = true;
 ```sql
 SELECT * FROM users WHERE COALESCE(active, true) = true;
 ```
-
-#### Additional Validations
-```sql
-SELECT * FROM users WHERE COALESCE(active, true) = true;
-```

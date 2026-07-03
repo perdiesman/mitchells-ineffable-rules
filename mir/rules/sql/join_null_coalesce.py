@@ -22,9 +22,7 @@ class JoinNullCoalesceRule(BaseRule):
             "correct": "SELECT * FROM users WHERE COALESCE(active, true) = true;"
         }
     ]
-    additional_validations = [
-        "SELECT * FROM users WHERE COALESCE(active, true) = true;"
-    ]
+    additional_validations = []
 
     def _find_violations(self, content: str) -> List[dict]:
         tokens = tokenize_sql(content)
