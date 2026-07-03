@@ -54,6 +54,12 @@ class TestMetaRules(unittest.TestCase):
                                 len(post_fix_violations), 0,
                                 f"Expected zero violations after running fix() on violating example #{idx} for rule '{rule_id}', but found {len(post_fix_violations)}.\nFixed Code:\n{fixed_content}"
                             )
+                            # Verify idempotency: running fix() again must yield the exact same content
+                            refixed_content = rule.fix(fixed_content, f"test_violating_{idx}.{lang}", rule_config)
+                            self.assertEqual(
+                                refixed_content, fixed_content,
+                                f"Idempotency failure for rule '{rule_id}' in example #{idx}: running fix() on the corrected content modified it again.\nFirst fix:\n{fixed_content}\nSecond fix:\n{refixed_content}"
+                            )
                         except NotImplementedError:
                             pass
                             
