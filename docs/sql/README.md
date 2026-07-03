@@ -33,7 +33,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-join-parens`](rules/IR-join-parens.md) | Unnecessary parentheses around a JOIN clause should be removed. | Yes | [View Details](rules/IR-join-parens.md) |
 | [`IR-from-single`](rules/IR-from-single.md) | Single FROM entry should be on the same line as the FROM keyword. | Yes | [View Details](rules/IR-from-single.md) |
 | [`IR-alias-as`](rules/IR-alias-as.md) | Column aliases must use the AS keyword. | Yes | [View Details](rules/IR-alias-as.md) |
-| [`IR-join-and`](rules/IR-join-and.md) | Split AND conditions in JOIN ON clauses to separate lines, indented 4 spaces. | Yes | [View Details](rules/IR-join-and.md) |
+| [`IR-join-and`](rules/IR-join-and.md) | Split AND or OR conditions in JOIN ON clauses to separate lines, indented 4 spaces. | Yes | [View Details](rules/IR-join-and.md) |
 | [`IR-clause-alignment`](rules/IR-clause-alignment.md) | Main query clause keywords (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT) must have the exact same indentation within the same query block when the query spans multiple lines. | Yes | [View Details](rules/IR-clause-alignment.md) |
 | [`IR-select-comma`](rules/IR-select-comma.md) | Missing commas between SELECT columns split across lines should be inserted. | Yes | [View Details](rules/IR-select-comma.md) |
 | [`IR-column-layout`](rules/IR-column-layout.md) | On select, order by, group by, if all the columns fit on one line then put them on one line, otherwise wrap one per line. | Yes | [View Details](rules/IR-column-layout.md) |

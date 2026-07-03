@@ -4,7 +4,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 
 class JoinAndRule(BaseRule):
     rule_id = "IR-join-and"
-    description = "Split AND conditions in JOIN ON clauses to separate lines, indented 4 spaces."
+    description = "Split AND or OR conditions in JOIN ON clauses to separate lines, indented 4 spaces."
     category = "select/view/materialized view"
     is_fixable = "yes"
     enabled_by_default = True
@@ -16,6 +16,10 @@ class JoinAndRule(BaseRule):
         {
             "violating": "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id AND t1.active = t2.active;",
             "correct": "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id\n    AND t1.active = t2.active;"
+        },
+        {
+            "violating": "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id OR t1.code = t2.code;",
+            "correct": "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id\n    OR t1.code = t2.code;"
         }
     ]
     additional_validations = [
@@ -30,10 +34,8 @@ class JoinAndRule(BaseRule):
         
         for i, tok in enumerate(tokens):
             if tok["type"] == "KEYWORD" and tok["value"].upper() == "ON":
-                # Verify that it is inside a FROM/JOIN clause
                 outer_depth = depths[i]
                 
-                # Resolve ON line indent
                 line_start = content.rfind("\n", 0, tok["start"]) + 1
                 line_prefix = content[line_start:tok["start"]]
                 on_indent = ""
@@ -45,7 +47,6 @@ class JoinAndRule(BaseRule):
                         
                 expected_indent = on_indent + "    "
                 
-                # Find end of ON clause
                 clause_end = n
                 for idx in range(i + 1, n):
                     t = tokens[idx]
@@ -64,9 +65,8 @@ class JoinAndRule(BaseRule):
                 clause_tokens = tokens[i + 1:clause_end]
                 clause_depths = depths[i + 1:clause_end]
                 
-                # Scan for AND keywords at depth 0 inside ON clause
                 for j_idx, (t, d) in enumerate(zip(clause_tokens, clause_depths)):
-                    if d == outer_depth and t["type"] == "KEYWORD" and t["value"].upper() == "AND":
+                    if d == outer_depth and t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
                         actual_idx = i + 1 + j_idx
                         ws_before = None
                         if actual_idx - 1 >= 0 and tokens[actual_idx - 1]["type"] == "WHITESPACE":
@@ -94,7 +94,7 @@ class JoinAndRule(BaseRule):
                 Violation(
                     rule_id=self.rule_id,
                     line_number=tok["line"],
-                    message="AND condition in JOIN ON clause should start on a new line.",
+                    message="AND or OR condition in JOIN ON clause should start on a new line.",
                     offending_lines=[lines[tok["line"] - 1] if tok["line"] - 1 < len(lines) else ""],
                     is_fixable=True
                 )
@@ -106,7 +106,6 @@ class JoinAndRule(BaseRule):
         if not offending:
             return content
             
-        # Apply edits in reverse order
         edits = []
         for item in offending:
             edits.append((item["ws_start"], item["ws_end"], item["replacement"]))
