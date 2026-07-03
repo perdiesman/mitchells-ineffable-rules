@@ -248,7 +248,8 @@ class ColumnLayoutRule(BaseRule):
                             
                         if list_paren == 0 and jc == ',':
                             expr = content[current_expr_start:j].strip()
-                            expr = re.sub(r"\s+", " ", expr)
+                            if "\n" not in expr:
+                                expr = re.sub(r"\s+", " ", expr)
                             if expr:
                                 expressions.append(expr)
                             last_non_space_idx = j + 1
@@ -261,7 +262,8 @@ class ColumnLayoutRule(BaseRule):
                         j += 1
                         
                     expr = content[current_expr_start:j].strip()
-                    expr = re.sub(r"\s+", " ", expr)
+                    if "\n" not in expr:
+                        expr = re.sub(r"\s+", " ", expr)
                     if expr:
                         if keyword == "SELECT":
                             match_distinct = re.match(r"^(distinct|all)\b\s*(.*)$", expr, re.IGNORECASE)
@@ -296,6 +298,39 @@ class ColumnLayoutRule(BaseRule):
             i += 1
             
         return clauses
+
+    def _reindent_multiline(self, text: str, new_indent: str) -> str:
+        lines = text.splitlines()
+        if len(lines) <= 1:
+            return text
+        other_lines = [l for l in lines[1:] if l.strip() != ""]
+        common_ws = None
+        for l in other_lines:
+            ws = ""
+            for char in l:
+                if char in (" ", "\t"):
+                    ws += char
+                else:
+                    break
+            if common_ws is None:
+                common_ws = ws
+            else:
+                common_prefix = []
+                for c1, c2 in zip(common_ws, ws):
+                    if c1 == c2:
+                        common_prefix.append(c1)
+                    else:
+                        break
+                common_ws = "".join(common_prefix)
+        if common_ws is None:
+            common_ws = ""
+        rebuilt = [new_indent + lines[0]]
+        for l in lines[1:]:
+            if l.strip() == "":
+                rebuilt.append("")
+            else:
+                rebuilt.append(new_indent + l[len(common_ws):])
+        return "\n".join(rebuilt)
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         max_length = self.get_config_value(
@@ -359,7 +394,15 @@ class ColumnLayoutRule(BaseRule):
             else:
                 # Expect multi-line format
                 inner_indent = indentation + (" " * indent_size)
-                expected = f"{keyword}\n" + ",\n".join(f"{inner_indent}{expr}" for expr in expressions)
+                
+                formatted_exprs = []
+                for expr in expressions:
+                    if "\n" in expr:
+                        formatted_exprs.append(self._reindent_multiline(expr, inner_indent))
+                    else:
+                        formatted_exprs.append(f"{inner_indent}{expr}")
+                        
+                expected = f"{keyword}\n" + ",\n".join(formatted_exprs)
                 
                 # Normalize line endings for comparison
                 current_normalized = current_clause_text.replace("\r\n", "\n")
@@ -429,7 +472,13 @@ class ColumnLayoutRule(BaseRule):
                 formatted = single_line_clause
             else:
                 inner_indent = indentation + (" " * indent_size)
-                formatted = f"{keyword}{ending}" + f",{ending}".join(f"{inner_indent}{expr}" for expr in expressions)
+                formatted_exprs = []
+                for expr in expressions:
+                    if "\n" in expr:
+                        formatted_exprs.append(self._reindent_multiline(expr, inner_indent))
+                    else:
+                        formatted_exprs.append(f"{inner_indent}{expr}")
+                formatted = f"{keyword}{ending}" + f",{ending}".join(formatted_exprs)
                 
             fixed_chunks.append(content[last_idx:cl["keyword_start"]])
             fixed_chunks.append(formatted)

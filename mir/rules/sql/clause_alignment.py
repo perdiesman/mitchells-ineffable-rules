@@ -180,16 +180,25 @@ class ClauseAlignmentRule(BaseRule):
             if max(line_numbers) == min(line_numbers):
                 continue
                 
-            first_clause = group[0]
-            expected_indent = first_clause["indentation"]
+            ref_clause = None
+            for cl in group:
+                if cl["is_first_on_line"]:
+                    ref_clause = cl
+                    break
+            if not ref_clause:
+                continue
+                
+            expected_indent = ref_clause["indentation"]
             
-            for cl in group[1:]:
+            for cl in group:
+                if cl == ref_clause:
+                    continue
                 if not cl["is_first_on_line"]:
                     violations.append(
                         Violation(
                             rule_id=self.rule_id,
                             line_number=cl["line_number"],
-                            message=f"Query clause {cl['keyword']} must start on a new line and align with the {first_clause['keyword']} clause.",
+                            message=f"Query clause {cl['keyword']} must start on a new line and align with the {ref_clause['keyword']} clause.",
                             offending_lines=[lines[cl["line_number"] - 1] if cl["line_number"] - 1 < len(lines) else ""],
                             is_fixable=True
                         )
@@ -201,7 +210,7 @@ class ClauseAlignmentRule(BaseRule):
                             line_number=cl["line_number"],
                             message=(
                                 f"Query clause {cl['keyword']} must align with the query's "
-                                f"{first_clause['keyword']} clause (expected indentation: "
+                                f"{ref_clause['keyword']} clause (expected indentation: "
                                 f"{len(expected_indent)} spaces, actual: {len(cl['indentation'])} spaces)."
                             ),
                             offending_lines=[lines[cl["line_number"] - 1] if cl["line_number"] - 1 < len(lines) else ""],
@@ -232,10 +241,19 @@ class ClauseAlignmentRule(BaseRule):
             if max(line_numbers) == min(line_numbers):
                 continue
                 
-            first_clause = group[0]
-            expected_indent = first_clause["indentation"]
+            ref_clause = None
+            for cl in group:
+                if cl["is_first_on_line"]:
+                    ref_clause = cl
+                    break
+            if not ref_clause:
+                continue
+                
+            expected_indent = ref_clause["indentation"]
             
-            for cl in group[1:]:
+            for cl in group:
+                if cl == ref_clause:
+                    continue
                 if not cl["is_first_on_line"]:
                     replacements.append((
                         cl["space_start"],

@@ -174,7 +174,7 @@ def run_linter(config: Config) -> int:
             current_content = content
             has_changes = True
             pass_num = 0
-            max_passes = 5
+            max_passes = 10
             unfixable_violations = unfixable
             
             while has_changes and pass_num < max_passes:
@@ -356,7 +356,7 @@ def run_linter(config: Config) -> int:
             current_content = content
             has_changes = True
             pass_num = 0
-            max_passes = 5
+            max_passes = 10
             unfixable_violations = unfixable
             
             while has_changes and pass_num < max_passes:
