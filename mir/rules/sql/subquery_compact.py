@@ -76,6 +76,25 @@ class SubqueryCompactRule(BaseRule):
         else:
             base_indent_spaces = 0
             
+        # Resolve max line length limit
+        max_len = 140
+        all_configs = rule_config.get("_all_configs", {})
+        lang = rule_config.get("_lang") or "sql"
+        
+        # Check IR-line-length
+        line_len_config = all_configs.get(f"{lang}:IR-line-length", all_configs.get("IR-line-length", {}))
+        if isinstance(line_len_config, dict) and "max_line_length" in line_len_config:
+            max_len = min(max_len, line_len_config["max_line_length"])
+            
+        # Check IR-expression-split
+        expr_split_config = all_configs.get(f"{lang}:IR-expression-split", all_configs.get("IR-expression-split", {}))
+        if isinstance(expr_split_config, dict) and "max_line_length" in expr_split_config:
+            max_len = min(max_len, expr_split_config["max_line_length"])
+        elif "max_line_length" in rule_config:
+            max_len = min(max_len, rule_config["max_line_length"])
+        else:
+            max_len = min(max_len, 100)
+            
         for i, tok in enumerate(tokens):
             if tok["type"] == "KEYWORD" and tok["value"].upper() in ("FROM", "JOIN"):
                 outer_depth = depths[i]
@@ -109,7 +128,7 @@ class SubqueryCompactRule(BaseRule):
                         line_prefix = content[line_start:paren_tok["start"]]
                         effective_prefix_len = max(0, len(line_prefix) - base_indent_spaces)
                         
-                        if effective_prefix_len + len(compacted_full) <= 140:
+                        if effective_prefix_len + len(compacted_full) <= max_len:
                             violations.append({
                                 "open_tok": paren_tok,
                                 "close_tok": close_tok,

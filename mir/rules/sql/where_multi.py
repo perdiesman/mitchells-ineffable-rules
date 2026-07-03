@@ -47,6 +47,9 @@ class WhereMultiRule(BaseRule):
                 for idx in range(i + 1, n):
                     t = tokens[idx]
                     d = depths[idx]
+                    if d < outer_depth:
+                        clause_end = idx
+                        break
                     if d == outer_depth:
                         if t["type"] == "KEYWORD" and t["value"].upper() in (
                             "GROUP", "ORDER", "LIMIT", "HAVING", "OFFSET", "UNION", "INTERSECT", "EXCEPT"

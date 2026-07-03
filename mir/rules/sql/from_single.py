@@ -37,6 +37,9 @@ class FromSingleRule(BaseRule):
                 for idx in range(i + 1, n):
                     t = tokens[idx]
                     d = depths[idx]
+                    if d < outer_depth:
+                        clause_end = idx
+                        break
                     if d == outer_depth:
                         if t["type"] == "KEYWORD" and t["value"].upper() in (
                             "WHERE", "GROUP", "ORDER", "BY", "HAVING", "LIMIT", "OFFSET", "UNION", "INTERSECT", "EXCEPT"
