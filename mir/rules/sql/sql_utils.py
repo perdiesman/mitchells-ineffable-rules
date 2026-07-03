@@ -296,3 +296,25 @@ def get_token_depths(tokens: List[dict]) -> List[int]:
         if tok["type"] == "PAREN" and tok["value"] == "(":
             current_depth += 1
     return depths
+
+def find_clause_end(tokens: List[dict], depths: List[int], start_idx: int, clause_keywords: List[str]) -> int:
+    n = len(tokens)
+    outer_depth = depths[start_idx]
+    paren_depth = 0
+    
+    for idx in range(start_idx + 1, n):
+        t = tokens[idx]
+        d = depths[idx]
+        if t["type"] == "PAREN":
+            if t["value"] == "(":
+                paren_depth += 1
+            elif t["value"] == ")":
+                paren_depth -= 1
+                if paren_depth < 0:
+                    return idx
+        elif paren_depth == 0 and d == outer_depth:
+            if t["type"] == "KEYWORD" and t["value"].upper() in clause_keywords:
+                return idx
+            if t["type"] == "SEMI":
+                return idx
+    return n
