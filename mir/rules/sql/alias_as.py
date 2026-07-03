@@ -44,7 +44,7 @@ class AliasAsRule(BaseRule):
                         ):
                             clause_end = idx
                             break
-                        if t["type"] in ("SEMI", "PAREN"):
+                        if t["type"] == "SEMI":
                             clause_end = idx
                             break
                             
@@ -72,6 +72,8 @@ class AliasAsRule(BaseRule):
                         # Check if last token is identifier (column alias)
                         if last_tok["type"] == "IDENTIFIER":
                             prev_tok = active[-2]
+                            if prev_tok["value"] == ".":
+                                continue
                             if prev_tok["type"] != "KEYWORD" or prev_tok["value"].upper() != "AS":
                                 # Violation! Missing AS
                                 violations.append({
