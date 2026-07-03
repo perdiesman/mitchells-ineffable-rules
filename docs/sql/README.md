@@ -42,6 +42,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-from-single`](rules/queries/IR-from-single.md) | Single FROM entry should be on the same line as the FROM keyword. | Yes | [View Details](rules/queries/IR-from-single.md) |
 | [`IR-is-null`](rules/queries/IR-is-null.md) | Standardize NULL comparison predicates to use IS NULL and IS NOT NULL operators. | Yes | [View Details](rules/queries/IR-is-null.md) |
 | [`IR-distinct-parentheses`](rules/queries/IR-distinct-parentheses.md) | Remove redundant parentheses around DISTINCT arguments, preserving DISTINCT ON (col) syntax. | Yes | [View Details](rules/queries/IR-distinct-parentheses.md) |
+| [`IR-expression-split`](rules/queries/IR-expression-split.md) | Long lines should split on function/expression parentheses, and optionally on additive/logical operators if still too long. | Yes | [View Details](rules/queries/IR-expression-split.md) |
 | [`IR-between`](rules/queries/IR-between.md) | Standardize range predicate check of form 'a >= b AND a <= c' to 'a BETWEEN b AND c'. | Yes | [View Details](rules/queries/IR-between.md) |
 | [`IR-boolean-comparison`](rules/queries/IR-boolean-comparison.md) | Standardize boolean comparison predicates to use idiomatic boolean predicates. | Yes | [View Details](rules/queries/IR-boolean-comparison.md) |
 | [`IR-alias-as`](rules/queries/IR-alias-as.md) | Column aliases must use the AS keyword. | Yes | [View Details](rules/queries/IR-alias-as.md) |
