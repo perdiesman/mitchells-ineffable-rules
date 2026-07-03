@@ -58,7 +58,7 @@ class JoinOnMultiRule(BaseRule):
                         ):
                             clause_end = idx
                             break
-                        if t["type"] in ("SEMI", "PAREN"):
+                        if t["type"] == "SEMI":
                             clause_end = idx
                             break
                             

@@ -4,7 +4,7 @@ from mir.rules.sql.sql_utils import tokenize_sql
 
 class TrailingSemicolonRule(BaseRule):
     rule_id = "IR-trailing-semicolon"
-    description = "Enforce that the last SQL statement ends with a trailing semicolon."
+    description = "Enforce that the last SQL statement ends with a trailing semicolon, placed immediately after the statement text."
     category = "general"
     is_fixable = "yes"
     enabled_by_default = True
@@ -16,6 +16,10 @@ class TrailingSemicolonRule(BaseRule):
         {
             "violating": "SELECT * FROM users",
             "correct": "SELECT * FROM users;"
+        },
+        {
+            "violating": "SELECT * FROM users\n    ;",
+            "correct": "SELECT * FROM users;"
         }
     ]
     additional_validations = [
@@ -26,7 +30,7 @@ class TrailingSemicolonRule(BaseRule):
         tokens = tokenize_sql(content)
         violations = []
         
-        # Find the last active token (non-whitespace, non-comment)
+        # 1. Enforce trailing semicolon for the entire file
         last_active = None
         for t in reversed(tokens):
             if t["type"] not in ("WHITESPACE", "COMMENT"):
@@ -35,11 +39,37 @@ class TrailingSemicolonRule(BaseRule):
                 
         if last_active and last_active["value"] != ";":
             violations.append({
+                "type": "missing",
                 "token": last_active,
                 "insert_pos": last_active["end"],
                 "line": last_active["line"]
             })
             
+        # 2. Check ALL semicolons for placement layout
+        for idx, tok in enumerate(tokens):
+            if tok["type"] != "WHITESPACE" and tok["type"] != "COMMENT" and tok["value"] == ";":
+                prev_tok = None
+                has_newline_before_semi = False
+                ws_before = None
+                
+                for p_idx in range(idx - 1, -1, -1):
+                    t = tokens[p_idx]
+                    if t["type"] == "WHITESPACE":
+                        ws_before = t
+                        if "\n" in t["value"]:
+                            has_newline_before_semi = True
+                    elif t["type"] != "COMMENT":
+                        prev_tok = t
+                        break
+                        
+                if prev_tok and (has_newline_before_semi or (ws_before and ws_before["value"] != "")):
+                    violations.append({
+                        "type": "placement",
+                        "semi_tok": tok,
+                        "insert_pos": prev_tok["end"],
+                        "line": tok["line"]
+                    })
+                    
         return violations
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
@@ -48,11 +78,14 @@ class TrailingSemicolonRule(BaseRule):
         offending = self._find_violations(content)
         
         for item in offending:
+            msg = "SQL statement should end with a semicolon."
+            if item["type"] == "placement":
+                msg = "Semicolon should be placed immediately after the preceding token without leading spaces/newlines."
             violations.append(
                 Violation(
                     rule_id=self.rule_id,
                     line_number=item["line"],
-                    message="SQL statement should end with a semicolon.",
+                    message=msg,
                     offending_lines=[lines[item["line"] - 1] if item["line"] - 1 < len(lines) else ""],
                     is_fixable=True
                 )
@@ -64,7 +97,18 @@ class TrailingSemicolonRule(BaseRule):
         if not offending:
             return content
             
-        # Since we only insert at one position at the very end, we just apply the first edit
-        item = offending[0]
-        pos = item["insert_pos"]
-        return content[:pos] + ";" + content[pos:]
+        edits = []
+        for item in offending:
+            if item["type"] == "placement":
+                semi = item["semi_tok"]
+                pos = item["insert_pos"]
+                edits.append((pos, semi["end"], ";"))
+            else:
+                pos = item["insert_pos"]
+                edits.append((pos, pos, ";"))
+                
+        edits.sort(key=lambda x: x[0], reverse=True)
+        chars = list(content)
+        for start, end, new_text in edits:
+            chars[start:end] = list(new_text)
+        return "".join(chars)

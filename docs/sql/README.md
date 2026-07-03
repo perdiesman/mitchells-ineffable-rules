@@ -16,7 +16,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | :--- | :--- | :---: | :---: |
 | [`IR-operator-spacing`](rules/general/IR-operator-spacing.md) | Operators should have a single space on both sides. | Yes | [View Details](rules/general/IR-operator-spacing.md) |
 | [`IR-redundant-keywords`](rules/general/IR-redundant-keywords.md) | Remove redundant implied keywords like INNER, OUTER, and ASC. | Yes | [View Details](rules/general/IR-redundant-keywords.md) |
-| [`IR-trailing-semicolon`](rules/general/IR-trailing-semicolon.md) | Enforce that the last SQL statement ends with a trailing semicolon. | Yes | [View Details](rules/general/IR-trailing-semicolon.md) |
+| [`IR-trailing-semicolon`](rules/general/IR-trailing-semicolon.md) | Enforce that the last SQL statement ends with a trailing semicolon, placed immediately after the statement text. | Yes | [View Details](rules/general/IR-trailing-semicolon.md) |
 | [`IR-comment-spacing`](rules/general/IR-comment-spacing.md) | Enforce a single space after the double-dash comment prefix. | Yes | [View Details](rules/general/IR-comment-spacing.md) |
 | [`IR-eof-newline`](rules/general/IR-eof-newline.md) | Enforce that every SQL file ends with exactly one newline character. | Yes | [View Details](rules/general/IR-eof-newline.md) |
 | [`IR-line-length`](rules/general/IR-line-length.md) | Lines must not exceed the configured maximum length. | No | [View Details](rules/general/IR-line-length.md) |
