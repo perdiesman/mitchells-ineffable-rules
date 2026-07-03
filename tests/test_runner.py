@@ -332,5 +332,55 @@ class TestRunnerIntegration(unittest.TestCase):
             content = f.read()
             self.assertEqual(content, "SELECT id FROM users;")
 
+    def test_configurable_blank_lines(self):
+        query = "SELECT * FROM users;\n\n\n\nSELECT * FROM roles;"
+        path = self.write_temp_file("test_blank_lines.sql", query)
+        
+        # Default max_blank_lines = 1 (violates)
+        config1 = Config()
+        config1.paths = [path]
+        config1.disable_all = True
+        config1.rules_to_enable = ["IR-blank-lines"]
+        config1.rule_configs = {"IR-blank-lines": {"max_blank_lines": 1}}
+        self.assertEqual(run_linter(config1), 1)
+        
+        # Configured max_blank_lines = 3 (passes, as we have 3 consecutive blank lines)
+        config2 = Config()
+        config2.paths = [path]
+        config2.disable_all = True
+        config2.rules_to_enable = ["IR-blank-lines"]
+        config2.rule_configs = {"IR-blank-lines": {"max_blank_lines": 3}}
+        self.assertEqual(run_linter(config2), 0)
+
+    def test_configurable_keyword_case(self):
+        query = "SELECT * FROM users WHERE active = true AND foo = 1;"
+        path = self.write_temp_file("test_keyword_case.sql", query)
+        
+        # Default: "foo" is not a keyword (passes)
+        config1 = Config()
+        config1.paths = [path]
+        config1.disable_all = True
+        config1.rules_to_enable = ["IR-keyword-case"]
+        self.assertEqual(run_linter(config1), 0)
+        
+        # Configured: "foo" is added to additional_keywords (violates and gets fixed)
+        config2 = Config()
+        config2.paths = [path]
+        config2.disable_all = True
+        config2.rules_to_enable = ["IR-keyword-case"]
+        config2.rule_configs = {"IR-keyword-case": {"additional_keywords": ["foo"]}}
+        self.assertEqual(run_linter(config2), 1)
+        
+        config3 = Config()
+        config3.paths = [path]
+        config3.fix = True
+        config3.disable_all = True
+        config3.rules_to_enable = ["IR-keyword-case"]
+        config3.rule_configs = {"IR-keyword-case": {"additional_keywords": ["foo"]}}
+        run_linter(config3)
+        with open(path, "r") as f:
+            content = f.read()
+            self.assertEqual(content, "SELECT * FROM users WHERE active = true AND FOO = 1;")
+
 if __name__ == "__main__":
     unittest.main()
