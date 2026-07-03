@@ -4,7 +4,7 @@ SELECT statements under a CREATE VIEW should be indented 4 spaces relative to th
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: Schema Definition Rules
 - **Configuration Options**:
   - `enabled`: `true`
 

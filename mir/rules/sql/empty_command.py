@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql
 class EmptyCommandRule(BaseRule):
     rule_id = "IR-empty-command"
     description = "Remove empty SQL commands, such as duplicate semicolons or leading semicolons."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

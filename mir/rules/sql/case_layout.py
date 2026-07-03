@@ -10,7 +10,7 @@ class CaseLayoutRule(BaseRule):
         "unless the block is simple (exactly one WHEN condition and an optional ELSE clause) "
         "and fits on a single line within length constraints."
     )
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

@@ -14,9 +14,10 @@ Categories:
 ### [SQL](sql/README.md)
 Categories:
 - [General Rules](sql/README.md#general-rules)
-- [Select / View / Materialized View Rules](sql/README.md#select-view-materialized-view-rules)
-- [Function / Procedure Rules](sql/README.md#function-procedure-rules)
-- [Insert / Update / Delete Rules](sql/README.md#insert-update-delete-rules)
+- [Query Structure Rules](sql/README.md#query-structure-rules)
+- [Schema Definition Rules](sql/README.md#schema-definition-rules)
+- [Data Modification Rules](sql/README.md#data-modification-rules)
+- [Routine & Procedure Rules](sql/README.md#routine-procedure-rules)
 
 ### [XML](xml/README.md)
 Categories:

@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren
 class DistinctParenthesesRule(BaseRule):
     rule_id = "IR-distinct-parentheses"
     description = "Remove redundant parentheses around DISTINCT arguments, preserving DISTINCT ON (col) syntax."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

@@ -4,7 +4,7 @@ Standardize NULL comparison predicates to use IS NULL and IS NOT NULL operators.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: Query Structure Rules
 - **Configuration Options**:
   - `enabled`: `true`
 

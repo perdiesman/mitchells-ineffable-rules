@@ -4,7 +4,7 @@ Single WHERE condition should be on the same line as the WHERE keyword.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: Query Structure Rules
 - **Configuration Options**:
   - `enabled`: `true`
 

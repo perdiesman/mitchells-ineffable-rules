@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths, find_matchin
 class ParenMultiRule(BaseRule):
     rule_id = "IR-paren-multi"
     description = "Parentheses wrapping multiple logical conditions in WHERE/ON clauses must format contents on separate lines, indented 4 spaces."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 class FromSingleRule(BaseRule):
     rule_id = "IR-from-single"
     description = "Single FROM entry should be on the same line as the FROM keyword."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

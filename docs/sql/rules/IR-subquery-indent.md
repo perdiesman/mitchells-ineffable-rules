@@ -4,7 +4,7 @@ Subqueries should be indented 4 spaces relative to their opening parenthesis.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: Query Structure Rules
 - **Configuration Options**:
   - `enabled`: `true`
 

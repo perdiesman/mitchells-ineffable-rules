@@ -4,7 +4,7 @@ CASE statements should be formatted with WHEN/THEN on separate lines unless the 
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: Query Structure Rules
 - **Configuration Options**:
   - `enabled`: `true`
 

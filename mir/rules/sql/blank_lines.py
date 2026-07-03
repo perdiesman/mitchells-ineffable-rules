@@ -4,7 +4,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 class BlankLinesRule(BaseRule):
     rule_id = "IR-blank-lines"
     description = "Limit consecutive blank lines to a configurable maximum."
-    category = "select/view/materialized view"
+    category = "general"
     is_fixable = "yes"
     enabled_by_default = True
     

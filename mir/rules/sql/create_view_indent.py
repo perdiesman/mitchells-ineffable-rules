@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 class CreateViewIndentRule(BaseRule):
     rule_id = "IR-create-view-indent"
     description = "SELECT statements under a CREATE VIEW should be indented 4 spaces relative to the CREATE VIEW statement."
-    category = "select/view/materialized view"
+    category = "schema-definition"
     is_fixable = "yes"
     enabled_by_default = True
     

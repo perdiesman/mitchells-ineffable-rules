@@ -4,7 +4,7 @@ On select, order by, group by, if all the columns fit on one line then put them 
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: Query Structure Rules
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `max_length` (Default: `120`): Maximum line length limit used to determine if columns fit on a single line. *Note: Value dynamically inherited from rule [`IR-line-length`](IR-line-length.md) -> `max_length` if not configured.*

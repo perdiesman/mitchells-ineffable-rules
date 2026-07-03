@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 class InExistsRule(BaseRule):
     rule_id = "IR-in-exists"
     description = "EXISTS is preferred over IN with a subquery."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "no"
     enabled_by_default = True
     

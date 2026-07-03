@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql
 class OperatorSpacingRule(BaseRule):
     rule_id = "IR-operator-spacing"
     description = "Operators should have a single space on both sides."
-    category = "select/view/materialized view"
+    category = "general"
     is_fixable = "yes"
     enabled_by_default = True
     

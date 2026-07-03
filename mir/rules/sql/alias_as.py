@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 class AliasAsRule(BaseRule):
     rule_id = "IR-alias-as"
     description = "Column aliases must use the AS keyword."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

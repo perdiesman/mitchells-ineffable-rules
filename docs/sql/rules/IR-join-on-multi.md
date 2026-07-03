@@ -4,7 +4,7 @@ Split AND or OR conditions in JOIN ON clauses to separate lines, indented 4 spac
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: Query Structure Rules
 - **Configuration Options**:
   - `enabled`: `true`
 

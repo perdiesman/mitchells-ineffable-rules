@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql
 class NullCoalesceRule(BaseRule):
     rule_id = "IR-null-coalesce"
     description = "Standardize nullable equality predicates to COALESCE(x, -1) form."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

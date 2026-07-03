@@ -4,7 +4,7 @@ Parentheses wrapping multiple logical conditions in WHERE/ON clauses must format
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: Query Structure Rules
 - **Configuration Options**:
   - `enabled`: `true`
 

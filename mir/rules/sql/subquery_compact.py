@@ -6,7 +6,7 @@ from mir.rules.sql.indent import IndentRule
 class SubqueryCompactRule(BaseRule):
     rule_id = "IR-subquery-compact"
     description = "Multiline subquery sources inside FROM or JOIN clauses should be compacted to a single line if they fit within 140 characters."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

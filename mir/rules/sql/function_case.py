@@ -14,7 +14,7 @@ EXCLUDED_WORDS = {
 class FunctionCaseRule(BaseRule):
     rule_id = "IR-function-case"
     description = "Function names should be the same case (default lowercase)."
-    category = "select/view/materialized view"
+    category = "general"
     is_fixable = "yes"
     enabled_by_default = True
     

@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql
 class CountStarRule(BaseRule):
     rule_id = "IR-count-star"
     description = "Standardize COUNT(1) or row-counting expressions to COUNT(*)."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

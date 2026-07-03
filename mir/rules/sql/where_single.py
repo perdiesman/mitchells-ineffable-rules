@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 class WhereSingleRule(BaseRule):
     rule_id = "IR-where-single"
     description = "Single WHERE condition should be on the same line as the WHERE keyword."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

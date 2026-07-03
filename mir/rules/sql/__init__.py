@@ -1,6 +1,7 @@
 CATEGORIES = {
     "general": "General Rules",
-    "select/view/materialized view": "Select / View / Materialized View Rules",
-    "function/procedure": "Function / Procedure Rules",
-    "insert/update/delete": "Insert / Update / Delete Rules"
+    "queries": "Query Structure Rules",
+    "schema-definition": "Schema Definition Rules",
+    "data-modification": "Data Modification Rules",
+    "routines": "Routine & Procedure Rules"
 }

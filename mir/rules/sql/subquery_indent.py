@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren, get_token
 class SubqueryIndentRule(BaseRule):
     rule_id = "IR-subquery-indent"
     description = "Subqueries should be indented 4 spaces relative to their opening parenthesis."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql
 class IsNullRule(BaseRule):
     rule_id = "IR-is-null"
     description = "Standardize NULL comparison predicates to use IS NULL and IS NOT NULL operators."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

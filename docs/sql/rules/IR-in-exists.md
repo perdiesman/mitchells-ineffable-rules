@@ -4,7 +4,7 @@ EXISTS is preferred over IN with a subquery.
 
 - **Auto-Fixable**: No
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: Query Structure Rules
 - **Configuration Options**:
   - `enabled`: `true`
 

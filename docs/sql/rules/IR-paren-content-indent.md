@@ -4,7 +4,7 @@ Content inside multi-line parentheses should be indented 4 spaces relative to th
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: Query Structure Rules
 - **Configuration Options**:
   - `enabled`: `true`
 

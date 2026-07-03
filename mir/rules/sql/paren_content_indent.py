@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren, get_token
 class ParenContentIndentRule(BaseRule):
     rule_id = "IR-paren-content-indent"
     description = "Content inside multi-line parentheses should be indented 4 spaces relative to the opening parenthesis, and the closing parenthesis should align with it."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

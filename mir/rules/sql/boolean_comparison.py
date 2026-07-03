@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql
 class BooleanComparisonRule(BaseRule):
     rule_id = "IR-boolean-comparison"
     description = "Standardize boolean comparison predicates to use idiomatic boolean predicates."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

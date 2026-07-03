@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 class WhereMultiRule(BaseRule):
     rule_id = "IR-where-multi"
     description = "Each AND/OR clause in a multi-condition WHERE clause should start on its own line, indented at 4 spaces."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 class JoinOnMultiRule(BaseRule):
     rule_id = "IR-join-on-multi"
     description = "Split AND or OR conditions in JOIN ON clauses to separate lines, indented 4 spaces."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

@@ -4,7 +4,7 @@ Operators should have a single space on both sides.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: General Rules
 - **Configuration Options**:
   - `enabled`: `true`
 

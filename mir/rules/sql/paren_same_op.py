@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren, get_token
 class ParenSameOpRule(BaseRule):
     rule_id = "IR-paren-same-op"
     description = "Unnecessary parentheses around homogeneous logical conditions should be removed."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

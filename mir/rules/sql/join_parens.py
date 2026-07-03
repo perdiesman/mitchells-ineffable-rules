@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren, get_token
 class JoinParensRule(BaseRule):
     rule_id = "IR-join-parens"
     description = "Unnecessary parentheses around a JOIN clause should be removed."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

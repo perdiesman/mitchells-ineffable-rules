@@ -4,7 +4,7 @@ Function names should be the same case (default lowercase).
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: General Rules
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `case` (Default: `lowercase`): Target casing style for function names ('lowercase' or 'uppercase').

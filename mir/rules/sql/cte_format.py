@@ -6,7 +6,7 @@ from mir.rules.sql.indent import IndentRule
 class CteFormatRule(BaseRule):
     rule_id = "IR-cte-format"
     description = "Format layout of CTE WITH blocks: align subquery aliases, parenthesis and the final query block."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     

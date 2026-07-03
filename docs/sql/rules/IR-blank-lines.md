@@ -4,7 +4,7 @@ Limit consecutive blank lines to a configurable maximum.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: General Rules
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `max_blank_lines` (Default: `1`): Maximum number of consecutive blank lines allowed.

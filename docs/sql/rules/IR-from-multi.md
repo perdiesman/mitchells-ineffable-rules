@@ -4,7 +4,7 @@ Multi-table or JOINed FROM entries should be formatted with one entry per line, 
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: Query Structure Rules
 - **Configuration Options**:
   - `enabled`: `true`
 

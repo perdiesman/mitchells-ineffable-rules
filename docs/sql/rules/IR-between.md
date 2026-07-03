@@ -4,7 +4,7 @@ Standardize range predicate check of form 'a >= b AND a <= c' to 'a BETWEEN b AN
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: Query Structure Rules
 - **Configuration Options**:
   - `enabled`: `true`
 

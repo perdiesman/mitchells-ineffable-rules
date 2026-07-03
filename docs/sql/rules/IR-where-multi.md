@@ -4,7 +4,7 @@ Each AND/OR clause in a multi-condition WHERE clause should start on its own lin
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Select / View / Materialized View Rules
+- **Category**: Query Structure Rules
 - **Configuration Options**:
   - `enabled`: `true`
 

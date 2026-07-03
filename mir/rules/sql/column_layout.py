@@ -7,7 +7,7 @@ from mir.rules.sql.indent import IndentRule
 class ColumnLayoutRule(BaseRule):
     rule_id = "IR-column-layout"
     description = "On select, order by, group by, if all the columns fit on one line then put them on one line, otherwise wrap one per line."
-    category = "select/view/materialized view"
+    category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     
