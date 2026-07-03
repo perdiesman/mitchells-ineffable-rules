@@ -144,6 +144,19 @@ def generate_docs_to_path(
         rules_dir = os.path.join(lang_dir, "rules")
         os.makedirs(rules_dir, exist_ok=True)
         
+        # Load standard categories defined in package init
+        lang_cats = get_categories_for_language(lang, include_dirs)
+        has_categories = len(lang_cats) > 0
+        
+        # Clean up legacy flat md files if they exist in rules_dir
+        if has_categories and os.path.exists(rules_dir):
+            for file_name in os.listdir(rules_dir):
+                if file_name.endswith(".md") and os.path.isfile(os.path.join(rules_dir, file_name)):
+                    try:
+                        os.remove(os.path.join(rules_dir, file_name))
+                    except Exception:
+                        pass
+        
         lang_md = []
         lang_md.append(f"# {lang.upper()} Style Guide & Rules\n")
         lang_md.append(f"This document describes all {lang.upper()} linting rules supported by Mitchell's Ineffable Rules (IR) Linter.\n")
@@ -182,9 +195,20 @@ def generate_docs_to_path(
             lang_md.append("| :--- | :--- | :---: | :---: |")
             for r in cat_rules:
                 fixable_str = r.is_fixable.capitalize()
-                lang_md.append(f"| [`{r.rule_id}`](rules/{r.rule_id}.md) | {r.description} | {fixable_str} | [View Details](rules/{r.rule_id}.md) |")
+                if has_categories:
+                    link_path = f"rules/{r.category.lower()}/{r.rule_id}.md"
+                else:
+                    link_path = f"rules/{r.rule_id}.md"
+                lang_md.append(f"| [`{r.rule_id}`]({link_path}) | {r.description} | {fixable_str} | [View Details]({link_path}) |")
             lang_md.append("")
             
+            # Helper to find category of another rule
+            def find_rule_category(rule_id: str) -> str:
+                for rule_obj in rules:
+                    if rule_obj.rule_id == rule_id:
+                        return rule_obj.category.lower()
+                return None
+
             # Write individual rule files
             for r in cat_rules:
                 rule_md = []
@@ -212,7 +236,12 @@ def generate_docs_to_path(
                         if fallback:
                             parts = fallback.split(":")
                             if len(parts) == 2:
-                                opt_line += f" *Note: Value dynamically inherited from rule [`{parts[0]}`]({parts[0]}.md) -> `{parts[1]}` if not configured.*"
+                                if has_categories:
+                                    other_cat = find_rule_category(parts[0])
+                                    link_to_rule = f"../{other_cat}/{parts[0]}.md" if other_cat else f"{parts[0]}.md"
+                                else:
+                                    link_to_rule = f"{parts[0]}.md"
+                                opt_line += f" *Note: Value dynamically inherited from rule [`{parts[0]}`]({link_to_rule}) -> `{parts[1]}` if not configured.*"
                             else:
                                 opt_line += f" *Note: Value dynamically inherited from `{fallback}` if not configured.*"
                         rule_md.append(opt_line)
@@ -272,7 +301,12 @@ def generate_docs_to_path(
                         rule_md.append(val)
                         rule_md.append("```\n")
                             
-                rule_file_path = os.path.join(rules_dir, f"{r.rule_id}.md")
+                if has_categories:
+                    dest_dir = os.path.join(rules_dir, r.category.lower())
+                    os.makedirs(dest_dir, exist_ok=True)
+                    rule_file_path = os.path.join(dest_dir, f"{r.rule_id}.md")
+                else:
+                    rule_file_path = os.path.join(rules_dir, f"{r.rule_id}.md")
                 with open(rule_file_path, "w", encoding="utf-8") as f:
                     f.write("\n".join(rule_md))
             
