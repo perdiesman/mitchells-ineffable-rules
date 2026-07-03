@@ -6,8 +6,10 @@ Function names should be the same case (default lowercase).
 - **Enabled by Default**: Yes
 - **Category**: Select / View / Materialized View Rules
 - **Configuration Options**:
-  - `enabled`: `true`
-  - `case`: `lowercase`
+  - `enabled` (Default: `true`): Enable or disable this rule.
+  - `case` (Default: `lowercase`): Target casing style for function names ('lowercase' or 'uppercase').
+  - `additional_exclusions` (Default: `[]`): Additional keywords to exclude from function casing checks.
+  - `override_exclusions` (Default: `None`): Override the default list of excluded keywords entirely.
 
 #### ❌ Violating Example
 ```sql

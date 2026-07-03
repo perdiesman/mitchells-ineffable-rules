@@ -403,5 +403,29 @@ class TestRunnerIntegration(unittest.TestCase):
         config2.rule_configs = {"IR-line-length": {"max_length": 20}}
         self.assertEqual(run_linter(config2), 0)
 
+    def test_configurable_function_case(self):
+        # "foo" is parsed as a function call because it is followed by '('
+        query = "SELECT foo(id) FROM users;"
+        path = self.write_temp_file("test_function_case.sql", query)
+        
+        # Default: "foo" is not excluded, so it violates function case default lowercase (but is lowercase, wait, let's use uppercase "FOO(id)" so it violates)
+        query = "SELECT FOO(id) FROM users;"
+        with open(path, "w") as f:
+            f.write(query)
+            
+        config1 = Config()
+        config1.paths = [path]
+        config1.disable_all = True
+        config1.rules_to_enable = ["IR-function-case"]
+        self.assertEqual(run_linter(config1), 1) # Violates (FOO must be lowercase foo)
+        
+        # Configured: add "foo" to additional_exclusions (passes)
+        config2 = Config()
+        config2.paths = [path]
+        config2.disable_all = True
+        config2.rules_to_enable = ["IR-function-case"]
+        config2.rule_configs = {"IR-function-case": {"additional_exclusions": ["foo"]}}
+        self.assertEqual(run_linter(config2), 0)
+
 if __name__ == "__main__":
     unittest.main()
