@@ -1,6 +1,7 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
+from mir.rules.sql.indent import IndentRule
 
 class CaseLayoutRule(BaseRule):
     rule_id = "IR-case"
@@ -44,12 +45,33 @@ class CaseLayoutRule(BaseRule):
                         })
         return blocks
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _find_violations(self, content: str, rule_config: Dict[str, Any]) -> List[dict]:
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
         blocks = self._find_case_blocks(tokens)
         violations = []
         
+        # Resolve base_indent
+        base_indent_opt = self.get_config_value(
+            rule_config,
+            "base_indent",
+            default_value=0,
+            fallbacks=[(IndentRule, "base_indent")]
+        )
+        indent_size = 4
+        all_configs = rule_config.get("_all_configs", {})
+        lang = rule_config.get("_lang")
+        indent_config = all_configs.get(f"{lang}:IR-indent", all_configs.get("IR-indent", {}))
+        if isinstance(indent_config, dict):
+            indent_size = indent_config.get("indent_size", 4)
+            
+        if isinstance(base_indent_opt, str):
+            base_indent_spaces = len(base_indent_opt.replace("\t", " " * indent_size))
+        elif isinstance(base_indent_opt, int):
+            base_indent_spaces = base_indent_opt
+        else:
+            base_indent_spaces = 0
+            
         for block in blocks:
             start_idx = block["start_idx"]
             end_idx = block["end_idx"]
@@ -72,19 +94,20 @@ class CaseLayoutRule(BaseRule):
                     elif val_upper == "ELSE":
                         has_else = True
                         
+            line_start = content.rfind("\n", 0, case_tok["start"]) + 1
+            line_prefix = content[line_start:case_tok["start"]]
+            effective_prefix_len = max(0, len(line_prefix) - base_indent_spaces)
+            
             is_simple_inline = (
                 case_tok["line"] == end_tok["line"]
                 and when_count == 1
                 and not has_else
-                and len(original_text.strip()) <= 140
+                and (effective_prefix_len + len(original_text.strip())) <= 140
             )
             
             if is_simple_inline:
                 continue
                 
-            line_start = content.rfind("\n", 0, case_tok["start"]) + 1
-            line_prefix = content[line_start:case_tok["start"]]
-            
             select_indent = ""
             for char in line_prefix:
                 if char in (" ", "\t"):
@@ -192,7 +215,7 @@ class CaseLayoutRule(BaseRule):
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         
         for item in offending:
             tok = item["case_tok"]
@@ -208,7 +231,7 @@ class CaseLayoutRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         if not offending:
             return content
             

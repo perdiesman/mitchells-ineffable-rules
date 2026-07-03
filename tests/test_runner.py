@@ -382,5 +382,26 @@ class TestRunnerIntegration(unittest.TestCase):
             content = f.read()
             self.assertEqual(content, "SELECT * FROM users WHERE active = true AND FOO = 1;")
 
+    def test_dynamic_base_indent(self):
+        # Indented by 8 spaces
+        query = "        SELECT id, name\n        FROM users;"
+        path = self.write_temp_file("test_base_indent.sql", query)
+        
+        # Test 1: Indent rule with no configured base_indent (should auto-detect 8 spaces, so it passes)
+        config1 = Config()
+        config1.paths = [path]
+        config1.disable_all = True
+        config1.rules_to_enable = ["IR-indent"]
+        self.assertEqual(run_linter(config1), 0)
+        
+        # Test 2: Line length rule with no configured base_indent (should auto-detect 8 spaces, so it passes)
+        config2 = Config()
+        config2.paths = [path]
+        config2.disable_all = True
+        config2.rules_to_enable = ["IR-line-length"]
+        # Limit set to 20. Raw line 1 has 23 chars. Effective has 15 chars. (passes)
+        config2.rule_configs = {"IR-line-length": {"max_length": 20}}
+        self.assertEqual(run_linter(config2), 0)
+
 if __name__ == "__main__":
     unittest.main()

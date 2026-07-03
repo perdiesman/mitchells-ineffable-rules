@@ -9,7 +9,7 @@ from mir.engine.rules_loader import load_rules_for_language
 from mir.engine.disabler import get_disabled_rules_map, get_file_language
 from mir.engine.rules_help import get_supported_languages
 
-def resolve_rule_config(config: Config, rule_id: str, lang: str) -> dict:
+def resolve_rule_config(config: Config, rule_id: str, lang: str, detected_base_indent: str = None) -> dict:
     global_config = config.rule_configs.get(rule_id, {})
     lang_config = config.rule_configs.get(f"{lang}:{rule_id}", {})
     
@@ -21,7 +21,24 @@ def resolve_rule_config(config: Config, rule_id: str, lang: str) -> dict:
         
     rule_config["_all_configs"] = config.rule_configs
     rule_config["_lang"] = lang
+    
+    if "base_indent" not in rule_config and detected_base_indent is not None:
+        rule_config["base_indent"] = detected_base_indent
+        
     return rule_config
+
+def detect_base_indent(content: str) -> str:
+    for line in content.splitlines():
+        if line.strip():
+            indent = ""
+            for char in line:
+                if char in (" ", "\t"):
+                    indent += char
+                else:
+                    break
+            return indent
+    return ""
+
 
 def find_files(paths: List[str], include_dirs: List[str] = None) -> List[str]:
     """
@@ -105,6 +122,7 @@ def run_linter(config: Config) -> int:
             
     if content is not None:
         file_path = "<stdin>"
+        detected_base_indent = detect_base_indent(content)
         rules = load_rules_for_language(lang, config.include_dirs, config.rule_mode)
         active_rules = [
             rule for rule in rules
@@ -120,7 +138,7 @@ def run_linter(config: Config) -> int:
             if global_config is False or lang_config is False:
                 continue
                 
-            rule_config = resolve_rule_config(config, rule.rule_id, lang)
+            rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
             if config.disable_all:
                 is_enabled = (
                     (rule_config.get("enabled") is True) or
@@ -157,7 +175,7 @@ def run_linter(config: Config) -> int:
                 current_content = content
                 rules_to_fix = {item[1] for item in fixable}
                 for rule in rules_to_fix:
-                    rule_config = resolve_rule_config(config, rule.rule_id, lang)
+                    rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                     try:
                         current_content = rule.fix(current_content, file_path, rule_config)
                     except Exception as e:
@@ -175,7 +193,7 @@ def run_linter(config: Config) -> int:
                 current_content = content
                 rules_to_fix = {item[1] for item in fixable}
                 for rule in rules_to_fix:
-                    rule_config = resolve_rule_config(config, rule.rule_id, lang)
+                    rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                     try:
                         current_content = rule.fix(current_content, file_path, rule_config)
                     except Exception as e:
@@ -232,6 +250,7 @@ def run_linter(config: Config) -> int:
             
         # Parse comments to get disabled rules map
         disabled_map = get_disabled_rules_map(content, file_path)
+        detected_base_indent = detect_base_indent(content)
         
         # Get rule config mapping
         file_violations: List[Tuple[Violation, BaseRule]] = []
@@ -245,7 +264,7 @@ def run_linter(config: Config) -> int:
             if global_config is False or lang_config is False:
                 continue
                 
-            rule_config = resolve_rule_config(config, rule.rule_id, lang)
+            rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                  
             # Check for explicit enabled parameter, falling back to rule default
             if config.disable_all:
@@ -290,7 +309,7 @@ def run_linter(config: Config) -> int:
                 # on the accumulated content.
                 rules_to_fix = {item[1] for item in fixable}
                 for rule in rules_to_fix:
-                    rule_config = resolve_rule_config(config, rule.rule_id, lang)
+                    rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                     try:
                         current_content = rule.fix(current_content, file_path, rule_config)
                     except Exception as e:
@@ -318,7 +337,7 @@ def run_linter(config: Config) -> int:
                 current_content = content
                 rules_to_fix = {item[1] for item in fixable}
                 for rule in rules_to_fix:
-                    rule_config = resolve_rule_config(config, rule.rule_id, lang)
+                    rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                     try:
                         current_content = rule.fix(current_content, file_path, rule_config)
                     except Exception as e:
