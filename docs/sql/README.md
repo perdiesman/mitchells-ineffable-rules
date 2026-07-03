@@ -41,7 +41,6 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-cte-format`](rules/IR-cte-format.md) | Format layout of CTE WITH blocks: align subquery aliases, parenthesis and the final query block. | Yes | [View Details](rules/IR-cte-format.md) |
 | [`IR-paren-single`](rules/IR-paren-single.md) | Unnecessary parentheses around a single condition should be removed. | Yes | [View Details](rules/IR-paren-single.md) |
 | [`IR-in-exists`](rules/IR-in-exists.md) | EXISTS is preferred over IN with a subquery. | No | [View Details](rules/IR-in-exists.md) |
-| [`IR-duplicate-content`](rules/IR-duplicate-content.md) | Duplicate blocks of SQL of length >= 3 lines should be consolidated or simplified. | No | [View Details](rules/IR-duplicate-content.md) |
 | [`IR-function-case`](rules/IR-function-case.md) | Function names should be the same case (default lowercase). | Yes | [View Details](rules/IR-function-case.md) |
 | [`IR-paren-same-op`](rules/IR-paren-same-op.md) | Unnecessary parentheses around homogeneous logical conditions should be removed. | Yes | [View Details](rules/IR-paren-same-op.md) |
 | [`IR-join-null-coalesce`](rules/IR-join-null-coalesce.md) | Standardize predicate checks of form 'x = v OR x IS NULL' to COALESCE(x, v) = v. | Yes | [View Details](rules/IR-join-null-coalesce.md) |
