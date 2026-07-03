@@ -38,6 +38,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-clause-alignment`](rules/IR-clause-alignment.md) | Main query clause keywords (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT) must have the exact same indentation within the same query block when the query spans multiple lines. | Yes | [View Details](rules/IR-clause-alignment.md) |
 | [`IR-column-layout`](rules/IR-column-layout.md) | On select, order by, group by, if all the columns fit on one line then put them on one line, otherwise wrap one per line. | Yes | [View Details](rules/IR-column-layout.md) |
 | [`IR-blank-lines`](rules/IR-blank-lines.md) | Limit consecutive blank lines to a configurable maximum. | Yes | [View Details](rules/IR-blank-lines.md) |
+| [`IR-paren-multi`](rules/IR-paren-multi.md) | Parentheses wrapping multiple logical conditions in WHERE/ON clauses must format contents on separate lines, indented 4 spaces. | Yes | [View Details](rules/IR-paren-multi.md) |
 | [`IR-cte-format`](rules/IR-cte-format.md) | Format layout of CTE WITH blocks: align subquery aliases, parenthesis and the final query block. | Yes | [View Details](rules/IR-cte-format.md) |
 | [`IR-paren-single`](rules/IR-paren-single.md) | Unnecessary parentheses around a single condition should be removed. | Yes | [View Details](rules/IR-paren-single.md) |
 | [`IR-in-exists`](rules/IR-in-exists.md) | EXISTS is preferred over IN with a subquery. | No | [View Details](rules/IR-in-exists.md) |
