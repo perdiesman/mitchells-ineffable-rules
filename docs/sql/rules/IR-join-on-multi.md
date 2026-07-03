@@ -1,4 +1,4 @@
-# IR-join-and
+# IR-join-on-multi
 
 Split AND or OR conditions in JOIN ON clauses to separate lines, indented 4 spaces.
 
