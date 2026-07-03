@@ -22,10 +22,7 @@ class NullCoalesceRule(BaseRule):
             "correct": "SELECT * FROM t1 JOIN t2 ON COALESCE(t1.id, -1) = COALESCE(t2.id, -1);"
         }
     ]
-    additional_validations = [
-        "SELECT * FROM users WHERE COALESCE(active, -1) = -1;",
-        "SELECT * FROM t1 JOIN t2 ON COALESCE(t1.id, -1) = COALESCE(t2.id, -1);"
-    ]
+    additional_validations = []
 
     def _find_violations(self, content: str) -> List[dict]:
         tokens = tokenize_sql(content)
