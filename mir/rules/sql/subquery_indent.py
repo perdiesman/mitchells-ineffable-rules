@@ -135,10 +135,24 @@ class SubqueryIndentRule(BaseRule):
             expected_content_indent = item["content_indent"]
             expected_close_indent = item["close_indent"]
             
+            # Find actual indentation of the first non-empty content line to compute shift delta
+            first_content_indent_len = None
             for line_no in range(start_line, end_line):
                 line_text = lines[line_no - 1]
                 if line_text.strip() != "":
-                    lines[line_no - 1] = expected_content_indent + line_text.lstrip()
+                    stripped = line_text.lstrip()
+                    first_content_indent_len = len(line_text) - len(stripped)
+                    break
+                    
+            delta = len(expected_content_indent) - (first_content_indent_len or 0)
+            
+            for line_no in range(start_line, end_line):
+                line_text = lines[line_no - 1]
+                if line_text.strip() != "":
+                    stripped = line_text.lstrip()
+                    actual_indent_len = len(line_text) - len(stripped)
+                    new_indent_len = max(0, actual_indent_len + delta)
+                    lines[line_no - 1] = (" " * new_indent_len) + stripped
                     
             close_line_text = lines[end_line - 1]
             stripped_close = close_line_text.lstrip()
