@@ -40,6 +40,31 @@ class SubqueryIndentRule(BaseRule):
                         break
                         
                 if next_active and next_active["type"] == "KEYWORD" and next_active["value"].upper() == "SELECT":
+                    # Skip if this parenthesis is preceded by AS (which indicates a CTE definition)
+                    is_cte = False
+                    prev_idx = i - 1
+                    while prev_idx >= 0 and tokens[prev_idx]["type"] in ("WHITESPACE", "COMMENT"):
+                        prev_idx -= 1
+                    if prev_idx >= 0:
+                        t_prev = tokens[prev_idx]
+                        if t_prev["type"] == "KEYWORD" and t_prev["value"].upper() == "MATERIALIZED":
+                            prev_idx -= 1
+                            while prev_idx >= 0 and tokens[prev_idx]["type"] in ("WHITESPACE", "COMMENT"):
+                                prev_idx -= 1
+                            if prev_idx >= 0:
+                                t_prev = tokens[prev_idx]
+                                if t_prev["type"] == "KEYWORD" and t_prev["value"].upper() == "NOT":
+                                    prev_idx -= 1
+                                    while prev_idx >= 0 and tokens[prev_idx]["type"] in ("WHITESPACE", "COMMENT"):
+                                        prev_idx -= 1
+                                    if prev_idx >= 0:
+                                        t_prev = tokens[prev_idx]
+                        if t_prev["type"] == "KEYWORD" and t_prev["value"].upper() == "AS":
+                            is_cte = True
+                            
+                    if is_cte:
+                        continue
+                        
                     close_idx = find_matching_paren(tokens, i)
                     if close_idx is None:
                         continue
@@ -76,10 +101,14 @@ class SubqueryIndentRule(BaseRule):
                     needs_fix = False
                     
                     close_line_text = lines[end_line - 1]
-                    stripped_close = close_line_text.lstrip()
-                    if stripped_close.startswith(")"):
-                        actual_close_indent = close_line_text[:len(close_line_text) - len(stripped_close)]
-                        if actual_close_indent != expected_close_indent:
+                    close_tok = tokens[close_idx]
+                    line_start_char = content.rfind("\n", 0, close_tok["start"]) + 1
+                    relative_offset = close_tok["start"] - line_start_char
+                    prefix = close_line_text[:relative_offset]
+                    
+                    is_on_own_line = (prefix.strip() == "")
+                    if is_on_own_line:
+                        if prefix != expected_close_indent:
                             needs_fix = True
                     else:
                         needs_fix = True
@@ -151,14 +180,13 @@ class SubqueryIndentRule(BaseRule):
                 lines[line_no - 1] = (" " * new_indent_len) + stripped
                 
         close_line_text = lines[end_line - 1]
-        stripped_close = close_line_text.lstrip()
-        if stripped_close.startswith(")"):
-            lines[end_line - 1] = expected_close_indent + stripped_close
+        line_start_char = content.rfind("\n", 0, close_tok["start"]) + 1
+        relative_offset = close_tok["start"] - line_start_char
+        prefix = close_line_text[:relative_offset]
+        
+        if prefix.strip() == "":
+            lines[end_line - 1] = expected_close_indent + close_line_text[relative_offset:]
         else:
-            # Need to split the close parenthesis onto a new line!
-            line_start_char = content.rfind("\n", 0, close_tok["start"]) + 1
-            relative_offset = close_tok["start"] - line_start_char
-            
             part1 = close_line_text[:relative_offset]
             part2 = close_line_text[relative_offset:]
             lines[end_line - 1] = part1.rstrip() + "\n" + expected_close_indent + part2
@@ -195,8 +223,10 @@ class SubqueryIndentRule(BaseRule):
             delta = len(expected_content_indent) - (first_content_indent_len or 0)
             
             close_line_text = lines[end_line - 1]
-            stripped_close = close_line_text.lstrip()
-            close_correct = stripped_close.startswith(")") and close_line_text[:len(close_line_text) - len(stripped_close)] == expected_close_indent
+            line_start_char = content.rfind("\n", 0, target["close_tok"]["start"]) + 1
+            relative_offset = target["close_tok"]["start"] - line_start_char
+            prefix = close_line_text[:relative_offset]
+            close_correct = (prefix.strip() == "") and prefix == expected_close_indent
             
             if delta == 0 and close_correct:
                 processed.add((target["open_line"], target["close_line"]))
