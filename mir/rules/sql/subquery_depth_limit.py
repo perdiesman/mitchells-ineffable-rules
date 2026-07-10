@@ -9,7 +9,9 @@ class SubqueryDepthLimitRule(BaseRule):
     is_fixable = "no"
     enabled_by_default = True
     
-    default_config = {}
+    default_config = {
+        "severity": "warning"
+    }
     config_options = {
         "max_depth": {
             "default": 3,

@@ -91,4 +91,7 @@ class BaseRule:
                     return other_rule_cls.default_config[other_param]
                     
         # 3. Fall back to current rule defaults
+        if hasattr(self, "default_config") and param_name in self.default_config:
+            return self.default_config[param_name]
+            
         return default_value

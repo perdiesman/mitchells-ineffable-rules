@@ -235,10 +235,14 @@ def run_linter(config: Config) -> int:
                 else:
                     break
             
+            has_errors = False
             print(current_content, end="")
             for v, rule in unfixable_violations:
+                rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
+                if rule.get_config_value(rule_config, "severity", "error") != "warning":
+                    has_errors = True
                 print(format_violation(v, file_path, config.verbose, rule.description), file=sys.stderr)
-            return 1 if unfixable_violations else 0
+            return 1 if has_errors else 0
             
         elif config.dry_run:
             if fixable:
@@ -259,14 +263,22 @@ def run_linter(config: Config) -> int:
                     )
                     sys.stdout.writelines(diff)
                     
+            has_errors = False
             for v, rule in file_violations:
+                rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
+                if rule.get_config_value(rule_config, "severity", "error") != "warning":
+                    has_errors = True
                 print(format_violation(v, file_path, config.verbose, rule.description), file=sys.stderr)
-            return 1
+            return 1 if has_errors else 0
             
         else:
+            has_errors = False
             for v, rule in file_violations:
+                rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
+                if rule.get_config_value(rule_config, "severity", "error") != "warning":
+                    has_errors = True
                 print(format_violation(v, file_path, config.verbose, rule.description))
-            return 1
+            return 1 if has_errors else 0
 
     files = find_files(config.paths, config.include_dirs)
     if not files:
@@ -278,6 +290,7 @@ def run_linter(config: Config) -> int:
     rules_by_lang: Dict[str, List[BaseRule]] = {}
     
     total_violations_reported = 0
+    total_errors_reported = 0
     
     for file_path in files:
         lang = get_file_language(file_path)
@@ -431,6 +444,9 @@ def run_linter(config: Config) -> int:
             for v, rule in unfixable_violations:
                 print(format_violation(v, file_path, config.verbose, rule.description))
                 total_violations_reported += 1
+                rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
+                if rule.get_config_value(rule_config, "severity", "error") != "warning":
+                    total_errors_reported += 1
                 
         elif config.dry_run:
             # Dry-run mode:
@@ -460,17 +476,27 @@ def run_linter(config: Config) -> int:
                         print(line, end="")
                     if not diff[-1].endswith("\n"):
                         print()
+                    for v, rule in fixable:
+                        rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
+                        if rule.get_config_value(rule_config, "severity", "error") != "warning":
+                            total_errors_reported += 1
                     total_violations_reported += len(fixable)
             
             # 2. Report unfixable errors
             for v, rule in unfixable:
                 print(format_violation(v, file_path, config.verbose, rule.description))
                 total_violations_reported += 1
+                rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
+                if rule.get_config_value(rule_config, "severity", "error") != "warning":
+                    total_errors_reported += 1
                 
         else:
             # Check mode (default): report everything
             for v, rule in file_violations:
                 print(format_violation(v, file_path, config.verbose, rule.description))
                 total_violations_reported += 1
+                rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
+                if rule.get_config_value(rule_config, "severity", "error") != "warning":
+                    total_errors_reported += 1
                 
-    return 1 if total_violations_reported > 0 else 0
+    return 1 if total_errors_reported > 0 else 0
