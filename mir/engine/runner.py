@@ -70,11 +70,13 @@ def find_files(paths: List[str], include_dirs: List[str] = None) -> List[str]:
                         
     return sorted(list(set(files_to_lint)))
 
-def format_violation(violation: Violation, file_path: str, verbose: bool, rule_desc: str) -> str:
+def format_violation(violation: Violation, file_path: str, verbose: bool, rule_desc: str, severity: str = "error") -> str:
     """
     Formats a violation according to the verbose flag.
     """
     base_msg = f"{violation.rule_id} {file_path}:{violation.line_number}"
+    if severity == "warning":
+        base_msg = f"[WARN] {base_msg}"
     if not verbose:
         return base_msg
     
@@ -239,9 +241,10 @@ def run_linter(config: Config) -> int:
             print(current_content, end="")
             for v, rule in unfixable_violations:
                 rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
-                if rule.get_config_value(rule_config, "severity", "error") != "warning":
+                severity = rule.get_config_value(rule_config, "severity", "error")
+                if severity != "warning":
                     has_errors = True
-                print(format_violation(v, file_path, config.verbose, rule.description), file=sys.stderr)
+                print(format_violation(v, file_path, config.verbose, rule.description, severity), file=sys.stderr)
             return 1 if has_errors else 0
             
         elif config.dry_run:
@@ -266,18 +269,20 @@ def run_linter(config: Config) -> int:
             has_errors = False
             for v, rule in file_violations:
                 rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
-                if rule.get_config_value(rule_config, "severity", "error") != "warning":
+                severity = rule.get_config_value(rule_config, "severity", "error")
+                if severity != "warning":
                     has_errors = True
-                print(format_violation(v, file_path, config.verbose, rule.description), file=sys.stderr)
+                print(format_violation(v, file_path, config.verbose, rule.description, severity), file=sys.stderr)
             return 1 if has_errors else 0
             
         else:
             has_errors = False
             for v, rule in file_violations:
                 rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
-                if rule.get_config_value(rule_config, "severity", "error") != "warning":
+                severity = rule.get_config_value(rule_config, "severity", "error")
+                if severity != "warning":
                     has_errors = True
-                print(format_violation(v, file_path, config.verbose, rule.description))
+                print(format_violation(v, file_path, config.verbose, rule.description, severity))
             return 1 if has_errors else 0
 
     files = find_files(config.paths, config.include_dirs)
@@ -442,10 +447,11 @@ def run_linter(config: Config) -> int:
             
             # 2. Report unfixable errors
             for v, rule in unfixable_violations:
-                print(format_violation(v, file_path, config.verbose, rule.description))
-                total_violations_reported += 1
                 rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
-                if rule.get_config_value(rule_config, "severity", "error") != "warning":
+                severity = rule.get_config_value(rule_config, "severity", "error")
+                print(format_violation(v, file_path, config.verbose, rule.description, severity))
+                total_violations_reported += 1
+                if severity != "warning":
                     total_errors_reported += 1
                 
         elif config.dry_run:
@@ -484,19 +490,21 @@ def run_linter(config: Config) -> int:
             
             # 2. Report unfixable errors
             for v, rule in unfixable:
-                print(format_violation(v, file_path, config.verbose, rule.description))
-                total_violations_reported += 1
                 rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
-                if rule.get_config_value(rule_config, "severity", "error") != "warning":
+                severity = rule.get_config_value(rule_config, "severity", "error")
+                print(format_violation(v, file_path, config.verbose, rule.description, severity))
+                total_violations_reported += 1
+                if severity != "warning":
                     total_errors_reported += 1
                 
         else:
             # Check mode (default): report everything
             for v, rule in file_violations:
-                print(format_violation(v, file_path, config.verbose, rule.description))
-                total_violations_reported += 1
                 rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
-                if rule.get_config_value(rule_config, "severity", "error") != "warning":
+                severity = rule.get_config_value(rule_config, "severity", "error")
+                print(format_violation(v, file_path, config.verbose, rule.description, severity))
+                total_violations_reported += 1
+                if severity != "warning":
                     total_errors_reported += 1
                 
     return 1 if total_errors_reported > 0 else 0
