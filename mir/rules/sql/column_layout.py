@@ -146,14 +146,14 @@ class ColumnLayoutRule(BaseRule):
                         i = next_idx
                         
                 if keyword:
-                    # Resolve indentation of keyword line
+                    # Resolve indentation of keyword line (the leading whitespace of the line)
                     line_text = content[line_start_idx:w_start]
                     indentation = ""
                     for char in line_text:
                         if char in (" ", "\t"):
                             indentation += char
                         else:
-                            indentation = ""
+                            break
                             
                     # Parse the list of expressions starting immediately after the keyword
                     list_start = keyword_end
