@@ -187,11 +187,28 @@ class ParenSameOpRule(BaseRule):
             open_end = open_tok["end"]
             open_rep = ""
             
+            # We only need a space if the token before '(' and the token after '(' are both "word-like"
+            # (alphanumeric/operators) to prevent them from merging together (e.g. WHERE(active -> WHERE active).
+            need_space = False
+            if open_idx - 1 >= 0 and open_idx + 1 < len(tokens):
+                prev_t = tokens[open_idx - 1]
+                next_t = tokens[open_idx + 1]
+                
+                # If there's whitespace immediately inside the parenthesis, the next token is the one after the whitespace
+                if next_t["type"] == "WHITESPACE" and open_idx + 2 < len(tokens):
+                    next_t = tokens[open_idx + 2]
+                
+                def is_word_like(t):
+                    return t["type"] in ("KEYWORD", "IDENTIFIER", "NUMBER", "OPERATOR") or (t["type"] == "OTHER" and t["value"].isalnum())
+                    
+                if is_word_like(prev_t) and is_word_like(next_t):
+                    need_space = True
+            
             if open_idx + 1 < len(tokens) and tokens[open_idx + 1]["type"] == "WHITESPACE":
                 open_end = tokens[open_idx + 1]["end"]
-                if open_idx - 1 >= 0 and tokens[open_idx - 1]["type"] != "WHITESPACE":
+                if open_idx - 1 >= 0 and tokens[open_idx - 1]["type"] != "WHITESPACE" and need_space:
                     open_rep = " "
-            elif open_idx - 1 >= 0 and tokens[open_idx - 1]["type"] != "WHITESPACE":
+            elif open_idx - 1 >= 0 and tokens[open_idx - 1]["type"] != "WHITESPACE" and need_space:
                 open_rep = " "
                 
             close_start = close_tok["start"]

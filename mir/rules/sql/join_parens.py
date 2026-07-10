@@ -80,10 +80,51 @@ class JoinParensRule(BaseRule):
         if not offending_pairs:
             return content
             
+        tokens = tokenize_sql(content)
         edits = []
         for pair in offending_pairs:
-            edits.append((pair["open_tok"]["start"], pair["open_tok"]["end"], ""))
-            edits.append((pair["close_tok"]["start"], pair["close_tok"]["end"], ""))
+            open_tok = pair["open_tok"]
+            close_tok = pair["close_tok"]
+            
+            try:
+                open_idx = tokens.index(open_tok)
+                close_idx = tokens.index(close_tok)
+            except ValueError:
+                continue
+                
+            open_start = open_tok["start"]
+            open_end = open_tok["end"]
+            open_rep = ""
+            
+            need_space = False
+            if open_idx - 1 >= 0 and open_idx + 1 < len(tokens):
+                prev_t = tokens[open_idx - 1]
+                next_t = tokens[open_idx + 1]
+                
+                if next_t["type"] == "WHITESPACE" and open_idx + 2 < len(tokens):
+                    next_t = tokens[open_idx + 2]
+                
+                def is_word_like(t):
+                    return t["type"] in ("KEYWORD", "IDENTIFIER", "NUMBER", "OPERATOR") or (t["type"] == "OTHER" and t["value"].isalnum())
+                    
+                if is_word_like(prev_t) and is_word_like(next_t):
+                    need_space = True
+                    
+            if open_idx + 1 < len(tokens) and tokens[open_idx + 1]["type"] == "WHITESPACE":
+                open_end = tokens[open_idx + 1]["end"]
+                if open_idx - 1 >= 0 and tokens[open_idx - 1]["type"] != "WHITESPACE" and need_space:
+                    open_rep = " "
+            elif open_idx - 1 >= 0 and tokens[open_idx - 1]["type"] != "WHITESPACE" and need_space:
+                open_rep = " "
+                
+            close_start = close_tok["start"]
+            close_end = close_tok["end"]
+            
+            if close_idx - 1 >= 0 and tokens[close_idx - 1]["type"] == "WHITESPACE":
+                close_start = tokens[close_idx - 1]["start"]
+                
+            edits.append((open_start, open_end, open_rep))
+            edits.append((close_start, close_end, ""))
             
         edits.sort(key=lambda x: x[0], reverse=True)
         chars = list(content)
