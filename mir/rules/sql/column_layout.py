@@ -70,7 +70,10 @@ class ColumnLayoutRule(BaseRule):
                 
             # String / comment states
             if in_string:
-                if c == string_char:
+                if c == '\n':
+                    line_number += 1
+                    line_start_idx = i + 1
+                elif c == string_char:
                     if i + 1 < n and content[i + 1] == string_char:
                         i += 2
                         continue
@@ -80,12 +83,17 @@ class ColumnLayoutRule(BaseRule):
                 
             if in_single_comment:
                 if c == '\n':
+                    line_number += 1
+                    line_start_idx = i + 1
                     in_single_comment = False
                 i += 1
                 continue
                 
             if in_multi_comment:
-                if c == '*' and i + 1 < n and content[i + 1] == '/':
+                if c == '\n':
+                    line_number += 1
+                    line_start_idx = i + 1
+                elif c == '*' and i + 1 < n and content[i + 1] == '/':
                     in_multi_comment = False
                     i += 2
                     continue
@@ -305,6 +313,13 @@ class ColumnLayoutRule(BaseRule):
                     
                     # Prevent formatting if there is an inline comment inside the clause text
                     clause_text = content[w_start:list_end]
+                    
+                    # Update line_number and line_start_idx for all newlines skipped during list scanning
+                    for idx in range(w_start, list_end):
+                        if content[idx] == '\n':
+                            line_number += 1
+                            line_start_idx = idx + 1
+                            
                     if "--" in clause_text or "/*" in clause_text:
                         i = list_end
                         continue
@@ -323,6 +338,9 @@ class ColumnLayoutRule(BaseRule):
                     i = list_end
                     continue
                     
+            if (c.isalpha() or c == '_'):
+                continue
+                
             i += 1
             
         return clauses
