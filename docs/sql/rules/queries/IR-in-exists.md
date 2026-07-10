@@ -7,6 +7,7 @@ EXISTS is preferred over IN with a subquery.
 - **Category**: Query Structure Rules
 - **Configuration Options**:
   - `enabled`: `true`
+  - `severity`: `warning`
 
 #### ❌ Violating Example
 ```sql

@@ -185,7 +185,14 @@ rule_mode: extend
 rules:
   IR-line-length:
     max_length: 120
+  IR-in-exists:
+    severity: warning # Override severity to warning (defaults to error if not specified)
 ```
+
+### Configurable Severity (`severity`)
+
+By default, any unfixable violation (or check-mode violation) is treated as an **error** and causes the linter to return a non-zero exit code. You can configure any rule to be treated as a **warning** instead by setting the `severity` config option to `warning` in `.ir-config.yaml`. Warnings are still printed to output, but they do not cause the linter to return a failure exit code.
+
 
 ### Rule Configuration Fallbacks
 

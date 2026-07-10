@@ -30,7 +30,6 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
 | [`IR-subquery-compact`](rules/queries/IR-subquery-compact.md) | Multiline subquery sources inside FROM or JOIN clauses should be compacted to a single line if they fit within 140 characters. | Yes | [View Details](rules/queries/IR-subquery-compact.md) |
-| [`IR-subquery-depth-limit`](rules/queries/IR-subquery-depth-limit.md) | Subquery nesting depth should not exceed the configured limit (default: 3). When over the limit, Common Table Expressions (CTEs) are preferred. | No | [View Details](rules/queries/IR-subquery-depth-limit.md) |
 | [`IR-null-coalesce`](rules/queries/IR-null-coalesce.md) | Standardize nullable equality predicates to COALESCE(x, -1) form. | Yes | [View Details](rules/queries/IR-null-coalesce.md) |
 | [`IR-empty-command`](rules/queries/IR-empty-command.md) | Remove empty SQL commands, such as duplicate semicolons or leading semicolons. | Yes | [View Details](rules/queries/IR-empty-command.md) |
 | [`IR-table-alias-as`](rules/queries/IR-table-alias-as.md) | Table and subquery aliases should not use the AS keyword. | Yes | [View Details](rules/queries/IR-table-alias-as.md) |
@@ -45,6 +44,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-distinct-parentheses`](rules/queries/IR-distinct-parentheses.md) | Remove redundant parentheses around DISTINCT arguments, preserving DISTINCT ON (col) syntax. | Yes | [View Details](rules/queries/IR-distinct-parentheses.md) |
 | [`IR-expression-split`](rules/queries/IR-expression-split.md) | Long lines should split on function/expression parentheses, and optionally on additive/logical operators if still too long. | Yes | [View Details](rules/queries/IR-expression-split.md) |
 | [`IR-between`](rules/queries/IR-between.md) | Standardize range predicate check of form 'a >= b AND a <= c' to 'a BETWEEN b AND c'. | Yes | [View Details](rules/queries/IR-between.md) |
+| [`IR-subquery-depth-limit`](rules/queries/IR-subquery-depth-limit.md) | Subquery nesting depth should not exceed the configured limit (default: 3). When over the limit, Common Table Expressions (CTEs) are preferred. | No | [View Details](rules/queries/IR-subquery-depth-limit.md) |
 | [`IR-boolean-comparison`](rules/queries/IR-boolean-comparison.md) | Standardize boolean comparison predicates to use idiomatic boolean predicates. | Yes | [View Details](rules/queries/IR-boolean-comparison.md) |
 | [`IR-alias-as`](rules/queries/IR-alias-as.md) | Column aliases must use the AS keyword. | Yes | [View Details](rules/queries/IR-alias-as.md) |
 | [`IR-clause-alignment`](rules/queries/IR-clause-alignment.md) | Main query clause keywords (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT) must have the exact same indentation within the same query block when the query spans multiple lines. | Yes | [View Details](rules/queries/IR-clause-alignment.md) |
