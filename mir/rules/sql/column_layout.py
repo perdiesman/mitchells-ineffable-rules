@@ -118,8 +118,8 @@ class ColumnLayoutRule(BaseRule):
                 i += 1
                 continue
                 
-            # Match keywords at top level
-            if paren_level == 0 and (c.isalpha() or c == '_'):
+            # Match keywords
+            if (c.isalpha() or c == '_'):
                 w_start = i
                 w_line = line_number
                 while i < n and (content[i].isalnum() or content[i] == '_'):
