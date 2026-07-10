@@ -179,7 +179,7 @@ def generate_docs_to_path(
         lang_md.append("")
         
         for cat in all_categories:
-            cat_rules = grouped_rules.get(cat, [])
+            cat_rules = sorted(grouped_rules.get(cat, []), key=lambda x: x.rule_id)
             cat_title = get_category_title(cat, lang, include_dirs)
             
             lang_md.append(f"## {cat_title}\n")
