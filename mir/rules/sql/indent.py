@@ -139,4 +139,5 @@ class IndentRule(BaseRule):
             fixed_lines.append(" " * final_spaces + content_part)
             
         ending = "\r\n" if "\r\n" in content else "\n"
-        return ending.join(fixed_lines)
+        eof_ending = ending if content.endswith(ending) else ""
+        return ending.join(fixed_lines) + eof_ending

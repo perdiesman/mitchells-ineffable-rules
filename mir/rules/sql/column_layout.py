@@ -242,6 +242,8 @@ class ColumnLayoutRule(BaseRule):
                             
                             if keyword.startswith("SELECT"):
                                 boundaries = {"from", "where", "group", "order", "limit", "offset", "union", "intersect", "except"}
+                            elif keyword.startswith("GROUP"):
+                                boundaries = {"having", "order", "limit", "offset", "union", "intersect", "except"}
                             else:
                                 boundaries = {"limit", "offset", "union", "intersect", "except"}
                                 

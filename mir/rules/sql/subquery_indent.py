@@ -81,6 +81,8 @@ class SubqueryIndentRule(BaseRule):
                         actual_close_indent = close_line_text[:len(close_line_text) - len(stripped_close)]
                         if actual_close_indent != expected_close_indent:
                             needs_fix = True
+                    else:
+                        needs_fix = True
                             
                     for line_no in range(start_line, end_line):
                         line_text = lines[line_no - 1]
@@ -121,21 +123,68 @@ class SubqueryIndentRule(BaseRule):
             )
         return violations
 
-    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        offending = self._find_violations(content)
-        if not offending:
-            return content
-            
+    def _fix_one(self, content: str, item: dict) -> str:
         lines = content.splitlines()
-        offending.sort(key=lambda x: x["open_line"], reverse=True)
+        start_line = item["open_line"] + 1
+        end_line = item["close_line"]
+        expected_content_indent = item["content_indent"]
+        expected_close_indent = item["close_indent"]
+        close_tok = item["close_tok"]
         
-        for item in offending:
-            start_line = item["open_line"] + 1
-            end_line = item["close_line"]
-            expected_content_indent = item["content_indent"]
-            expected_close_indent = item["close_indent"]
+        # Find actual indentation of the first non-empty content line to compute shift delta
+        first_content_indent_len = None
+        for line_no in range(start_line, end_line):
+            line_text = lines[line_no - 1]
+            if line_text.strip() != "":
+                stripped = line_text.lstrip()
+                first_content_indent_len = len(line_text) - len(stripped)
+                break
+                
+        delta = len(expected_content_indent) - (first_content_indent_len or 0)
+        
+        for line_no in range(start_line, end_line):
+            line_text = lines[line_no - 1]
+            if line_text.strip() != "":
+                stripped = line_text.lstrip()
+                actual_indent_len = len(line_text) - len(stripped)
+                new_indent_len = max(0, actual_indent_len + delta)
+                lines[line_no - 1] = (" " * new_indent_len) + stripped
+                
+        close_line_text = lines[end_line - 1]
+        stripped_close = close_line_text.lstrip()
+        if stripped_close.startswith(")"):
+            lines[end_line - 1] = expected_close_indent + stripped_close
+        else:
+            # Need to split the close parenthesis onto a new line!
+            line_start_char = content.rfind("\n", 0, close_tok["start"]) + 1
+            relative_offset = close_tok["start"] - line_start_char
             
-            # Find actual indentation of the first non-empty content line to compute shift delta
+            part1 = close_line_text[:relative_offset]
+            part2 = close_line_text[relative_offset:]
+            lines[end_line - 1] = part1.rstrip() + "\n" + expected_close_indent + part2
+            
+        ending = "\n" if content.endswith("\n") else ""
+        return "\n".join(lines) + ending
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        processed = set()
+        while True:
+            offending = self._find_violations(content)
+            offending = [item for item in offending if (item["open_line"], item["close_line"]) not in processed]
+            if not offending:
+                break
+                
+            # Fix from bottom to top to minimize cascading shifts
+            offending.sort(key=lambda x: x["open_line"])
+            target = offending[-1]
+            
+            # Check if this target will result in no changes (delta == 0 and close paren is already correct)
+            lines = content.splitlines()
+            start_line = target["open_line"] + 1
+            end_line = target["close_line"]
+            expected_content_indent = target["content_indent"]
+            expected_close_indent = target["close_indent"]
+            
             first_content_indent_len = None
             for line_no in range(start_line, end_line):
                 line_text = lines[line_no - 1]
@@ -143,21 +192,15 @@ class SubqueryIndentRule(BaseRule):
                     stripped = line_text.lstrip()
                     first_content_indent_len = len(line_text) - len(stripped)
                     break
-                    
             delta = len(expected_content_indent) - (first_content_indent_len or 0)
             
-            for line_no in range(start_line, end_line):
-                line_text = lines[line_no - 1]
-                if line_text.strip() != "":
-                    stripped = line_text.lstrip()
-                    actual_indent_len = len(line_text) - len(stripped)
-                    new_indent_len = max(0, actual_indent_len + delta)
-                    lines[line_no - 1] = (" " * new_indent_len) + stripped
-                    
             close_line_text = lines[end_line - 1]
             stripped_close = close_line_text.lstrip()
-            if stripped_close.startswith(")"):
-                lines[end_line - 1] = expected_close_indent + stripped_close
+            close_correct = stripped_close.startswith(")") and close_line_text[:len(close_line_text) - len(stripped_close)] == expected_close_indent
+            
+            if delta == 0 and close_correct:
+                processed.add((target["open_line"], target["close_line"]))
+                continue
                 
-        ending = "\n" if content.endswith("\n") else ""
-        return "\n".join(lines) + ending
+            content = self._fix_one(content, target)
+        return content
