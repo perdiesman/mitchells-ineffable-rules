@@ -43,11 +43,22 @@ class ExpressionSplitRule(BaseRule):
             if len(line) <= max_len:
                 continue
                 
-            # Find the first open parenthesis ( on this line
+            # Find the first open parenthesis ( on this line that is not preceded by another '('
             line_tokens = [tok for tok in tokens if tok["line"] == line_no]
             open_tok = None
             for tok in line_tokens:
                 if tok["type"] == "PAREN" and tok["value"] == "(":
+                    try:
+                        idx = tokens.index(tok)
+                        prev_active = None
+                        for p_idx in range(idx - 1, -1, -1):
+                            if tokens[p_idx]["type"] != "WHITESPACE":
+                                prev_active = tokens[p_idx]
+                                break
+                        if prev_active and prev_active["type"] == "PAREN" and prev_active["value"] == "(":
+                            continue
+                    except ValueError:
+                        pass
                     open_tok = tok
                     break
                     

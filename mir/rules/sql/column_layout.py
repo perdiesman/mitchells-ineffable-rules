@@ -158,6 +158,7 @@ class ColumnLayoutRule(BaseRule):
                     # Parse the list of expressions starting immediately after the keyword
                     list_start = keyword_end
                     expressions = []
+                    expression_indents = []
                     
                     list_paren = 0
                     list_string = False
@@ -252,6 +253,19 @@ class ColumnLayoutRule(BaseRule):
                                 expr = re.sub(r"\s+", " ", expr)
                             if expr:
                                 expressions.append(expr)
+                                # Find original base indentation of this expression
+                                actual_start = current_expr_start
+                                while actual_start < j and content[actual_start].isspace():
+                                    actual_start += 1
+                                line_start = content.rfind("\n", 0, actual_start) + 1
+                                line_prefix = content[line_start:actual_start]
+                                expr_base_indent = ""
+                                for char in line_prefix:
+                                    if char in (" ", "\t"):
+                                        expr_base_indent += char
+                                    else:
+                                        break
+                                expression_indents.append(expr_base_indent)
                             last_non_space_idx = j + 1
                             j += 1
                             current_expr_start = j
@@ -273,6 +287,19 @@ class ColumnLayoutRule(BaseRule):
                                 
                         if expr:
                             expressions.append(expr)
+                            # Find original base indentation of this expression
+                            actual_start = current_expr_start
+                            while actual_start < j and content[actual_start].isspace():
+                                actual_start += 1
+                            line_start = content.rfind("\n", 0, actual_start) + 1
+                            line_prefix = content[line_start:actual_start]
+                            expr_base_indent = ""
+                            for char in line_prefix:
+                                if char in (" ", "\t"):
+                                    expr_base_indent += char
+                                else:
+                                    break
+                            expression_indents.append(expr_base_indent)
                             
                     list_end = last_non_space_idx
                     
@@ -289,6 +316,7 @@ class ColumnLayoutRule(BaseRule):
                         "list_start": list_start,
                         "list_end": list_end,
                         "expressions": expressions,
+                        "expression_indents": expression_indents,
                         "line_number": w_line,
                         "indentation": indentation
                     })
@@ -299,37 +327,40 @@ class ColumnLayoutRule(BaseRule):
             
         return clauses
 
-    def _reindent_multiline(self, text: str, new_indent: str) -> str:
+    def _reindent_multiline(self, text: str, new_indent: str, orig_base_indent: str) -> str:
         lines = text.splitlines()
         if len(lines) <= 1:
             return text
-        other_lines = [l for l in lines[1:] if l.strip() != ""]
-        common_ws = None
-        for l in other_lines:
-            ws = ""
-            for char in l:
-                if char in (" ", "\t"):
-                    ws += char
-                else:
-                    break
-            if common_ws is None:
-                common_ws = ws
+        
+        orig_base_len = len(orig_base_indent)
+        
+        # Find leading whitespace of the first line of the expression text
+        first_line = lines[0]
+        first_ws = ""
+        for char in first_line:
+            if char in (" ", "\t"):
+                first_ws += char
             else:
-                common_prefix = []
-                for c1, c2 in zip(common_ws, ws):
-                    if c1 == c2:
-                        common_prefix.append(c1)
-                    else:
-                        break
-                common_ws = "".join(common_prefix)
-        if common_ws is None:
-            common_ws = ""
-        rebuilt = [new_indent + lines[0]]
+                break
+        first_indent = len(first_ws)
+        
+        # Rebuild the first line starting with new_indent
+        rebuilt = [new_indent + first_line[first_indent:]]
         for l in lines[1:]:
             if l.strip() == "":
                 rebuilt.append("")
             else:
-                rebuilt.append(new_indent + l[len(common_ws):])
+                # Find leading whitespace of this line
+                l_ws = ""
+                for char in l:
+                    if char in (" ", "\t"):
+                        l_ws += char
+                    else:
+                        break
+                l_indent = len(l_ws)
+                # Compute relative indentation relative to orig_base_len
+                relative_indent = max(0, l_indent - orig_base_len)
+                rebuilt.append(new_indent + " " * relative_indent + l[l_indent:])
         return "\n".join(rebuilt)
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
@@ -396,9 +427,9 @@ class ColumnLayoutRule(BaseRule):
                 inner_indent = indentation + (" " * indent_size)
                 
                 formatted_exprs = []
-                for expr in expressions:
+                for expr, orig_indent in zip(expressions, cl.get("expression_indents", [""] * len(expressions))):
                     if "\n" in expr:
-                        formatted_exprs.append(self._reindent_multiline(expr, inner_indent))
+                        formatted_exprs.append(self._reindent_multiline(expr, inner_indent, orig_indent))
                     else:
                         formatted_exprs.append(f"{inner_indent}{expr}")
                         
@@ -473,9 +504,9 @@ class ColumnLayoutRule(BaseRule):
             else:
                 inner_indent = indentation + (" " * indent_size)
                 formatted_exprs = []
-                for expr in expressions:
+                for expr, orig_indent in zip(expressions, cl.get("expression_indents", [""] * len(expressions))):
                     if "\n" in expr:
-                        formatted_exprs.append(self._reindent_multiline(expr, inner_indent))
+                        formatted_exprs.append(self._reindent_multiline(expr, inner_indent, orig_indent))
                     else:
                         formatted_exprs.append(f"{inner_indent}{expr}")
                 formatted = f"{keyword}{ending}" + f",{ending}".join(formatted_exprs)
