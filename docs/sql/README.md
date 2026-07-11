@@ -22,6 +22,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-keyword-case`](rules/general/IR-keyword-case.md) | SQL keywords must be in uppercase. | Yes | [View Details](rules/general/IR-keyword-case.md) |
 | [`IR-line-length`](rules/general/IR-line-length.md) | Lines must not exceed the configured maximum length. | No | [View Details](rules/general/IR-line-length.md) |
 | [`IR-operator-spacing`](rules/general/IR-operator-spacing.md) | Operators should have a single space on both sides. | Yes | [View Details](rules/general/IR-operator-spacing.md) |
+| [`IR-plpgsql-keyword-case`](rules/general/IR-plpgsql-keyword-case.md) | Procedural PL/pgSQL keywords and trigger variables must be in uppercase. | Yes | [View Details](rules/general/IR-plpgsql-keyword-case.md) |
 | [`IR-redundant-keywords`](rules/general/IR-redundant-keywords.md) | Remove redundant implied keywords like INNER, OUTER, and ASC. | Yes | [View Details](rules/general/IR-redundant-keywords.md) |
 | [`IR-trailing-semicolon`](rules/general/IR-trailing-semicolon.md) | Enforce that the last SQL statement ends with a trailing semicolon, placed immediately after the statement text. | Yes | [View Details](rules/general/IR-trailing-semicolon.md) |
 
@@ -43,6 +44,8 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-from-multi`](rules/queries/IR-from-multi.md) | Multi-table or JOINed FROM entries should be formatted with one entry per line, indented at 4 spaces. | Yes | [View Details](rules/queries/IR-from-multi.md) |
 | [`IR-from-paren-layout`](rules/queries/IR-from-paren-layout.md) | Parenthesized column alias lists in FROM/JOIN clauses should format entries one per line if the line exceeds max length. | Yes | [View Details](rules/queries/IR-from-paren-layout.md) |
 | [`IR-from-single`](rules/queries/IR-from-single.md) | Single FROM entry should be on the same line as the FROM keyword. | Yes | [View Details](rules/queries/IR-from-single.md) |
+| [`IR-function-body-indent`](rules/queries/IR-function-body-indent.md) | Standardize indentation of PL/pgSQL function bodies relative to the AS tag. | Yes | [View Details](rules/queries/IR-function-body-indent.md) |
+| [`IR-function-header-layout`](rules/queries/IR-function-header-layout.md) | Standardize formatting, line-wrapping, and indentation of function creation headers. | Yes | [View Details](rules/queries/IR-function-header-layout.md) |
 | [`IR-in-exists`](rules/queries/IR-in-exists.md) | EXISTS is preferred over IN with a subquery. | No | [View Details](rules/queries/IR-in-exists.md) |
 | [`IR-is-null`](rules/queries/IR-is-null.md) | Standardize NULL comparison predicates to use IS NULL and IS NOT NULL operators. | Yes | [View Details](rules/queries/IR-is-null.md) |
 | [`IR-join-on-multi`](rules/queries/IR-join-on-multi.md) | Split AND or OR conditions in JOIN ON clauses to separate lines, indented 4 spaces. | Yes | [View Details](rules/queries/IR-join-on-multi.md) |
@@ -52,6 +55,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-paren-multi`](rules/queries/IR-paren-multi.md) | Parentheses wrapping multiple logical conditions in WHERE/ON clauses must format contents on separate lines, indented 4 spaces. | Yes | [View Details](rules/queries/IR-paren-multi.md) |
 | [`IR-paren-same-op`](rules/queries/IR-paren-same-op.md) | Unnecessary parentheses around homogeneous logical conditions should be removed. | Yes | [View Details](rules/queries/IR-paren-same-op.md) |
 | [`IR-paren-single`](rules/queries/IR-paren-single.md) | Unnecessary parentheses around a single condition should be removed. | Yes | [View Details](rules/queries/IR-paren-single.md) |
+| [`IR-plpgsql-assignment`](rules/queries/IR-plpgsql-assignment.md) | PL/pgSQL variable and trigger field assignments must use the standard assignment operator (:=). | Yes | [View Details](rules/queries/IR-plpgsql-assignment.md) |
 | [`IR-subquery-compact`](rules/queries/IR-subquery-compact.md) | Multiline subquery sources inside FROM or JOIN clauses should be compacted to a single line if they fit within 140 characters. | Yes | [View Details](rules/queries/IR-subquery-compact.md) |
 | [`IR-subquery-depth-limit`](rules/queries/IR-subquery-depth-limit.md) | Subquery nesting depth should not exceed the configured limit (default: 3). When over the limit, Common Table Expressions (CTEs) are preferred. | No | [View Details](rules/queries/IR-subquery-depth-limit.md) |
 | [`IR-subquery-indent`](rules/queries/IR-subquery-indent.md) | Subqueries should be indented 4 spaces relative to their opening parenthesis. | Yes | [View Details](rules/queries/IR-subquery-indent.md) |
