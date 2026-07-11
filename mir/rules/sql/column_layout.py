@@ -106,6 +106,18 @@ class ColumnLayoutRule(BaseRule):
                 i += 1
                 continue
                 
+            if c == '$':
+                match = re.match(r'^\$[a-zA-Z0-9_]*\$', content[i:])
+                if match:
+                    tag = match.group(0)
+                    tag_end = content.find(tag, i + len(tag))
+                    if tag_end != -1:
+                        skip_len = tag_end + len(tag) - i
+                        skipped_text = content[i : i + skip_len]
+                        line_number += skipped_text.count('\n')
+                        i += skip_len
+                        continue
+                        
             if c == '-' and i + 1 < n and content[i + 1] == '-':
                 in_single_comment = True
                 i += 2
