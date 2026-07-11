@@ -22,7 +22,7 @@ class ExpressionSplitRule(BaseRule):
     examples = [
         {
             "violating": "SELECT min(date_trunc('hour', start_time) + date_part('minutes', start_time)::int / 15 * '15 Minutes'::interval) AS start_time;",
-            "correct": "SELECT min(\n    date_trunc('hour', start_time)\n    + date_part('minutes', start_time)::int / 15 * '15 Minutes'::interval\n) AS start_time;"
+            "correct": "SELECT min\n(\n    date_trunc('hour', start_time)\n    + date_part('minutes', start_time)::int\n    / 15\n    * '15 Minutes'::interval\n) AS start_time;"
         }
     ]
     additional_validations = [
@@ -33,7 +33,6 @@ class ExpressionSplitRule(BaseRule):
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
         violations = []
-        n = len(tokens)
         
         # Calculate line lengths
         lines = content.splitlines()
@@ -156,6 +155,10 @@ class ExpressionSplitRule(BaseRule):
             content_indent = base_indent + "    "
             
             # 1. Format parenthesis boundaries
+            # Check whitespace before open parenthesis
+            ws_before_open = None
+            if open_idx - 1 >= 0 and tokens[open_idx - 1]["type"] == "WHITESPACE":
+                ws_before_open = tokens[open_idx - 1]
             # Check whitespace after open parenthesis
             ws_after = None
             if open_idx + 1 < len(tokens) and tokens[open_idx + 1]["type"] == "WHITESPACE":
@@ -165,10 +168,12 @@ class ExpressionSplitRule(BaseRule):
             if close_idx - 1 >= 0 and tokens[close_idx - 1]["type"] == "WHITESPACE":
                 ws_before = tokens[close_idx - 1]
                 
+            open_pre_replacement = "\n" + base_indent
             open_replacement = "\n" + content_indent
             close_replacement = "\n" + base_indent
             
             # Apply boundary edits
+            edits.append((ws_before_open["start"] if ws_before_open else open_tok["start"], ws_before_open["end"] if ws_before_open else open_tok["start"], open_pre_replacement))
             edits.append((ws_after["start"] if ws_after else open_tok["end"], ws_after["end"] if ws_after else open_tok["end"], open_replacement))
             edits.append((ws_before["start"] if ws_before else close_tok["start"], ws_before["end"] if ws_before else close_tok["start"], close_replacement))
             
@@ -184,9 +189,9 @@ class ExpressionSplitRule(BaseRule):
             if len(content_indent + inner_str) > max_len:
                 for idx, (t, d) in enumerate(zip(inner_tokens, inner_depths)):
                     if d == base_depth:
-                        # Split on operators + - || AND OR
+                        # Split on operators + - || * / AND OR
                         is_split_operator = False
-                        if t["type"] == "OPERATOR" and t["value"] in ("+", "-", "||"):
+                        if t["type"] == "OPERATOR" and t["value"] in ("+", "-", "||", "*", "/"):
                             is_split_operator = True
                         elif t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
                             is_split_operator = True

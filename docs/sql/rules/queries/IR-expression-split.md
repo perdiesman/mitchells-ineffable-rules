@@ -16,9 +16,12 @@ SELECT min(date_trunc('hour', start_time) + date_part('minutes', start_time)::in
 
 ####  Correct Example
 ```sql
-SELECT min(
+SELECT min
+(
     date_trunc('hour', start_time)
-    + date_part('minutes', start_time)::int / 15 * '15 Minutes'::interval
+    + date_part('minutes', start_time)::int
+    / 15
+    * '15 Minutes'::interval
 ) AS start_time;
 ```
 

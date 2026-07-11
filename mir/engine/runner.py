@@ -53,15 +53,25 @@ def run_rule_check_recursively(rule: BaseRule, content: str, file_path: str, rul
                 
             body = val[len(tag):-len(tag)]
             body_lines = body.splitlines()
-            first_line = None
-            for line in body_lines:
-                if line.strip():
-                    first_line = line
-                    break
-            if first_line is None:
-                continue
-            first_word = first_line.strip().split()[0].upper() if first_line.strip() else ""
-            if first_word not in ("DECLARE", "BEGIN"):
+            is_body = False
+            prev_active = None
+            try:
+                idx = tokens.index(t)
+                for p_idx in range(idx - 1, -1, -1):
+                    if tokens[p_idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                        prev_active = tokens[p_idx]
+                        break
+            except ValueError:
+                pass
+                
+            if prev_active and prev_active["value"].upper() in ("AS", "DO"):
+                is_body = True
+            else:
+                first_word = first_line.strip().split()[0].upper() if first_line.strip() else ""
+                if first_word in ("DECLARE", "BEGIN"):
+                    is_body = True
+                    
+            if not is_body:
                 continue
                 
             body_start_offset = t["start"] + len(tag)
@@ -111,15 +121,25 @@ def run_rule_fix_recursively(rule: BaseRule, content: str, file_path: str, rule_
                 
             body = val[len(tag):-len(tag)]
             body_lines = body.splitlines()
-            first_line = None
-            for line in body_lines:
-                if line.strip():
-                    first_line = line
-                    break
-            if first_line is None:
-                continue
-            first_word = first_line.strip().split()[0].upper() if first_line.strip() else ""
-            if first_word not in ("DECLARE", "BEGIN"):
+            is_body = False
+            prev_active = None
+            try:
+                idx = tokens.index(t)
+                for p_idx in range(idx - 1, -1, -1):
+                    if tokens[p_idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                        prev_active = tokens[p_idx]
+                        break
+            except ValueError:
+                pass
+                
+            if prev_active and prev_active["value"].upper() in ("AS", "DO"):
+                is_body = True
+            else:
+                first_word = first_line.strip().split()[0].upper() if first_line.strip() else ""
+                if first_word in ("DECLARE", "BEGIN"):
+                    is_body = True
+                    
+            if not is_body:
                 continue
                 
             bodies.append({

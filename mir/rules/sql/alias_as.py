@@ -77,6 +77,10 @@ class AliasAsRule(BaseRule):
                             prev_tok = active[-2]
                             if prev_tok["value"] == ".":
                                 continue
+                            if prev_tok["type"] in ("OPERATOR", "CAST"):
+                                continue
+                            if prev_tok["value"].upper() in ("AND", "OR", "NOT", "IN", "LIKE", "IS", "BETWEEN", "CASE", "WHEN", "THEN", "ELSE", "END"):
+                                continue
                             if prev_tok["type"] != "KEYWORD" or prev_tok["value"].upper() != "AS":
                                 # Violation! Missing AS
                                 violations.append({
