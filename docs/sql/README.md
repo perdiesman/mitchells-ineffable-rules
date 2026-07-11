@@ -24,7 +24,9 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-operator-spacing`](rules/general/IR-operator-spacing.md) | Operators should have a single space on both sides. | Yes | [View Details](rules/general/IR-operator-spacing.md) |
 | [`IR-plpgsql-keyword-case`](rules/general/IR-plpgsql-keyword-case.md) | Procedural PL/pgSQL keywords and trigger variables must be in uppercase. | Yes | [View Details](rules/general/IR-plpgsql-keyword-case.md) |
 | [`IR-redundant-keywords`](rules/general/IR-redundant-keywords.md) | Remove redundant implied keywords like INNER, OUTER, and ASC. | Yes | [View Details](rules/general/IR-redundant-keywords.md) |
+| [`IR-statement-semicolon`](rules/general/IR-statement-semicolon.md) | Enforce that all top-level statements end with a trailing semicolon. | Yes | [View Details](rules/general/IR-statement-semicolon.md) |
 | [`IR-trailing-semicolon`](rules/general/IR-trailing-semicolon.md) | Enforce that the last SQL statement ends with a trailing semicolon, placed immediately after the statement text. | Yes | [View Details](rules/general/IR-trailing-semicolon.md) |
+| [`IR-unresolved-alias`](rules/general/IR-unresolved-alias.md) | Detect references to table aliases or qualifiers that are not declared in the query context. | No | [View Details](rules/general/IR-unresolved-alias.md) |
 
 ## Query Structure Rules
 
@@ -56,6 +58,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-paren-same-op`](rules/queries/IR-paren-same-op.md) | Unnecessary parentheses around homogeneous logical conditions should be removed. | Yes | [View Details](rules/queries/IR-paren-same-op.md) |
 | [`IR-paren-single`](rules/queries/IR-paren-single.md) | Unnecessary parentheses around a single condition should be removed. | Yes | [View Details](rules/queries/IR-paren-single.md) |
 | [`IR-plpgsql-assignment`](rules/queries/IR-plpgsql-assignment.md) | PL/pgSQL variable and trigger field assignments must use the standard assignment operator (:=). | Yes | [View Details](rules/queries/IR-plpgsql-assignment.md) |
+| [`IR-plpgsql-block-indent`](rules/queries/IR-plpgsql-block-indent.md) | Enforce block structure indentation inside PL/pgSQL procedural code blocks. | Yes | [View Details](rules/queries/IR-plpgsql-block-indent.md) |
 | [`IR-subquery-compact`](rules/queries/IR-subquery-compact.md) | Multiline subquery sources inside FROM or JOIN clauses should be compacted to a single line if they fit within 140 characters. | Yes | [View Details](rules/queries/IR-subquery-compact.md) |
 | [`IR-subquery-depth-limit`](rules/queries/IR-subquery-depth-limit.md) | Subquery nesting depth should not exceed the configured limit (default: 3). When over the limit, Common Table Expressions (CTEs) are preferred. | No | [View Details](rules/queries/IR-subquery-depth-limit.md) |
 | [`IR-subquery-indent`](rules/queries/IR-subquery-indent.md) | Subqueries should be indented 4 spaces relative to their opening parenthesis. | Yes | [View Details](rules/queries/IR-subquery-indent.md) |

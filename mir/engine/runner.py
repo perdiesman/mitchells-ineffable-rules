@@ -9,6 +9,138 @@ from mir.engine.rules_loader import load_rules_for_language
 from mir.engine.disabler import get_disabled_rules_map, get_file_language
 from mir.engine.rules_help import get_supported_languages
 
+EXCLUDED_RECURSIVE_RULES = {
+    "IR-plpgsql-keyword-case",
+    "IR-plpgsql-assignment",
+    "IR-function-body-indent",
+    "IR-function-header-layout",
+    "IR-eof-newline",
+    "IR-trailing-semicolon",
+    "IR-statement-semicolon"
+}
+
+ONLY_RECURSIVE_RULES = {
+    "IR-plpgsql-block-indent"
+}
+
+def run_rule_check_recursively(rule: BaseRule, content: str, file_path: str, rule_config: dict, lang: str) -> List[Violation]:
+    if rule.rule_id in ONLY_RECURSIVE_RULES:
+        violations = []
+    else:
+        try:
+            violations = rule.check(content, file_path, rule_config)
+        except Exception as e:
+            raise e
+        
+    if lang != "sql" or rule.rule_id in EXCLUDED_RECURSIVE_RULES:
+        return violations
+        
+    try:
+        from mir.rules.sql.sql_utils import tokenize_sql
+        tokens = tokenize_sql(content)
+    except Exception:
+        return violations
+        
+    for t in tokens:
+        if t["type"] == "STRING" and t["value"].startswith("$"):
+            val = t["value"]
+            dollar_idx = val.find("$", 1)
+            if dollar_idx == -1:
+                continue
+            tag = val[:dollar_idx + 1]
+            if not val.endswith(tag):
+                continue
+                
+            body = val[len(tag):-len(tag)]
+            body_lines = body.splitlines()
+            first_line = None
+            for line in body_lines:
+                if line.strip():
+                    first_line = line
+                    break
+            if first_line is None:
+                continue
+            first_word = first_line.strip().split()[0].upper() if first_line.strip() else ""
+            if first_word not in ("DECLARE", "BEGIN"):
+                continue
+                
+            body_start_offset = t["start"] + len(tag)
+            body_start_line = content[:body_start_offset].count("\n") + 1
+            
+            try:
+                body_violations = rule.check(body, file_path, rule_config)
+            except Exception:
+                continue
+                
+            lines = content.splitlines()
+            for bv in body_violations:
+                bv.line_number = body_start_line + bv.line_number - 1
+                bv.offending_lines = [lines[bv.line_number - 1] if bv.line_number - 1 < len(lines) else ""]
+                violations.append(bv)
+                
+    return violations
+
+def run_rule_fix_recursively(rule: BaseRule, content: str, file_path: str, rule_config: dict, lang: str) -> str:
+    if rule.rule_id in ONLY_RECURSIVE_RULES:
+        current_content = content
+    else:
+        try:
+            current_content = rule.fix(content, file_path, rule_config)
+        except Exception:
+            current_content = content
+        
+    if lang != "sql" or rule.rule_id in EXCLUDED_RECURSIVE_RULES:
+        return current_content
+        
+    try:
+        from mir.rules.sql.sql_utils import tokenize_sql
+        tokens = tokenize_sql(current_content)
+    except Exception:
+        return current_content
+        
+    bodies = []
+    for t in tokens:
+        if t["type"] == "STRING" and t["value"].startswith("$"):
+            val = t["value"]
+            dollar_idx = val.find("$", 1)
+            if dollar_idx == -1:
+                continue
+            tag = val[:dollar_idx + 1]
+            if not val.endswith(tag):
+                continue
+                
+            body = val[len(tag):-len(tag)]
+            body_lines = body.splitlines()
+            first_line = None
+            for line in body_lines:
+                if line.strip():
+                    first_line = line
+                    break
+            if first_line is None:
+                continue
+            first_word = first_line.strip().split()[0].upper() if first_line.strip() else ""
+            if first_word not in ("DECLARE", "BEGIN"):
+                continue
+                
+            bodies.append({
+                "token": t,
+                "tag": tag,
+                "body": body
+            })
+            
+    for b in reversed(bodies):
+        try:
+            fixed_body = rule.fix(b["body"], file_path, rule_config)
+        except Exception:
+            fixed_body = b["body"]
+            
+        if fixed_body != b["body"]:
+            t = b["token"]
+            replacement = b["tag"] + fixed_body + b["tag"]
+            current_content = current_content[:t["start"]] + replacement + current_content[t["end"]:]
+            
+    return current_content
+
 def resolve_rule_config(config: Config, rule_id: str, lang: str, detected_base_indent: str = None) -> dict:
     global_config = config.rule_configs.get(rule_id, {})
     lang_config = config.rule_configs.get(f"{lang}:{rule_id}", {})
@@ -154,7 +286,7 @@ def run_linter(config: Config) -> int:
                 continue
                 
             try:
-                violations = rule.check(content, file_path, rule_config)
+                violations = run_rule_check_recursively(rule, content, file_path, rule_config, lang)
             except Exception as e:
                 print(f"Error running rule {rule.rule_id} on {file_path}: {e}", file=sys.stderr)
                 continue
@@ -206,7 +338,7 @@ def run_linter(config: Config) -> int:
                         continue
                         
                     try:
-                        violations = rule.check(current_content, file_path, rule_config)
+                        violations = run_rule_check_recursively(rule, current_content, file_path, rule_config, lang)
                     except Exception as e:
                         continue
                         
@@ -229,7 +361,7 @@ def run_linter(config: Config) -> int:
                     for rule in rules_to_fix:
                         rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                         try:
-                            current_content = rule.fix(current_content, file_path, rule_config)
+                            current_content = run_rule_fix_recursively(rule, current_content, file_path, rule_config, lang)
                         except Exception as e:
                             pass
                     if current_content != old_content:
@@ -254,7 +386,7 @@ def run_linter(config: Config) -> int:
                 for rule in rules_to_fix:
                     rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                     try:
-                        current_content = rule.fix(current_content, file_path, rule_config)
+                        current_content = run_rule_fix_recursively(rule, current_content, file_path, rule_config, lang)
                     except Exception as e:
                         pass
                 if current_content != content:
@@ -350,7 +482,7 @@ def run_linter(config: Config) -> int:
                 continue
             # Run check
             try:
-                violations = rule.check(content, file_path, rule_config)
+                violations = run_rule_check_recursively(rule, content, file_path, rule_config, lang)
             except Exception as e:
                 print(f"Error running rule {rule.rule_id} on {file_path}: {e}")
                 continue
@@ -404,7 +536,7 @@ def run_linter(config: Config) -> int:
                         continue
                         
                     try:
-                        violations = rule.check(current_content, file_path, rule_config)
+                        violations = run_rule_check_recursively(rule, current_content, file_path, rule_config, lang)
                     except Exception as e:
                         continue
                         
@@ -427,7 +559,7 @@ def run_linter(config: Config) -> int:
                     for rule in rules_to_fix:
                         rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                         try:
-                            current_content = rule.fix(current_content, file_path, rule_config)
+                            current_content = run_rule_fix_recursively(rule, current_content, file_path, rule_config, lang)
                         except Exception as e:
                             pass
                     if current_content != old_content:
@@ -463,7 +595,7 @@ def run_linter(config: Config) -> int:
                 for rule in rules_to_fix:
                     rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                     try:
-                        current_content = rule.fix(current_content, file_path, rule_config)
+                        current_content = run_rule_fix_recursively(rule, current_content, file_path, rule_config, lang)
                     except Exception as e:
                         pass
                 
