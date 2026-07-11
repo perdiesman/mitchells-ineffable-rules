@@ -49,6 +49,11 @@ class PlpgsqlBlockIndentRule(BaseRule):
                 lines_tokens[l] = []
             lines_tokens[l].append(t)
             
+        # Get active tokens globally (ignoring whitespace and comments)
+        active_indices = [idx for idx, t in enumerate(tokens) if t["type"] not in ("WHITESPACE", "COMMENT")]
+        # Map token object index to its position in active_indices
+        token_to_active_pos = {id(tokens[idx]): pos for pos, idx in enumerate(active_indices)}
+        
         stack = []
         violations = []
         
@@ -103,18 +108,43 @@ class PlpgsqlBlockIndentRule(BaseRule):
             leading_spaces = len(leading_ws.replace("\n", "").replace("\r", "").replace("\t", " " * indent_size))
             
             should_check = False
+            exact_enforce = False
+            
             if expected_level > 0:
                 should_check = True
+                # Check if this line is a block keyword or starts a statement
+                is_block_keyword = first_val in ("DECLARE", "BEGIN", "EXCEPTION", "IF", "WHILE", "FOR", "LOOP", "ELSIF", "ELSE", "END")
+                is_starter = False
+                tok_id = id(first_tok)
+                if tok_id in token_to_active_pos:
+                    pos = token_to_active_pos[tok_id]
+                    if pos == 0:
+                        is_starter = True
+                    else:
+                        prev_tok = tokens[active_indices[pos - 1]]
+                        if prev_tok["value"].upper() in (";", "BEGIN", "THEN", "ELSE", "EXCEPTION", "LOOP", "DECLARE"):
+                            is_starter = True
+                exact_enforce = is_block_keyword or is_starter
             elif first_val in ("DECLARE", "BEGIN", "END", "IF", "WHILE", "FOR", "LOOP", "ELSIF", "ELSE"):
                 should_check = True
+                exact_enforce = True
                 
-            if should_check and leading_spaces != expected_spaces:
-                violations.append({
-                    "line": l,
-                    "expected": expected_spaces,
-                    "actual": leading_spaces,
-                    "first_token": first_tok
-                })
+            if should_check:
+                is_violation = False
+                if exact_enforce:
+                    if leading_spaces != expected_spaces:
+                        is_violation = True
+                else:
+                    if leading_spaces < expected_spaces:
+                        is_violation = True
+                        
+                if is_violation:
+                    violations.append({
+                        "line": l,
+                        "expected": expected_spaces,
+                        "actual": leading_spaces,
+                        "first_token": first_tok
+                    })
                 
             if first_val == "DECLARE":
                 stack.append("DECLARE")
