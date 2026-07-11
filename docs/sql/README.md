@@ -64,6 +64,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-subquery-indent`](rules/queries/IR-subquery-indent.md) | Subqueries should be indented 4 spaces relative to their opening parenthesis. | Yes | [View Details](rules/queries/IR-subquery-indent.md) |
 | [`IR-table-alias-as`](rules/queries/IR-table-alias-as.md) | Table and subquery aliases should not use the AS keyword. | Yes | [View Details](rules/queries/IR-table-alias-as.md) |
 | [`IR-trigger-layout`](rules/queries/IR-trigger-layout.md) | Format and wrap long CREATE TRIGGER statements to standard multiline layout. | Yes | [View Details](rules/queries/IR-trigger-layout.md) |
+| [`IR-update-layout`](rules/queries/IR-update-layout.md) | Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent assignments. | Yes | [View Details](rules/queries/IR-update-layout.md) |
 | [`IR-where-multi`](rules/queries/IR-where-multi.md) | Each AND/OR clause in a multi-condition WHERE clause should start on its own line, indented at 4 spaces. | Yes | [View Details](rules/queries/IR-where-multi.md) |
 | [`IR-where-single`](rules/queries/IR-where-single.md) | Single WHERE condition should be on the same line as the WHERE keyword. | Yes | [View Details](rules/queries/IR-where-single.md) |
 

@@ -51,12 +51,24 @@ class BooleanComparisonRule(BaseRule):
             return None, None
 
         i = 0
+        in_update = False
+        in_update_set = False
         while i < num_active:
+            tok_val_up = active[i]["value"].upper()
+            if tok_val_up == "UPDATE":
+                in_update = True
+                in_update_set = False
+            elif tok_val_up == "SET" and in_update:
+                in_update_set = True
+            elif tok_val_up in (";", "WHERE", "RETURNING", "FROM"):
+                in_update = False
+                in_update_set = False
+                
             is_assignment = False
             if i == 0 or active[i - 1]["value"].upper() in (";", "BEGIN", "THEN", "ELSE", "LOOP"):
                 is_assignment = True
                 
-            if is_assignment:
+            if is_assignment or in_update_set:
                 _, next_idx = parse_operand(i)
                 i = next_idx if next_idx is not None else i + 1
                 continue
