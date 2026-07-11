@@ -546,6 +546,7 @@ def run_linter(config: Config) -> int:
                             iter_violations.append((v, rule))
                             
                 if not iter_violations:
+                    unfixable_violations = []
                     break
                     
                 fixable = [item for item in iter_violations if item[0].is_fixable and item[1].is_fixable in ("yes", "sometimes")]

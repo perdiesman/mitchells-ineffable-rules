@@ -1,7 +1,7 @@
 import os
 import sys
 
-__version__ = "0.1.0a10"
+__version__ = "0.1.0a11"
 
 # Ensure parent directory of 'mir' is in path so absolute imports function correctly
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
