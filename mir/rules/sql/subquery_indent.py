@@ -62,8 +62,8 @@ class SubqueryIndentRule(BaseRule):
                         if t_prev["type"] == "KEYWORD" and t_prev["value"].upper() == "AS":
                             is_cte = True
                             
-                    if is_cte:
-                        continue
+                    # Do not skip CTEs so their subqueries get formatted
+                    pass
                         
                     close_idx = find_matching_paren(tokens, i)
                     if close_idx is None:
@@ -164,7 +164,7 @@ class SubqueryIndentRule(BaseRule):
         first_content_indent_len = None
         for line_no in range(start_line, end_line):
             line_text = lines[line_no - 1]
-            if line_text.strip() != "":
+            if line_text.strip() != "" and not line_text.strip().startswith("--") and not line_text.strip().startswith("/*"):
                 stripped = line_text.lstrip()
                 first_content_indent_len = len(line_text) - len(stripped)
                 break
@@ -216,7 +216,7 @@ class SubqueryIndentRule(BaseRule):
             first_content_indent_len = None
             for line_no in range(start_line, end_line):
                 line_text = lines[line_no - 1]
-                if line_text.strip() != "":
+                if line_text.strip() != "" and not line_text.strip().startswith("--") and not line_text.strip().startswith("/*"):
                     stripped = line_text.lstrip()
                     first_content_indent_len = len(line_text) - len(stripped)
                     break
