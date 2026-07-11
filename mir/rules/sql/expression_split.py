@@ -73,6 +73,14 @@ class ExpressionSplitRule(BaseRule):
                 
             close_tok = tokens[close_idx]
             
+            # Skip empty parentheses
+            active_between = [
+                tokens[idx] for idx in range(open_idx + 1, close_idx)
+                if tokens[idx]["type"] not in ("WHITESPACE", "COMMENT")
+            ]
+            if not active_between:
+                continue
+            
             # Check if it is already multiline
             is_multiline = False
             for idx in range(open_idx + 1, close_idx):

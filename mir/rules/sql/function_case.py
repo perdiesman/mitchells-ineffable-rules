@@ -8,7 +8,8 @@ EXCLUDED_WORDS = {
     "having", "between", "like", "as", "over", "partition",
     "by", "window", "group", "order", "limit", "offset",
     "union", "all", "intersect", "except", "distinct",
-    "with", "recursive", "case", "when", "then", "else", "end"
+    "with", "recursive", "case", "when", "then", "else", "end",
+    "table", "row", "any", "some", "array", "if", "while", "return"
 }
 
 class FunctionCaseRule(BaseRule):

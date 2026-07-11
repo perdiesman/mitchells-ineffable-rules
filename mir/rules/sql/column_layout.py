@@ -285,7 +285,8 @@ class ColumnLayoutRule(BaseRule):
                             last_non_space_idx = j + 1
                         j += 1
                         
-                    expr = content[current_expr_start:j].strip()
+                    list_end = last_non_space_idx
+                    expr = content[current_expr_start:list_end].strip()
                     if "\n" not in expr:
                         expr = re.sub(r"\s+", " ", expr)
                     if expr:
@@ -299,7 +300,7 @@ class ColumnLayoutRule(BaseRule):
                             expressions.append(expr)
                             # Find original base indentation of this expression
                             actual_start = current_expr_start
-                            while actual_start < j and content[actual_start].isspace():
+                            while actual_start < list_end and content[actual_start].isspace():
                                 actual_start += 1
                             line_start = content.rfind("\n", 0, actual_start) + 1
                             line_prefix = content[line_start:actual_start]
@@ -310,8 +311,6 @@ class ColumnLayoutRule(BaseRule):
                                 else:
                                     break
                             expression_indents.append(expr_base_indent)
-                            
-                    list_end = last_non_space_idx
                     
                     # Prevent formatting if there is an inline comment inside the clause text
                     clause_text = content[w_start:list_end]
