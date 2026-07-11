@@ -22,15 +22,22 @@ class PlpgsqlAssignmentRule(BaseRule):
     
     examples = [
         {
-            "violating": "NEW.file_uploader = TRUE;",
-            "correct": "NEW.file_uploader := TRUE;"
+            "violating": "BEGIN\n    NEW.file_uploader := TRUE;\nEND;",
+            "correct": "BEGIN\n    NEW.file_uploader = TRUE;\nEND;"
+        },
+        {
+            "violating": "DECLARE\n    my_var INT = 1;\nBEGIN\nEND;",
+            "correct": "DECLARE\n    my_var INT := 1;\nBEGIN\nEND;"
         }
     ]
     additional_validations = [
-        "NEW.resolution := 'BY_POINT';"
+        "BEGIN\n    NEW.resolution = 'BY_POINT';\nEND;"
     ]
 
     def _check_tokens(self, tokens: List[dict], offset_delta: int, violations: List[dict]):
+        in_declare = False
+        in_body = False
+        
         # Group tokens into statements by semicolon
         statements = []
         current_statement = []
@@ -43,33 +50,64 @@ class PlpgsqlAssignmentRule(BaseRule):
             statements.append(current_statement)
             
         for stmt in statements:
+            # Update state based on keywords inside this statement
+            for t in stmt:
+                val_up = t["value"].upper()
+                if val_up == "DECLARE":
+                    in_declare = True
+                    in_body = False
+                elif val_up == "BEGIN":
+                    in_declare = False
+                    in_body = True
+            
             active_tokens = [t for t in stmt if t["type"] not in ("WHITESPACE", "COMMENT")]
             if not active_tokens:
                 continue
                 
-            first_tok = active_tokens[0]
+            first_tok_idx = 0
+            while first_tok_idx < len(active_tokens) and active_tokens[first_tok_idx]["value"].upper() in ("DECLARE", "BEGIN", "EXCEPTION"):
+                first_tok_idx += 1
+                
+            if first_tok_idx >= len(active_tokens):
+                continue
+                
+            first_tok = active_tokens[first_tok_idx]
             if first_tok["type"] in ("KEYWORD", "IDENTIFIER") and first_tok["value"].upper() in EXCLUDED_STARTERS:
                 continue
                 
-            # Find the first '=' operator that is not part of ':='
+            # Find the first '=' operator (or ':=' combination)
             for idx, t in enumerate(stmt):
                 if t["type"] == "OPERATOR" and t["value"] == "=":
-                    # Check if preceded by ':' (possibly with whitespace in between, but usually adjacent)
-                    is_assignment = True
+                    # Check if preceded by ':'
                     prev_idx = idx - 1
                     while prev_idx >= 0 and stmt[prev_idx]["type"] in ("WHITESPACE", "COMMENT"):
                         prev_idx -= 1
-                    if prev_idx >= 0 and stmt[prev_idx]["value"] == ":":
-                        is_assignment = False
                         
-                    if is_assignment:
-                        violations.append({
-                            "token": t,
-                            "start_offset": t["start"] + offset_delta,
-                            "end_offset": t["end"] + offset_delta,
-                            "replacement": ":=",
-                            "line": t["line"]
-                        })
+                    is_colon_equals = (prev_idx >= 0 and stmt[prev_idx]["value"] == ":")
+                    
+                    if is_colon_equals:
+                        # It is ':=' operator!
+                        # In the body (or outside declare), we want '=' instead of ':='!
+                        if in_body or not in_declare:
+                            colon_tok = stmt[prev_idx]
+                            violations.append({
+                                "token": t,
+                                "start_offset": colon_tok["start"] + offset_delta,
+                                "end_offset": t["end"] + offset_delta,
+                                "replacement": "=",
+                                "line": t["line"]
+                            })
+                    else:
+                        # It is '=' operator!
+                        # In the declare block, we want ':=' instead of '='!
+                        if in_declare:
+                            violations.append({
+                                "token": t,
+                                "start_offset": t["start"] + offset_delta,
+                                "end_offset": t["end"] + offset_delta,
+                                "replacement": ":=",
+                                "line": t["line"]
+                            })
                     # Only check/replace the first assignment operator in the statement
                     break
 
@@ -121,7 +159,7 @@ class PlpgsqlAssignmentRule(BaseRule):
                 Violation(
                     rule_id=self.rule_id,
                     line_number=item["line"],
-                    message="PL/pgSQL assignments should use the standard assignment operator (:=) instead of =.",
+                    message="PL/pgSQL assignments must use '=' in the function body and ':=' in the DECLARE section.",
                     offending_lines=[lines[item["line"] - 1] if item["line"] - 1 < len(lines) else ""],
                     is_fixable=True
                 )
