@@ -22,7 +22,11 @@ class UpdateLayoutRule(BaseRule):
     examples = [
         {
             "violating": "UPDATE dashboard.layout SET default_layout = false WHERE user_id = NEW.user_id AND type_id = NEW.type_id AND id != NEW.id;",
-            "correct": "UPDATE dashboard.layout\nSET\n    default_layout = false\nWHERE user_id = NEW.user_id AND type_id = NEW.type_id AND id != NEW.id;"
+            "correct": "UPDATE dashboard.layout\nSET default_layout = false\nWHERE user_id = NEW.user_id AND type_id = NEW.type_id AND id != NEW.id;"
+        },
+        {
+            "violating": "UPDATE my_very_long_table SET my_first_very_long_field_with_very_long_value = 1, my_second_very_long_field_with_very_long_value = 2 WHERE some_condition;",
+            "correct": "UPDATE my_very_long_table\nSET\n    my_first_very_long_field_with_very_long_value = 1,\n    my_second_very_long_field_with_very_long_value = 2\nWHERE some_condition;"
         }
     ]
     additional_validations = [
@@ -141,8 +145,7 @@ class UpdateLayoutRule(BaseRule):
                     else:
                         expected = (
                             c1_str + "\n" +
-                            base_indent + "SET\n" +
-                            base_indent + "    " + fields[0] + "\n" +
+                            base_indent + "SET " + fields[0] + "\n" +
                             base_indent + c4_str
                         )
                     
