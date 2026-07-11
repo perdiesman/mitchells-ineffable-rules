@@ -35,6 +35,12 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
         const="standard",
         help="Show this help message. Specify 'rules', 'rules:<lang>', 'docs', 'docs:<path>', '<rule_id>', or '<lang>:<rule_id>' for details."
     )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="mir-linter 0.1.0a3",
+        help="Show version information"
+    )
     parser.add_argument("paths", nargs="*", help="Files or directories to lint")
     parser.add_argument("-c", "--config", help="Path to config file")
     parser.add_argument("--fix", action="store_true", default=None, help="Fix rule violations where possible")
