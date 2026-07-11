@@ -14,15 +14,17 @@ class WhereMultiRule(BaseRule):
     
     examples = [
         {
-            "violating": "SELECT id FROM users WHERE active = true AND type = 'admin' OR age > 21;",
-            "correct": "SELECT id FROM users WHERE\n    active = true\n    AND type = 'admin'\n    OR age > 21;"
+            "violating": "SELECT id FROM users WHERE some_long_column_identifier_active = true AND another_long_column_identifier_type = 'admin' OR age_greater_than_limit > 21;",
+            "correct": "SELECT id FROM users WHERE\n    some_long_column_identifier_active = true\n    AND another_long_column_identifier_type = 'admin'\n    OR age_greater_than_limit > 21;"
         }
     ]
     additional_validations = [
         "SELECT id FROM users WHERE active = true;"
     ]
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _find_violations(self, content: str, rule_config: Dict[str, Any] = None) -> List[dict]:
+        if rule_config is None:
+            rule_config = {}
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
         violations = []
@@ -70,6 +72,17 @@ class WhereMultiRule(BaseRule):
                         break
                         
                 if has_multi:
+                    where_clause_tokens = tokens[i : clause_end]
+                    where_clause_str = "".join(t["value"] for t in where_clause_tokens)
+                    import re
+                    where_clause_single = re.sub(r'\s+', ' ', where_clause_str)
+                    estimated_line_len = len(where_indent) + len(where_clause_single)
+                    
+                    from mir.rules.sql.line_length import LineLengthRule
+                    max_len = self.get_config_value(rule_config, "max_line_length", 100, fallbacks=[(LineLengthRule, "max_length")])
+                    
+                    if estimated_line_len <= max_len:
+                        continue
                     # 1. Format the first condition after WHERE onto its own line
                     first_cond_idx = None
                     for idx in range(i + 1, clause_end):
@@ -116,7 +129,7 @@ class WhereMultiRule(BaseRule):
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         
         for item in offending:
             tok = item["token"]
@@ -132,7 +145,7 @@ class WhereMultiRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         if not offending:
             return content
             

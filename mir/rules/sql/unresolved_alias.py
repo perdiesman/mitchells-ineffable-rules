@@ -37,10 +37,10 @@ class UnresolvedAliasRule(BaseRule):
         in_declare = False
         for i, t in enumerate(tokens):
             val_upper = t["value"].upper()
-            if t["type"] == "KEYWORD" and val_upper == "DECLARE":
+            if val_upper == "DECLARE":
                 in_declare = True
                 continue
-            if t["type"] == "KEYWORD" and val_upper == "BEGIN":
+            if val_upper == "BEGIN":
                 in_declare = False
                 break
             if in_declare and t["type"] == "IDENTIFIER":

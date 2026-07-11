@@ -52,6 +52,15 @@ class BooleanComparisonRule(BaseRule):
 
         i = 0
         while i < num_active:
+            is_assignment = False
+            if i == 0 or active[i - 1]["value"].upper() in (";", "BEGIN", "THEN", "ELSE", "LOOP"):
+                is_assignment = True
+                
+            if is_assignment:
+                _, next_idx = parse_operand(i)
+                i = next_idx if next_idx is not None else i + 1
+                continue
+                
             op_str, next_idx = parse_operand(i)
             if op_str and next_idx < num_active:
                 t_op = active[next_idx]

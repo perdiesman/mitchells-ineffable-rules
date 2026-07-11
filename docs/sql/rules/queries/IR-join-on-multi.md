@@ -8,26 +8,15 @@ Split AND or OR conditions in JOIN ON clauses to separate lines, indented 4 spac
 - **Configuration Options**:
   - `enabled`: `true`
 
-#### ❌ Violating Example #1
+#### ❌ Violating Example
 ```sql
-SELECT * FROM t1 JOIN t2 ON t1.id = t2.id AND t1.active = t2.active;
+SELECT * FROM table_one JOIN table_two ON table_one.some_long_column_identifier = table_two.some_long_column_identifier AND table_one.another_long_column_identifier = table_two.another_long_column_identifier;
 ```
 
-####  Correct Example #1
+####  Correct Example
 ```sql
-SELECT * FROM t1 JOIN t2 ON t1.id = t2.id
-    AND t1.active = t2.active;
-```
-
-#### ❌ Violating Example #2
-```sql
-SELECT * FROM t1 JOIN t2 ON t1.id = t2.id OR t1.code = t2.code;
-```
-
-####  Correct Example #2
-```sql
-SELECT * FROM t1 JOIN t2 ON t1.id = t2.id
-    OR t1.code = t2.code;
+SELECT * FROM table_one JOIN table_two ON table_one.some_long_column_identifier = table_two.some_long_column_identifier
+    AND table_one.another_long_column_identifier = table_two.another_long_column_identifier;
 ```
 
 #### Additional Validations

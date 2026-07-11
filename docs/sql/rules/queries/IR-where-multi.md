@@ -10,15 +10,15 @@ Each AND/OR clause in a multi-condition WHERE clause should start on its own lin
 
 #### ❌ Violating Example
 ```sql
-SELECT id FROM users WHERE active = true AND type = 'admin' OR age > 21;
+SELECT id FROM users WHERE some_long_column_identifier_active = true AND another_long_column_identifier_type = 'admin' OR age_greater_than_limit > 21;
 ```
 
 ####  Correct Example
 ```sql
 SELECT id FROM users WHERE
-    active = true
-    AND type = 'admin'
-    OR age > 21;
+    some_long_column_identifier_active = true
+    AND another_long_column_identifier_type = 'admin'
+    OR age_greater_than_limit > 21;
 ```
 
 #### Additional Validations

@@ -14,19 +14,17 @@ class JoinOnMultiRule(BaseRule):
     
     examples = [
         {
-            "violating": "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id AND t1.active = t2.active;",
-            "correct": "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id\n    AND t1.active = t2.active;"
-        },
-        {
-            "violating": "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id OR t1.code = t2.code;",
-            "correct": "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id\n    OR t1.code = t2.code;"
+            "violating": "SELECT * FROM table_one JOIN table_two ON table_one.some_long_column_identifier = table_two.some_long_column_identifier AND table_one.another_long_column_identifier = table_two.another_long_column_identifier;",
+            "correct": "SELECT * FROM table_one JOIN table_two ON table_one.some_long_column_identifier = table_two.some_long_column_identifier\n    AND table_one.another_long_column_identifier = table_two.another_long_column_identifier;"
         }
     ]
     additional_validations = [
         'SELECT * FROM t1 JOIN t2 ON t1.id = t2.id;'
     ]
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _find_violations(self, content: str, rule_config: Dict[str, Any] = None) -> List[dict]:
+        if rule_config is None:
+            rule_config = {}
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
         violations = []
@@ -68,6 +66,18 @@ class JoinOnMultiRule(BaseRule):
                 clause_tokens = tokens[i + 1:clause_end]
                 clause_depths = depths[i + 1:clause_end]
                 
+                on_clause_tokens = tokens[i : clause_end]
+                on_clause_str = "".join(t["value"] for t in on_clause_tokens)
+                import re
+                on_clause_single = re.sub(r'\s+', ' ', on_clause_str)
+                estimated_line_len = len(on_indent) + len("JOIN ") + len(on_clause_single)
+                
+                from mir.rules.sql.line_length import LineLengthRule
+                max_len = self.get_config_value(rule_config, "max_line_length", 100, fallbacks=[(LineLengthRule, "max_length")])
+                
+                if estimated_line_len <= max_len:
+                    continue
+                    
                 for j_idx, (t, d) in enumerate(zip(clause_tokens, clause_depths)):
                     if d == outer_depth and t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
                         actual_idx = i + 1 + j_idx
@@ -89,7 +99,7 @@ class JoinOnMultiRule(BaseRule):
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         
         for item in offending:
             tok = item["token"]
@@ -105,7 +115,7 @@ class JoinOnMultiRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         if not offending:
             return content
             

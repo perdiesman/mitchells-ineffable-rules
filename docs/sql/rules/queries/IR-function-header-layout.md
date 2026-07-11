@@ -19,5 +19,6 @@ AS $function$
 
 ####  Correct Example
 ```sql
-CREATE OR REPLACE FUNCTION my_func() RETURNS trigger LANGUAGE plpgsql AS $function$
+CREATE OR REPLACE FUNCTION my_func() RETURNS trigger LANGUAGE plpgsql AS
+$function$
 ```

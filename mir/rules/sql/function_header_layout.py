@@ -2,7 +2,25 @@ from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren
 
-def format_returns_table(returns_type_str: str) -> str:
+def split_cols(cols_str: str) -> List[str]:
+    parts = []
+    current = []
+    depth = 0
+    for char in cols_str:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        if char == "," and depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+    if current:
+        parts.append("".join(current).strip())
+    return [p for p in parts if p]
+
+def format_returns_table(returns_type_str: str, max_len: int = 120) -> str:
     if not returns_type_str.upper().startswith("TABLE"):
         return returns_type_str
         
@@ -11,20 +29,19 @@ def format_returns_table(returns_type_str: str) -> str:
     if open_p == -1 or close_p == -1:
         return returns_type_str
         
-    cols_content = returns_type_str[open_p + 1 : close_p]
-    lines = cols_content.splitlines()
+    cols_content = returns_type_str[open_p + 1 : close_p].strip()
     
-    is_multiline = any("\n" in line for line in lines) or len(lines) > 1
-    
-    if not is_multiline:
-        return f"TABLE({cols_content.strip()})"
+    # Check if it fits on a single line
+    single_line = f"TABLE({cols_content})"
+    if len("    RETURNS " + single_line) <= max_len and "\n" not in cols_content:
+        return single_line
         
+    cols = split_cols(cols_content)
     cleaned_lines = []
-    for line in lines:
-        if line.strip():
-            cleaned_lines.append("    " + line.strip())
-            
-    return "TABLE(\n" + "\n".join(cleaned_lines) + "\n)"
+    for col in cols:
+        cleaned_lines.append("    " + col)
+        
+    return "TABLE(\n" + ",\n".join(cleaned_lines) + "\n)"
 
 class FunctionHeaderLayoutRule(BaseRule):
     rule_id = "IR-function-header-layout"
@@ -46,7 +63,7 @@ class FunctionHeaderLayoutRule(BaseRule):
     examples = [
         {
             "violating": "CREATE OR REPLACE FUNCTION my_func()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$",
-            "correct": "CREATE OR REPLACE FUNCTION my_func() RETURNS trigger LANGUAGE plpgsql AS $function$"
+            "correct": "CREATE OR REPLACE FUNCTION my_func() RETURNS trigger LANGUAGE plpgsql AS\n$function$"
         }
     ]
     additional_validations = []
@@ -143,7 +160,7 @@ class FunctionHeaderLayoutRule(BaseRule):
                 
                 # Format clauses by keeping their original content and formatting
                 returns_type_str = content[returns_type_tokens[0]["start"] : returns_type_tokens[-1]["end"]].strip()
-                returns_type_str = format_returns_table(returns_type_str)
+                returns_type_str = format_returns_table(returns_type_str, max_len)
                 returns_str = "RETURNS " + returns_type_str
                 language_str = "LANGUAGE plpgsql"
                 
@@ -151,12 +168,12 @@ class FunctionHeaderLayoutRule(BaseRule):
                 if options_tokens:
                     options_str = content[options_tokens[0]["start"] : options_tokens[-1]["end"]].strip()
                     
-                as_str = "AS"
-                
-                clauses = [returns_str, language_str]
+                options_clause = "LANGUAGE plpgsql"
                 if options_str:
-                    clauses.append(options_str)
-                clauses.append(as_str)
+                    options_clause += " " + options_str
+                options_clause += " AS"
+                
+                clauses = [returns_str, options_clause]
                 
                 func_sig_cleaned = content[t["start"] : tokens[close_paren_idx]["end"]].strip()
                 
@@ -191,7 +208,7 @@ class FunctionHeaderLayoutRule(BaseRule):
                     violations.append({
                         "start_offset": t["start"],
                         "end_offset": body_tok["start"],
-                        "replacement": expected_header + " ",
+                        "replacement": expected_header + "\n",
                         "line": t["line"]
                     })
                     

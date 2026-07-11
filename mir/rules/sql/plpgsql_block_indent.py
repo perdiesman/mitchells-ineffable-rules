@@ -64,7 +64,7 @@ class PlpgsqlBlockIndentRule(BaseRule):
             first_tok = active_toks[0]
             first_val = first_tok["value"].upper()
             
-            is_closing = False
+            is_adjusting = False
             
             if first_val == "BEGIN":
                 if stack and stack[-1] == "DECLARE":
@@ -82,20 +82,17 @@ class PlpgsqlBlockIndentRule(BaseRule):
                 if is_end_if:
                     if stack and stack[-1] == "IF":
                         stack.pop()
-                    is_closing = True
                 elif is_end_loop:
                     if stack and stack[-1] in ("LOOP", "FOR", "WHILE"):
                         stack.pop()
-                    is_closing = True
                 else:
                     if stack and stack[-1] in ("BEGIN", "DECLARE", "EXCEPTION"):
                         stack.pop()
-                    is_closing = True
             elif first_val in ("ELSIF", "ELSE", "WHEN"):
-                is_closing = True
+                is_adjusting = True
                 
             expected_level = len(stack)
-            if is_closing and expected_level > 0:
+            if is_adjusting and expected_level > 0:
                 expected_level = expected_level - 1
                 
             expected_spaces = expected_level * indent_size
