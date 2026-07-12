@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mir-linter"
-version = "0.1.0a15"
+version = "0.1.0a16"
 description = "Mitchell's Ineffable Rules (IR) Linter - A modular linter with customizable rules for SQL, Java, and XML."
 readme = "README.md"
 requires-python = ">=3.8"

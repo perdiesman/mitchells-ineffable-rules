@@ -36,5 +36,32 @@ class TestConfig(unittest.TestCase):
             del os.environ["IR_VERBOSE"]
             del os.environ["IR_DISABLE"]
 
+    def test_quiet_warnings_flags(self):
+        # Default flags should be False
+        config = load_config([])
+        self.assertFalse(config.quiet)
+        self.assertFalse(config.warnings_only)
+        self.assertFalse(config.no_warnings)
+
+        # CLI overrides
+        config2 = load_config(["--quiet", "--warnings-only", "--no-warnings"])
+        self.assertTrue(config2.quiet)
+        self.assertTrue(config2.warnings_only)
+        self.assertTrue(config2.no_warnings)
+
+        # Env overrides
+        os.environ["IR_QUIET"] = "True"
+        os.environ["IR_WARNINGS_ONLY"] = "yes"
+        os.environ["IR_NO_WARNINGS"] = "1"
+        try:
+            config3 = load_config([])
+            self.assertTrue(config3.quiet)
+            self.assertTrue(config3.warnings_only)
+            self.assertTrue(config3.no_warnings)
+        finally:
+            del os.environ["IR_QUIET"]
+            del os.environ["IR_WARNINGS_ONLY"]
+            del os.environ["IR_NO_WARNINGS"]
+
 if __name__ == "__main__":
     unittest.main()

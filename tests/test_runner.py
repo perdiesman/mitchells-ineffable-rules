@@ -2,6 +2,7 @@ import os
 import sys
 import unittest
 import tempfile
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -428,6 +429,58 @@ class TestRunnerIntegration(unittest.TestCase):
         config2.rules_to_enable = ["IR-function-case"]
         config2.rule_configs = {"IR-function-case": {"additional_exclusions": ["foo"]}}
         self.assertEqual(run_linter(config2), 0)
+
+    def test_quiet_warnings_runner(self):
+        query = "select id from users;"  # Violates IR-keyword-case
+        path = self.write_temp_file("test_quiet_warnings.sql", query)
+
+        # 1. Test quiet option (no stdout/stderr but sets exit code)
+        config_quiet = Config()
+        config_quiet.paths = [path]
+        config_quiet.disable_all = True
+        config_quiet.rules_to_enable = ["IR-keyword-case"]
+        config_quiet.quiet = True
+
+        import io
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+        with patch("sys.stdout", captured_stdout), patch("sys.stderr", captured_stderr):
+            exit_code = run_linter(config_quiet)
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(captured_stdout.getvalue(), "")
+        self.assertEqual(captured_stderr.getvalue(), "")
+
+        # 2. Test warnings-only and no-warnings options
+        # We need a rule with severity warning. Let's configure IR-keyword-case to severity warning
+        config_warn_only = Config()
+        config_warn_only.paths = [path]
+        config_warn_only.disable_all = True
+        config_warn_only.rules_to_enable = ["IR-keyword-case"]
+        config_warn_only.rule_configs = {"IR-keyword-case": {"severity": "warning"}}
+        config_warn_only.warnings_only = True
+
+        captured_stdout = io.StringIO()
+        with patch("sys.stdout", captured_stdout):
+            exit_code = run_linter(config_warn_only)
+        # Should report violation and exit 0 (since warning severity doesn't fail the lint run)
+        self.assertEqual(exit_code, 0)
+        self.assertIn("[WARN] IR-keyword-case", captured_stdout.getvalue())
+
+        # Test no-warnings option (should hide the warning)
+        config_no_warn = Config()
+        config_no_warn.paths = [path]
+        config_no_warn.disable_all = True
+        config_no_warn.rules_to_enable = ["IR-keyword-case"]
+        config_no_warn.rule_configs = {"IR-keyword-case": {"severity": "warning"}}
+        config_no_warn.no_warnings = True
+
+        captured_stdout = io.StringIO()
+        with patch("sys.stdout", captured_stdout):
+            exit_code = run_linter(config_no_warn)
+        # Should hide the warning completely
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(captured_stdout.getvalue(), "")
 
 if __name__ == "__main__":
     unittest.main()

@@ -22,6 +22,9 @@ class Config:
         self.lang: Optional[str] = None
         self.disable_all: bool = False
         self.rules_to_enable: List[str] = []
+        self.quiet: bool = False
+        self.warnings_only: bool = False
+        self.no_warnings: bool = False
 
 def load_config(args_list: Optional[List[str]] = None) -> Config:
     # 1. Parse CLI arguments first to check for config path, flags, and targets
@@ -53,6 +56,9 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     parser.add_argument("--lang", "--language", dest="lang", help="Language of the content (required if using --content or piping stdin)")
     parser.add_argument("--disable-all", action="store_true", default=None, help="Disable all rules by default")
     parser.add_argument("--enable", help="Comma-separated list of rule IDs to enable")
+    parser.add_argument("-q", "--quiet", action="store_true", default=None, help="Quiet mode (no output, just set appropriate exit code)")
+    parser.add_argument("--warnings-only", action="store_true", default=None, help="Only show warnings")
+    parser.add_argument("--no-warnings", action="store_true", default=None, help="Hide all warnings")
     
     parsed_args = parser.parse_args(args_list)
     
@@ -205,6 +211,30 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
         for r in cli_enable.split(","):
             enabled_rules_set.add(r.strip())
     config.rules_to_enable = sorted(list(enabled_rules_set))
+    
+    # -- quiet --
+    if parsed_args.quiet is not None:
+        config.quiet = parsed_args.quiet
+    elif os.environ.get("IR_QUIET") is not None:
+        config.quiet = os.environ.get("IR_QUIET").lower() in ("true", "1", "yes")
+    else:
+        config.quiet = file_config.get("quiet", False)
+        
+    # -- warnings_only --
+    if parsed_args.warnings_only is not None:
+        config.warnings_only = parsed_args.warnings_only
+    elif os.environ.get("IR_WARNINGS_ONLY") is not None:
+        config.warnings_only = os.environ.get("IR_WARNINGS_ONLY").lower() in ("true", "1", "yes")
+    else:
+        config.warnings_only = file_config.get("warnings_only", False)
+        
+    # -- no_warnings --
+    if parsed_args.no_warnings is not None:
+        config.no_warnings = parsed_args.no_warnings
+    elif os.environ.get("IR_NO_WARNINGS") is not None:
+        config.no_warnings = os.environ.get("IR_NO_WARNINGS").lower() in ("true", "1", "yes")
+    else:
+        config.no_warnings = file_config.get("no_warnings", False)
         
     # 5. Handle rule help AFTER config resolution so that include_dirs and rule_mode are resolved
     if parsed_args.help is not None:

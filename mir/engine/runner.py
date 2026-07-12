@@ -308,16 +308,22 @@ def run_linter(config: Config) -> int:
             try:
                 violations = run_rule_check_recursively(rule, content, file_path, rule_config, lang)
             except Exception as e:
-                print(f"Error running rule {rule.rule_id} on {file_path}: {e}", file=sys.stderr)
+                if not config.quiet:
+                    print(f"Error running rule {rule.rule_id} on {file_path}: {e}", file=sys.stderr)
                 continue
                 
             rule_disabled_lines = disabled_map.get(rule.rule_id, set())
             for v in violations:
                 if v.line_number not in rule_disabled_lines:
+                    severity = rule.get_config_value(rule_config, "severity", "error")
+                    if config.no_warnings and severity == "warning":
+                        continue
+                    if config.warnings_only and severity != "warning":
+                        continue
                     file_violations.append((v, rule))
                     
         if not file_violations:
-            if config.fix:
+            if config.fix and not config.quiet:
                 print(content, end="")
             return 0
             
@@ -365,6 +371,11 @@ def run_linter(config: Config) -> int:
                     rule_disabled_lines = disabled_map.get(rule.rule_id, set())
                     for v in violations:
                         if v.line_number not in rule_disabled_lines:
+                            severity = rule.get_config_value(rule_config, "severity", "error")
+                            if config.no_warnings and severity == "warning":
+                                continue
+                            if config.warnings_only and severity != "warning":
+                                continue
                             iter_violations.append((v, rule))
                             
                 if not iter_violations:
@@ -390,13 +401,15 @@ def run_linter(config: Config) -> int:
                     break
             
             has_errors = False
-            print(current_content, end="")
+            if not config.quiet:
+                print(current_content, end="")
             for v, rule in unfixable_violations:
                 rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                 severity = rule.get_config_value(rule_config, "severity", "error")
                 if severity != "warning":
                     has_errors = True
-                print(format_violation(v, file_path, config.verbose, rule.description, severity), file=sys.stderr)
+                if not config.quiet:
+                    print(format_violation(v, file_path, config.verbose, rule.description, severity), file=sys.stderr)
             return 1 if has_errors else 0
             
         elif config.dry_run:
@@ -409,7 +422,7 @@ def run_linter(config: Config) -> int:
                         current_content = run_rule_fix_recursively(rule, current_content, file_path, rule_config, lang)
                     except Exception as e:
                         pass
-                if current_content != content:
+                if current_content != content and not config.quiet:
                     diff = difflib.unified_diff(
                         content.splitlines(keepends=True),
                         current_content.splitlines(keepends=True),
@@ -424,7 +437,8 @@ def run_linter(config: Config) -> int:
                 severity = rule.get_config_value(rule_config, "severity", "error")
                 if severity != "warning":
                     has_errors = True
-                print(format_violation(v, file_path, config.verbose, rule.description, severity), file=sys.stderr)
+                if not config.quiet:
+                    print(format_violation(v, file_path, config.verbose, rule.description, severity), file=sys.stderr)
             return 1 if has_errors else 0
             
         else:
@@ -434,12 +448,13 @@ def run_linter(config: Config) -> int:
                 severity = rule.get_config_value(rule_config, "severity", "error")
                 if severity != "warning":
                     has_errors = True
-                print(format_violation(v, file_path, config.verbose, rule.description, severity))
+                if not config.quiet:
+                    print(format_violation(v, file_path, config.verbose, rule.description, severity))
             return 1 if has_errors else 0
-
+ 
     files = find_files(config.paths, config.include_dirs)
     if not files:
-        if config.verbose:
+        if config.verbose and not config.quiet:
             print("No files found to lint.")
         return 0
         
@@ -504,13 +519,19 @@ def run_linter(config: Config) -> int:
             try:
                 violations = run_rule_check_recursively(rule, content, file_path, rule_config, lang)
             except Exception as e:
-                print(f"Error running rule {rule.rule_id} on {file_path}: {e}")
+                if not config.quiet:
+                    print(f"Error running rule {rule.rule_id} on {file_path}: {e}")
                 continue
                 
             # Filter violations based on in-file disable comments
             rule_disabled_lines = disabled_map.get(rule.rule_id, set())
             for v in violations:
                 if v.line_number not in rule_disabled_lines:
+                    severity = rule.get_config_value(rule_config, "severity", "error")
+                    if config.no_warnings and severity == "warning":
+                        continue
+                    if config.warnings_only and severity != "warning":
+                        continue
                     file_violations.append((v, rule))
                     
         if not file_violations:
@@ -563,6 +584,11 @@ def run_linter(config: Config) -> int:
                     rule_disabled_lines = disabled_map.get(rule.rule_id, set())
                     for v in violations:
                         if v.line_number not in rule_disabled_lines:
+                            severity = rule.get_config_value(rule_config, "severity", "error")
+                            if config.no_warnings and severity == "warning":
+                                continue
+                            if config.warnings_only and severity != "warning":
+                                continue
                             iter_violations.append((v, rule))
                             
                 if not iter_violations:
@@ -593,16 +619,18 @@ def run_linter(config: Config) -> int:
                 try:
                     with open(file_path, "w", encoding="utf-8") as f:
                         f.write(current_content)
-                    if config.verbose:
+                    if config.verbose and not config.quiet:
                         print(f"Fixed issues in {file_path}")
                 except Exception as e:
-                    print(f"Error writing fixed content to '{file_path}': {e}")
+                    if not config.quiet:
+                        print(f"Error writing fixed content to '{file_path}': {e}")
             
             # 2. Report unfixable errors
             for v, rule in unfixable_violations:
                 rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                 severity = rule.get_config_value(rule_config, "severity", "error")
-                print(format_violation(v, file_path, config.verbose, rule.description, severity))
+                if not config.quiet:
+                    print(format_violation(v, file_path, config.verbose, rule.description, severity))
                 total_violations_reported += 1
                 if severity != "warning":
                     total_errors_reported += 1
@@ -621,8 +649,9 @@ def run_linter(config: Config) -> int:
                         pass
                 
                 if current_content != content:
-                    print(f"--- {file_path} (original)")
-                    print(f"+++ {file_path} (dry-run fix)")
+                    if not config.quiet:
+                        print(f"--- {file_path} (original)")
+                        print(f"+++ {file_path} (dry-run fix)")
                     diff = list(difflib.unified_diff(
                         content.splitlines(keepends=True),
                         current_content.splitlines(keepends=True),
@@ -631,10 +660,11 @@ def run_linter(config: Config) -> int:
                         n=2
                     ))
                     # Print diff lines (excluding the header which we customized)
-                    for line in diff[2:]:
-                        print(line, end="")
-                    if not diff[-1].endswith("\n"):
-                        print()
+                    if not config.quiet:
+                        for line in diff[2:]:
+                            print(line, end="")
+                        if not diff[-1].endswith("\n"):
+                            print()
                     for v, rule in fixable:
                         rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                         if rule.get_config_value(rule_config, "severity", "error") != "warning":
@@ -645,7 +675,8 @@ def run_linter(config: Config) -> int:
             for v, rule in unfixable:
                 rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                 severity = rule.get_config_value(rule_config, "severity", "error")
-                print(format_violation(v, file_path, config.verbose, rule.description, severity))
+                if not config.quiet:
+                    print(format_violation(v, file_path, config.verbose, rule.description, severity))
                 total_violations_reported += 1
                 if severity != "warning":
                     total_errors_reported += 1
@@ -655,7 +686,8 @@ def run_linter(config: Config) -> int:
             for v, rule in file_violations:
                 rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                 severity = rule.get_config_value(rule_config, "severity", "error")
-                print(format_violation(v, file_path, config.verbose, rule.description, severity))
+                if not config.quiet:
+                    print(format_violation(v, file_path, config.verbose, rule.description, severity))
                 total_violations_reported += 1
                 if severity != "warning":
                     total_errors_reported += 1
