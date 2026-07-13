@@ -167,6 +167,33 @@ class ColumnLayoutRule(BaseRule):
                             
                     # Parse the list of expressions starting immediately after the keyword
                     list_start = keyword_end
+                    
+                    # Check for DISTINCT or ALL modifier right after SELECT
+                    if keyword == "SELECT":
+                        next_idx = list_start
+                        while next_idx < n and content[next_idx].isspace():
+                            next_idx += 1
+                        w_mod_start = next_idx
+                        while next_idx < n and (content[next_idx].isalnum() or content[next_idx] == '_'):
+                            next_idx += 1
+                        word_mod = content[w_mod_start:next_idx].lower()
+                        if word_mod in ("distinct", "all"):
+                            keyword = f"SELECT {word_mod.upper()}"
+                            list_start = next_idx
+                            
+                            # Check if it is DISTINCT ON
+                            if word_mod == "distinct":
+                                next_on_idx = list_start
+                                while next_on_idx < n and content[next_on_idx].isspace():
+                                    next_on_idx += 1
+                                w_on_start = next_on_idx
+                                while next_on_idx < n and (content[next_on_idx].isalnum() or content[next_on_idx] == '_'):
+                                    next_on_idx += 1
+                                word_on = content[w_on_start:next_on_idx].lower()
+                                if word_on == "on":
+                                    keyword = "SELECT DISTINCT ON"
+                                    list_start = next_on_idx
+                                    
                     expressions = []
                     expression_indents = []
                     expression_ranges = []
@@ -294,12 +321,7 @@ class ColumnLayoutRule(BaseRule):
                     if "\n" not in expr:
                         expr = re.sub(r"\s+", " ", expr)
                     if expr:
-                        if keyword == "SELECT":
-                            match_distinct = re.match(r"^(distinct|all)\b\s*(.*)$", expr, re.IGNORECASE)
-                            if match_distinct:
-                                keyword = f"SELECT {match_distinct.group(1).upper()}"
-                                expr = match_distinct.group(2).strip()
-                                
+                        # DISTINCT/ALL has been parsed at the start of SELECT
                         if expr:
                             expressions.append(expr)
                             # Find original base indentation of this expression
