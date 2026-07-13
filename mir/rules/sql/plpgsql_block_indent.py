@@ -56,6 +56,7 @@ class PlpgsqlBlockIndentRule(BaseRule):
         
         stack = []
         violations = []
+        case_depth = 0
         
         max_line = max(lines_tokens.keys()) if lines_tokens else 0
         for l in range(1, max_line + 1):
@@ -69,102 +70,113 @@ class PlpgsqlBlockIndentRule(BaseRule):
             first_tok = active_toks[0]
             first_val = first_tok["value"].upper()
             
-            is_adjusting = False
+            skip_procedural = (case_depth > 0) or (first_val == "CASE")
             
-            if first_val == "BEGIN":
-                if stack and stack[-1] == "DECLARE":
-                    stack.pop()
-            elif first_val == "END":
-                is_end_if = False
-                is_end_loop = False
-                if len(active_toks) > 1:
-                    next_val = active_toks[1]["value"].upper()
-                    if next_val == "IF":
-                        is_end_if = True
-                    elif next_val == "LOOP":
-                        is_end_loop = True
+            if not skip_procedural:
+                is_adjusting = False
                 
-                if is_end_if:
-                    if stack and stack[-1] == "IF":
+                if first_val == "BEGIN":
+                    if stack and stack[-1] == "DECLARE":
                         stack.pop()
-                elif is_end_loop:
-                    if stack and stack[-1] in ("LOOP", "FOR", "WHILE"):
-                        stack.pop()
-                else:
-                    if stack and stack[-1] in ("BEGIN", "DECLARE", "EXCEPTION"):
-                        stack.pop()
-            elif first_val in ("ELSIF", "ELSE", "WHEN"):
-                is_adjusting = True
-                
-            expected_level = len(stack)
-            if is_adjusting and expected_level > 0:
-                expected_level = expected_level - 1
-                
-            expected_spaces = expected_level * indent_size
-            
-            leading_ws = ""
-            if line_toks and line_toks[0]["type"] == "WHITESPACE":
-                leading_ws = line_toks[0]["value"]
-            leading_spaces = len(leading_ws.replace("\n", "").replace("\r", "").replace("\t", " " * indent_size))
-            
-            should_check = False
-            exact_enforce = False
-            
-            if expected_level > 0:
-                should_check = True
-                # Check if this line is a block keyword or starts a statement
-                is_block_keyword = first_val in ("DECLARE", "BEGIN", "EXCEPTION", "IF", "WHILE", "FOR", "LOOP", "ELSIF", "ELSE", "END")
-                is_starter = False
-                tok_id = id(first_tok)
-                if tok_id in token_to_active_pos:
-                    pos = token_to_active_pos[tok_id]
-                    if pos == 0:
-                        is_starter = True
-                    else:
-                        prev_tok = tokens[active_indices[pos - 1]]
-                        if prev_tok["value"].upper() in (";", "BEGIN", "THEN", "ELSE", "EXCEPTION", "LOOP", "DECLARE"):
-                            is_starter = True
-                exact_enforce = is_block_keyword or is_starter
-            elif first_val in ("DECLARE", "BEGIN", "END", "IF", "WHILE", "FOR", "LOOP", "ELSIF", "ELSE"):
-                should_check = True
-                exact_enforce = True
-                
-            if should_check:
-                is_violation = False
-                if exact_enforce:
-                    if leading_spaces != expected_spaces:
-                        is_violation = True
-                else:
-                    if leading_spaces < expected_spaces:
-                        is_violation = True
-                        
-                if is_violation:
-                    violations.append({
-                        "line": l,
-                        "expected": expected_spaces,
-                        "actual": leading_spaces,
-                        "first_token": first_tok
-                    })
-                
-            if first_val == "DECLARE":
-                stack.append("DECLARE")
-            elif first_val == "BEGIN":
-                stack.append("BEGIN")
-            elif first_val == "EXCEPTION":
-                stack.append("EXCEPTION")
-            elif first_val == "IF":
-                stack.append("IF")
-            elif first_val == "WHILE":
-                stack.append("WHILE")
-            elif first_val == "FOR":
-                has_loop = any(t["value"].upper() == "LOOP" for t in active_toks)
-                if has_loop:
-                    stack.append("FOR")
-            elif first_val == "LOOP":
-                has_for_while = any(t["value"].upper() in ("FOR", "WHILE") for t in active_toks)
-                if not has_for_while:
-                    stack.append("LOOP")
+                elif first_val == "END":
+                    is_end_if = False
+                    is_end_loop = False
+                    if len(active_toks) > 1:
+                        next_val = active_toks[1]["value"].upper()
+                        if next_val == "IF":
+                            is_end_if = True
+                        elif next_val == "LOOP":
+                            is_end_loop = True
                     
+                    if is_end_if:
+                        if stack and stack[-1] == "IF":
+                            stack.pop()
+                    elif is_end_loop:
+                        if stack and stack[-1] in ("LOOP", "FOR", "WHILE"):
+                            stack.pop()
+                    else:
+                        if stack and stack[-1] in ("BEGIN", "DECLARE", "EXCEPTION"):
+                            stack.pop()
+                elif first_val in ("ELSIF", "ELSE", "WHEN"):
+                    is_adjusting = True
+                    
+                expected_level = len(stack)
+                if is_adjusting and expected_level > 0:
+                    expected_level = expected_level - 1
+                    
+                expected_spaces = expected_level * indent_size
+                
+                leading_ws = ""
+                if line_toks and line_toks[0]["type"] == "WHITESPACE":
+                    leading_ws = line_toks[0]["value"]
+                leading_spaces = len(leading_ws.replace("\n", "").replace("\r", "").replace("\t", " " * indent_size))
+                
+                should_check = False
+                exact_enforce = False
+                
+                if expected_level > 0:
+                    should_check = True
+                    # Check if this line is a block keyword or starts a statement
+                    is_block_keyword = first_val in ("DECLARE", "BEGIN", "EXCEPTION", "IF", "WHILE", "FOR", "LOOP", "ELSIF", "ELSE", "END")
+                    is_starter = False
+                    tok_id = id(first_tok)
+                    if tok_id in token_to_active_pos:
+                        pos = token_to_active_pos[tok_id]
+                        if pos == 0:
+                            is_starter = True
+                        else:
+                            prev_tok = tokens[active_indices[pos - 1]]
+                            if prev_tok["value"].upper() in (";", "BEGIN", "THEN", "ELSE", "EXCEPTION", "LOOP", "DECLARE"):
+                                is_starter = True
+                    exact_enforce = is_block_keyword or is_starter
+                elif first_val in ("DECLARE", "BEGIN", "END", "IF", "WHILE", "FOR", "LOOP", "ELSIF", "ELSE"):
+                    should_check = True
+                    exact_enforce = True
+                    
+                if should_check:
+                    is_violation = False
+                    if exact_enforce:
+                        if leading_spaces != expected_spaces:
+                            is_violation = True
+                    else:
+                        if leading_spaces < expected_spaces:
+                            is_violation = True
+                            
+                    if is_violation:
+                        violations.append({
+                            "line": l,
+                            "expected": expected_spaces,
+                            "actual": leading_spaces,
+                            "first_token": first_tok
+                        })
+                    
+                if first_val == "DECLARE":
+                    stack.append("DECLARE")
+                elif first_val == "BEGIN":
+                    stack.append("BEGIN")
+                elif first_val == "EXCEPTION":
+                    stack.append("EXCEPTION")
+                elif first_val == "IF":
+                    stack.append("IF")
+                elif first_val == "WHILE":
+                    stack.append("WHILE")
+                elif first_val == "FOR":
+                    has_loop = any(t["value"].upper() == "LOOP" for t in active_toks)
+                    if has_loop:
+                        stack.append("FOR")
+                elif first_val == "LOOP":
+                    has_for_while = any(t["value"].upper() in ("FOR", "WHILE") for t in active_toks)
+                    if not has_for_while:
+                        stack.append("LOOP")
+                        
+            # Chronologically update case_depth by scanning all active tokens on the line
+            for t in active_toks:
+                if t["type"] == "KEYWORD" and t["value"].upper() == "CASE":
+                    case_depth += 1
+                elif t["type"] == "KEYWORD" and t["value"].upper() == "END":
+                    if case_depth > 0:
+                        case_depth -= 1
+                        
         return violations
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
