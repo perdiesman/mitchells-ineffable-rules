@@ -13,7 +13,7 @@ EXCLUDED_WORDS = {
     "geometry", "numeric", "varchar", "integer", "int", "bigint",
     "smallint", "text", "boolean", "bool", "decimal", "json", "jsonb",
     "uuid", "date", "timestamp", "timestamptz", "time", "timetz", "real",
-    "char", "character", "double"
+    "char", "character", "double", "varying"
 }
 
 class FunctionCaseRule(BaseRule):
