@@ -640,3 +640,28 @@ def find_datatype_token_groups(tokens: List[dict], content: str) -> List[List[di
                                         type_groups.append(group)
                             
     return type_groups
+
+
+def is_values_multi(tokens: List[dict], open_idx: int) -> bool:
+    # Check if the preceding active token is VALUES
+    prev_tok = None
+    for p_idx in range(open_idx - 1, -1, -1):
+        if tokens[p_idx]["type"] not in ("WHITESPACE", "COMMENT"):
+            prev_tok = tokens[p_idx]
+            break
+    if not prev_tok or prev_tok["value"].upper() != "VALUES":
+        return False
+        
+    close_idx = find_matching_paren(tokens, open_idx)
+    if close_idx is None:
+        return False
+        
+    next_tok = None
+    for n_idx in range(close_idx + 1, len(tokens)):
+        if tokens[n_idx]["type"] not in ("WHITESPACE", "COMMENT"):
+            next_tok = tokens[n_idx]
+            break
+            
+    if next_tok and next_tok["type"] == "COMMA":
+        return True
+    return False
