@@ -14,12 +14,17 @@ class ParenContentIndentRule(BaseRule):
     
     examples = [
         {
+            "violating": "SELECT (\na +\nb\n) FROM users;",
+            "correct": "SELECT (\n    a +\n    b\n) FROM users;"
+        },
+        {
             "violating": "SELECT COALESCE(\na,\nb\n) FROM users;",
-            "correct": "SELECT COALESCE(\n    a,\n    b\n) FROM users;"
+            "correct": "SELECT COALESCE(\n        a,\n        b\n    ) FROM users;"
         }
     ]
     additional_validations = [
-        'SELECT COALESCE(a, b) FROM users;'
+        'SELECT COALESCE(a, b) FROM users;',
+        'SELECT (a + b) FROM users;'
     ]
 
     def _get_line_expected_indents(self, content: str) -> Dict[int, str]:
@@ -77,10 +82,27 @@ class ParenContentIndentRule(BaseRule):
             open_line_text = lines[open_tok["line"] - 1]
             open_indent = open_line_text[:len(open_line_text) - len(open_line_text.lstrip())]
             
+            # Check if this parenthesis is function-like
+            prev_tok = None
+            try:
+                open_idx = tokens.index(open_tok)
+                for p_idx in range(open_idx - 1, -1, -1):
+                    if tokens[p_idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                        prev_tok = tokens[p_idx]
+                        break
+            except ValueError:
+                pass
+                
+            is_func_like = False
+            if prev_tok:
+                val_up = prev_tok["value"].upper()
+                if prev_tok["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST"):
+                    is_func_like = True
+
             if inner[1] == "content":
-                expected_indents[line_no] = open_indent + "    "
+                expected_indents[line_no] = open_indent + ("        " if is_func_like else "    ")
             else:
-                expected_indents[line_no] = open_indent
+                expected_indents[line_no] = open_indent + ("    " if is_func_like else "")
                 
         return expected_indents
 
