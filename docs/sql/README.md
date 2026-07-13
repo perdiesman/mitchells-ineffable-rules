@@ -24,6 +24,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-operator-spacing`](rules/general/IR-operator-spacing.md) | Operators should have a single space on both sides. | Yes | [View Details](rules/general/IR-operator-spacing.md) |
 | [`IR-plpgsql-keyword-case`](rules/general/IR-plpgsql-keyword-case.md) | Procedural PL/pgSQL keywords and trigger variables must be in uppercase. | Yes | [View Details](rules/general/IR-plpgsql-keyword-case.md) |
 | [`IR-redundant-keywords`](rules/general/IR-redundant-keywords.md) | Remove redundant implied keywords like INNER, OUTER, and ASC. | Yes | [View Details](rules/general/IR-redundant-keywords.md) |
+| [`IR-statement-blank-lines`](rules/general/IR-statement-blank-lines.md) | Ensure at least one blank line between consecutive top-level SQL statements. | Yes | [View Details](rules/general/IR-statement-blank-lines.md) |
 | [`IR-statement-semicolon`](rules/general/IR-statement-semicolon.md) | Enforce that all top-level statements end with a trailing semicolon. | Yes | [View Details](rules/general/IR-statement-semicolon.md) |
 | [`IR-trailing-semicolon`](rules/general/IR-trailing-semicolon.md) | Enforce that the last SQL statement ends with a trailing semicolon, placed immediately after the statement text. | Yes | [View Details](rules/general/IR-trailing-semicolon.md) |
 | [`IR-unresolved-alias`](rules/general/IR-unresolved-alias.md) | Detect references to table aliases or qualifiers that are not declared in the query context. | No | [View Details](rules/general/IR-unresolved-alias.md) |
