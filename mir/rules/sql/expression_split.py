@@ -82,7 +82,7 @@ class ExpressionSplitRule(BaseRule):
                     is_func_like = False
                     if prev_tok:
                         val_up = prev_tok["value"].upper()
-                        if prev_tok["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST"):
+                        if prev_tok["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST", "IN", "ANY", "SOME"):
                             is_func_like = True
                             
                     if is_func_like:
