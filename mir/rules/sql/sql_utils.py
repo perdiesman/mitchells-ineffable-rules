@@ -575,4 +575,68 @@ def find_datatype_token_groups(tokens: List[dict], content: str) -> List[List[di
                         if group:
                             type_groups.append(group)
                             
+    # Context 5: CREATE [TEMP/TEMPORARY] TABLE table_name ( columns )
+    for idx, t in enumerate(active_tokens):
+        if t["type"] == "KEYWORD" and t["value"].upper() == "CREATE":
+            is_table = False
+            table_idx = None
+            for offset in range(1, 4):
+                if idx + offset < n_active:
+                    val = active_tokens[idx + offset]["value"].upper()
+                    if val == "TABLE":
+                        is_table = True
+                        table_idx = idx + offset
+                        break
+                    elif val in ("TEMP", "TEMPORARY"):
+                        if idx + offset + 1 < n_active and active_tokens[idx + offset + 1]["value"].upper() == "TABLE":
+                            is_table = True
+                            table_idx = idx + offset + 1
+                            break
+            if is_table:
+                # Find the column list parenthesis '('
+                col_start = None
+                for sub_idx in range(table_idx + 1, n_active):
+                    if active_tokens[sub_idx]["value"] == "(":
+                        col_start = sub_idx
+                        break
+                if col_start is not None:
+                    # Scan until matching ')'
+                    p_level = 0
+                    col_end = None
+                    for sub_idx in range(col_start, n_active):
+                        sub_tok = active_tokens[sub_idx]
+                        if sub_tok["value"] == "(":
+                            p_level += 1
+                        elif sub_tok["value"] == ")":
+                            p_level -= 1
+                            if p_level == 0:
+                                col_end = sub_idx
+                                break
+                    if col_end is not None:
+                        col_tokens = active_tokens[col_start + 1 : col_end]
+                        p_level = 0
+                        current_col = []
+                        cols = []
+                        for ct in col_tokens:
+                            if ct["value"] == "(":
+                                p_level += 1
+                            elif ct["value"] == ")":
+                                p_level -= 1
+                            if p_level == 0 and ct["type"] == "COMMA":
+                                if current_col:
+                                    cols.append(current_col)
+                                    current_col = []
+                            else:
+                                current_col.append(ct)
+                        if current_col:
+                            cols.append(current_col)
+                            
+                        for col in cols:
+                            if col and col[0]["value"].upper() not in ("CONSTRAINT", "PRIMARY", "FOREIGN", "UNIQUE", "CHECK"):
+                                if len(col) >= 2:
+                                    global_active_idx = token_to_active_idx[id(col[1])]
+                                    group = try_parse_type_at(global_active_idx)
+                                    if group:
+                                        type_groups.append(group)
+                            
     return type_groups
