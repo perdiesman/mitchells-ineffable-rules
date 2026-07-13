@@ -29,6 +29,12 @@ class TriggerLayoutRule(BaseRule):
         "CREATE TRIGGER short_trigger BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION f();"
     ]
 
+    def _indent_clause(self, clause_str: str, indent: str) -> str:
+        lines = clause_str.splitlines()
+        if not lines:
+            return ""
+        return lines[0].strip() + "".join("\n" + indent + line.strip() for line in lines[1:])
+
     def _find_violations(self, content: str, rule_config: Dict[str, Any]) -> List[dict]:
         max_len = self.get_config_value(rule_config, "max_length", 120)
         tokens = tokenize_sql(content)
@@ -146,16 +152,21 @@ class TriggerLayoutRule(BaseRule):
                         break
                 clause_indent = base_indent + "    "
                 
-                single_line = c1_str + " " + c2_str + " " + c3_str + (" " + c4_str if c4_str else "") + " " + c5_str
+                import re
+                c2_flat = re.sub(r"\s+", " ", c2_str)
+                c3_flat = re.sub(r"\s+", " ", c3_str)
+                c4_flat = re.sub(r"\s+", " ", c4_str)
+                c5_flat = re.sub(r"\s+", " ", c5_str)
+                single_line = c1_str + " " + c2_flat + " " + c3_flat + (" " + c4_flat if c4_flat else "") + " " + c5_flat
                 if len(base_indent + single_line) <= max_len:
                     expected = single_line
                 else:
                     expected = (
                         c1_str + "\n" +
-                        clause_indent + c2_str + "\n" +
-                        clause_indent + c3_str +
-                        ("\n" + clause_indent + c4_str if c4_str else "") + "\n" +
-                        clause_indent + c5_str
+                        clause_indent + self._indent_clause(c2_str, clause_indent) + "\n" +
+                        clause_indent + self._indent_clause(c3_str, clause_indent) +
+                        ("\n" + clause_indent + self._indent_clause(c4_str, clause_indent) if c4_str else "") + "\n" +
+                        clause_indent + self._indent_clause(c5_str, clause_indent)
                     )
                     
                 original = content[t["start"] : tokens[semi_idx]["end"]].strip()
