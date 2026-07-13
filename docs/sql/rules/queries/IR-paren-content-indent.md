@@ -8,7 +8,23 @@ Content inside multi-line parentheses should be indented 4 spaces relative to th
 - **Configuration Options**:
   - `enabled`: `true`
 
-#### ❌ Violating Example
+#### ❌ Violating Example #1
+```sql
+SELECT (
+a +
+b
+) FROM users;
+```
+
+####  Correct Example #1
+```sql
+SELECT (
+    a +
+    b
+) FROM users;
+```
+
+#### ❌ Violating Example #2
 ```sql
 SELECT COALESCE(
 a,
@@ -16,15 +32,43 @@ b
 ) FROM users;
 ```
 
-####  Correct Example
+####  Correct Example #2
 ```sql
 SELECT COALESCE(
-    a,
-    b
-) FROM users;
+        a,
+        b
+    ) FROM users;
+```
+
+#### ❌ Violating Example #3
+```sql
+INSERT INTO t (c) VALUES
+(1),
+    (2);
+```
+
+####  Correct Example #3
+```sql
+INSERT INTO t(c) VALUES
+    (1),
+    (2);
 ```
 
 #### Additional Validations
 ```sql
 SELECT COALESCE(a, b) FROM users;
+```
+
+```sql
+SELECT (a + b) FROM users;
+```
+
+```sql
+INSERT INTO t(c) VALUES (1);
+```
+
+```sql
+INSERT INTO t(c) VALUES
+    (1),
+    (2);
 ```

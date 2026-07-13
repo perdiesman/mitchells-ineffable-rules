@@ -8,9 +8,6 @@ PL/pgSQL variable and trigger field assignments must use the standard assignment
 - **Configuration Options**:
   - `enabled`: `true`
 
-#### Default `EXCLUDED_STARTERS`
-`ALTER`, `ANALYZE`, `BEGIN`, `CALL`, `CASE`, `CLOSE`, `COMMIT`, `COPY`, `CREATE`, `DECLARE`, `DELETE`, `DROP`, `END`, `EXECUTE`, `EXPLAIN`, `FETCH`, `FOR`, `GET`, `GRANT`, `IF`, `INSERT`, `LOCK`, `LOOP`, `MOVE`, `OPEN`, `PERFORM`, `RAISE`, `REFRESH`, `REINDEX`, `RETURN`, `REVOKE`, `ROLLBACK`, `SELECT`, `TRUNCATE`, `UPDATE`, `VACUUM`, `WHILE`, `WITH`
-
 #### ❌ Violating Example #1
 ```sql
 BEGIN

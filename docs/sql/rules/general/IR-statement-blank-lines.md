@@ -1,6 +1,6 @@
 # IR-statement-blank-lines
 
-Ensure at least one blank line between consecutive top-level SQL statements.
+Ensure at least one blank line between consecutive SQL statements.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
@@ -9,15 +9,30 @@ Ensure at least one blank line between consecutive top-level SQL statements.
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `min_blank_lines` (Default: `1`): Minimum number of blank lines between consecutive SQL statements.
 
-#### ❌ Violating Example
+#### ❌ Violating Example #1
 ```sql
 SELECT 1;
 SELECT 2;
 ```
 
-####  Correct Example
+####  Correct Example #1
 ```sql
 SELECT 1;
 
+SELECT 2;
+```
+
+#### ❌ Violating Example #2
+```sql
+SELECT 1;
+-- comment for 2
+SELECT 2;
+```
+
+####  Correct Example #2
+```sql
+SELECT 1;
+
+-- comment for 2
 SELECT 2;
 ```

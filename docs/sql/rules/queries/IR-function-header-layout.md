@@ -7,9 +7,9 @@ Standardize formatting, line-wrapping, and indentation of function creation head
 - **Category**: Query Structure Rules
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
-  - `max_length` (Default: `120`): Maximum line length before wrapping clauses.
+  - `max_length` (Default: `100`): Maximum line length before wrapping clauses.
 
-#### ❌ Violating Example
+#### ❌ Violating Example #1
 ```sql
 CREATE OR REPLACE FUNCTION my_func()
  RETURNS trigger
@@ -17,8 +17,28 @@ CREATE OR REPLACE FUNCTION my_func()
 AS $function$
 ```
 
-####  Correct Example
+####  Correct Example #1
 ```sql
 CREATE OR REPLACE FUNCTION my_func() RETURNS trigger LANGUAGE plpgsql AS
 $function$
+```
+
+#### ❌ Violating Example #2
+```sql
+CREATE FUNCTION test_func()
+AS $body$
+BEGIN
+    RETURN 1;
+END;
+$body$ LANGUAGE plpgsql STABLE RETURNS integer;
+```
+
+####  Correct Example #2
+```sql
+CREATE FUNCTION test_func() RETURNS integer LANGUAGE plpgsql STABLE AS
+$body$
+BEGIN
+    RETURN 1;
+END;
+$body$;
 ```

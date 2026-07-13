@@ -24,7 +24,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-operator-spacing`](rules/general/IR-operator-spacing.md) | Operators should have a single space on both sides. | Yes | [View Details](rules/general/IR-operator-spacing.md) |
 | [`IR-plpgsql-keyword-case`](rules/general/IR-plpgsql-keyword-case.md) | Procedural PL/pgSQL keywords and trigger variables must be in uppercase. | Yes | [View Details](rules/general/IR-plpgsql-keyword-case.md) |
 | [`IR-redundant-keywords`](rules/general/IR-redundant-keywords.md) | Remove redundant implied keywords like INNER, OUTER, and ASC. | Yes | [View Details](rules/general/IR-redundant-keywords.md) |
-| [`IR-statement-blank-lines`](rules/general/IR-statement-blank-lines.md) | Ensure at least one blank line between consecutive top-level SQL statements. | Yes | [View Details](rules/general/IR-statement-blank-lines.md) |
+| [`IR-statement-blank-lines`](rules/general/IR-statement-blank-lines.md) | Ensure at least one blank line between consecutive SQL statements. | Yes | [View Details](rules/general/IR-statement-blank-lines.md) |
 | [`IR-statement-semicolon`](rules/general/IR-statement-semicolon.md) | Enforce that all top-level statements end with a trailing semicolon. | Yes | [View Details](rules/general/IR-statement-semicolon.md) |
 | [`IR-trailing-semicolon`](rules/general/IR-trailing-semicolon.md) | Enforce that the last SQL statement ends with a trailing semicolon, placed immediately after the statement text. | Yes | [View Details](rules/general/IR-trailing-semicolon.md) |
 | [`IR-unresolved-alias`](rules/general/IR-unresolved-alias.md) | Detect references to table aliases or qualifiers that are not declared in the query context. | No | [View Details](rules/general/IR-unresolved-alias.md) |
@@ -68,6 +68,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-subquery-depth-limit`](rules/queries/IR-subquery-depth-limit.md) | Subquery nesting depth should not exceed the configured limit (default: 3). When over the limit, Common Table Expressions (CTEs) are preferred. | No | [View Details](rules/queries/IR-subquery-depth-limit.md) |
 | [`IR-subquery-indent`](rules/queries/IR-subquery-indent.md) | Subqueries should be indented 4 spaces relative to their opening parenthesis. | Yes | [View Details](rules/queries/IR-subquery-indent.md) |
 | [`IR-table-alias-as`](rules/queries/IR-table-alias-as.md) | Table and subquery aliases should not use the AS keyword. | Yes | [View Details](rules/queries/IR-table-alias-as.md) |
+| [`IR-table-field-spacing`](rules/queries/IR-table-field-spacing.md) | Enforce exactly one space between column/field name and its data type. | Yes | [View Details](rules/queries/IR-table-field-spacing.md) |
 | [`IR-trigger-layout`](rules/queries/IR-trigger-layout.md) | Format and wrap long CREATE TRIGGER statements to standard multiline layout. | Yes | [View Details](rules/queries/IR-trigger-layout.md) |
 | [`IR-update-layout`](rules/queries/IR-update-layout.md) | Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent assignments. | Yes | [View Details](rules/queries/IR-update-layout.md) |
 | [`IR-where-multi`](rules/queries/IR-where-multi.md) | Each AND/OR clause in a multi-condition WHERE clause should start on its own line, indented at 4 spaces. | Yes | [View Details](rules/queries/IR-where-multi.md) |
@@ -78,7 +79,6 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
 | [`IR-create-view-indent`](rules/schema-definition/IR-create-view-indent.md) | SELECT statements under a CREATE VIEW should be indented 4 spaces relative to the CREATE VIEW statement. | Yes | [View Details](rules/schema-definition/IR-create-view-indent.md) |
-| [`IR-table-field-spacing`](rules/schema-definition/IR-table-field-spacing.md) | Enforce exactly one space (no alignment padding) between column/field names and their data types. | Yes | [View Details](rules/schema-definition/IR-table-field-spacing.md) |
 
 ## Data Modification Rules
 
