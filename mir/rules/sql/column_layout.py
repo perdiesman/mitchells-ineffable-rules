@@ -55,7 +55,6 @@ class ColumnLayoutRule(BaseRule):
         string_char = None
         in_single_comment = False
         in_multi_comment = False
-        paren_level = 0
         line_number = 1
         line_start_idx = 0
         
@@ -128,15 +127,6 @@ class ColumnLayoutRule(BaseRule):
                 i += 2
                 continue
                 
-            # Parenthesis tracking
-            if c == '(':
-                paren_level += 1
-                i += 1
-                continue
-            if c == ')':
-                paren_level = max(0, paren_level - 1)
-                i += 1
-                continue
                 
             # Match keywords
             if (c.isalpha() or c == '_'):
@@ -179,6 +169,7 @@ class ColumnLayoutRule(BaseRule):
                     list_start = keyword_end
                     expressions = []
                     expression_indents = []
+                    expression_ranges = []
                     
                     list_paren = 0
                     list_string = False
@@ -288,6 +279,7 @@ class ColumnLayoutRule(BaseRule):
                                     else:
                                         break
                                 expression_indents.append(expr_base_indent)
+                                expression_ranges.append((actual_start, j))
                             last_non_space_idx = j + 1
                             j += 1
                             current_expr_start = j
@@ -323,6 +315,7 @@ class ColumnLayoutRule(BaseRule):
                                 else:
                                     break
                             expression_indents.append(expr_base_indent)
+                            expression_ranges.append((actual_start, list_end))
                     
                     # Prevent formatting if there is an inline comment inside the clause text
                     clause_text = content[w_start:list_end]
@@ -345,6 +338,7 @@ class ColumnLayoutRule(BaseRule):
                         "list_end": list_end,
                         "expressions": expressions,
                         "expression_indents": expression_indents,
+                        "expression_ranges": expression_ranges,
                         "line_number": w_line,
                         "indentation": indentation
                     })
@@ -356,42 +350,37 @@ class ColumnLayoutRule(BaseRule):
                 
             i += 1
             
+        # Mark nested clauses using coordinate containment
+        for cl1 in clauses:
+            for cl2 in clauses:
+                if cl1 is not cl2:
+                    if cl2["list_start"] <= cl1["keyword_start"] < cl2["list_end"]:
+                        cl1["is_nested"] = True
+                        break
         return clauses
 
     def _reindent_multiline(self, text: str, new_indent: str, orig_base_indent: str) -> str:
         lines = text.splitlines()
-        if len(lines) <= 1:
+        if not lines:
             return text
-        
-        orig_base_len = len(orig_base_indent)
-        
-        # Find leading whitespace of the first line of the expression text
-        first_line = lines[0]
-        first_ws = ""
-        for char in first_line:
-            if char in (" ", "\t"):
-                first_ws += char
-            else:
-                break
-        first_indent = len(first_ws)
-        
-        # Rebuild the first line starting with new_indent
-        rebuilt = [new_indent + first_line[first_indent:]]
+            
+        indent_size = 4
+        if isinstance(orig_base_indent, str):
+            orig_base_len = len(orig_base_indent.replace("\t", " " * indent_size))
+        elif isinstance(orig_base_indent, int):
+            orig_base_len = orig_base_indent
+        else:
+            orig_base_len = 0
+            
+        rebuilt = [new_indent + lines[0].lstrip()]
         for l in lines[1:]:
-            if l.strip() == "":
+            stripped = l.lstrip()
+            if stripped == "":
                 rebuilt.append("")
             else:
-                # Find leading whitespace of this line
-                l_ws = ""
-                for char in l:
-                    if char in (" ", "\t"):
-                        l_ws += char
-                    else:
-                        break
-                l_indent = len(l_ws)
-                # Compute relative indentation relative to orig_base_len
+                l_indent = len(l) - len(stripped)
                 relative_indent = max(0, l_indent - orig_base_len)
-                rebuilt.append(new_indent + " " * relative_indent + l[l_indent:])
+                rebuilt.append(new_indent + " " * relative_indent + stripped)
         return "\n".join(rebuilt)
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
@@ -425,7 +414,8 @@ class ColumnLayoutRule(BaseRule):
         clauses = self._parse_clauses(content)
         lines = content.splitlines()
         
-        for cl in clauses:
+        top_level_clauses = [cl for cl in clauses if not cl.get("is_nested", False)]
+        for cl in top_level_clauses:
             keyword = cl["keyword"]
             expressions = cl["expressions"]
             indentation = cl["indentation"]
@@ -510,7 +500,8 @@ class ColumnLayoutRule(BaseRule):
             base_indent_spaces = 0
             
         clauses = self._parse_clauses(content)
-        if not clauses:
+        top_level_clauses = [cl for cl in clauses if not cl.get("is_nested", False)]
+        if not top_level_clauses:
             return content
             
         fixed_chunks = []
@@ -518,7 +509,7 @@ class ColumnLayoutRule(BaseRule):
         
         ending = "\r\n" if "\r\n" in content else "\n"
         
-        for cl in clauses:
+        for cl in top_level_clauses:
             keyword = cl["keyword"]
             expressions = cl["expressions"]
             indentation = cl["indentation"]
@@ -526,18 +517,31 @@ class ColumnLayoutRule(BaseRule):
             if not expressions:
                 continue
                 
+            # Recursively format nested expressions (subqueries) first
+            recursively_formatted_expressions = []
+            recursively_formatted_indices = set()
+            for idx, (expr, orig_indent) in enumerate(zip(expressions, cl.get("expression_indents", [""] * len(expressions)))):
+                if any(k in expr.lower() for k in ("select", "group by", "order by")):
+                    normalized_expr = self._reindent_multiline(expr, "", orig_indent)
+                    recursively_formatted_expressions.append(self.fix(normalized_expr, file_path, rule_config))
+                    recursively_formatted_indices.add(idx)
+                else:
+                    recursively_formatted_expressions.append(expr)
+            expressions = recursively_formatted_expressions
+            
             single_line_clause = f"{keyword} {', '.join(expressions)}"
             effective_indent_len = max(0, len(indentation) - base_indent_spaces)
             total_len = effective_indent_len + len(single_line_clause)
             
-            if total_len <= max_length:
+            if total_len <= max_length and not any("\n" in expr for expr in expressions):
                 formatted = single_line_clause
             else:
                 inner_indent = indentation + (" " * indent_size)
                 formatted_exprs = []
-                for expr, orig_indent in zip(expressions, cl.get("expression_indents", [""] * len(expressions))):
+                for idx, (expr, orig_indent) in enumerate(zip(expressions, cl.get("expression_indents", [""] * len(expressions)))):
                     if "\n" in expr:
-                        formatted_exprs.append(self._reindent_multiline(expr, inner_indent, orig_indent))
+                        effective_orig_indent = "" if idx in recursively_formatted_indices else orig_indent
+                        formatted_exprs.append(self._reindent_multiline(expr, inner_indent, effective_orig_indent))
                     else:
                         formatted_exprs.append(f"{inner_indent}{expr}")
                 formatted = f"{keyword}{ending}" + f",{ending}".join(formatted_exprs)

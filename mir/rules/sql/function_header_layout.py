@@ -51,11 +51,11 @@ class FunctionHeaderLayoutRule(BaseRule):
     enabled_by_default = True
     
     default_config = {
-        "max_length": 120
+        "max_length": 100
     }
     config_options = {
         "max_length": {
-            "default": 120,
+            "default": 100,
             "description": "Maximum line length before wrapping clauses."
         }
     }
@@ -64,12 +64,16 @@ class FunctionHeaderLayoutRule(BaseRule):
         {
             "violating": "CREATE OR REPLACE FUNCTION my_func()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$",
             "correct": "CREATE OR REPLACE FUNCTION my_func() RETURNS trigger LANGUAGE plpgsql AS\n$function$"
+        },
+        {
+            "violating": "CREATE FUNCTION test_func()\nAS $body$\nBEGIN\n    RETURN 1;\nEND;\n$body$ LANGUAGE plpgsql STABLE RETURNS integer;",
+            "correct": "CREATE FUNCTION test_func() RETURNS integer LANGUAGE plpgsql STABLE AS\n$body$\nBEGIN\n    RETURN 1;\nEND;\n$body$;"
         }
     ]
     additional_validations = []
 
     def _find_violations(self, content: str, rule_config: Dict[str, Any]) -> List[dict]:
-        max_len = self.get_config_value(rule_config, "max_length", 120)
+        max_len = self.get_config_value(rule_config, "max_length", 100)
         tokens = tokenize_sql(content)
         violations = []
         n = len(tokens)
@@ -113,68 +117,119 @@ class FunctionHeaderLayoutRule(BaseRule):
                     
                 # Find next body string token (dollar-quoted string)
                 body_tok = None
+                body_tok_idx = None
                 for idx in range(close_paren_idx + 1, n):
                     if tokens[idx]["type"] == "STRING" and tokens[idx]["value"].startswith("$"):
                         body_tok = tokens[idx]
+                        body_tok_idx = idx
                         break
                         
                 if body_tok is None:
                     i = close_paren_idx + 1
                     continue
                     
-                # Extract header tokens from close_paren_idx + 1 to body_tok's start
-                header_tokens = tokens[close_paren_idx + 1 : body_tok["start"]]
+                # Find the terminating semicolon for the function statement
+                semi_tok_idx = n
+                for idx in range(body_tok_idx + 1, n):
+                    if tokens[idx]["type"] == "SEMI":
+                        semi_tok_idx = idx
+                        break
+                        
+                if semi_tok_idx < n:
+                    end_offset = tokens[semi_tok_idx]["start"]
+                else:
+                    end_offset = tokens[-1]["end"]
+
+                # Extract header active tokens and footer active tokens (excluding AS)
+                header_tokens = tokens[close_paren_idx + 1 : body_tok_idx]
                 header_active = [tok for tok in header_tokens if tok["type"] not in ("WHITESPACE", "COMMENT")]
                 
-                # We need RETURNS, LANGUAGE, AS
-                returns_tok = None
-                language_tok = None
-                as_tok = None
+                footer_tokens = tokens[body_tok_idx + 1 : semi_tok_idx]
+                footer_active = [tok for tok in footer_tokens if tok["type"] not in ("WHITESPACE", "COMMENT")]
                 
-                for tok in header_active:
+                all_active = [tok for tok in header_active + footer_active if tok["value"].upper() != "AS"]
+                
+                # Option keywords that start a clause at depth 0
+                OPTION_START_KEYWORDS = {
+                    "RETURNS", "LANGUAGE", "STABLE", "VOLATILE", "IMMUTABLE", "STRICT", "PARALLEL", "SECURITY", "COST", "ROWS"
+                }
+
+                returns_str = ""
+                lang_name = "plpgsql"
+                other_options = []
+
+                idx_opt = 0
+                num_tokens = len(all_active)
+
+                while idx_opt < num_tokens:
+                    tok = all_active[idx_opt]
                     val_up = tok["value"].upper()
+                    
                     if val_up == "RETURNS":
-                        returns_tok = tok
-                    elif val_up == "LANGUAGE":
-                        language_tok = tok
-                    elif val_up == "AS":
-                        as_tok = tok
+                        clause_toks = [tok]
+                        idx_opt += 1
+                        depth = 0
+                        while idx_opt < num_tokens:
+                            t_inner = all_active[idx_opt]
+                            if t_inner["type"] == "PAREN" and t_inner["value"] == "(":
+                                depth += 1
+                            elif t_inner["type"] == "PAREN" and t_inner["value"] == ")":
+                                depth -= 1
+                                
+                            if depth == 0 and t_inner["value"].upper() in OPTION_START_KEYWORDS:
+                                break
+                            clause_toks.append(t_inner)
+                            idx_opt += 1
+                        clause_str = content[clause_toks[0]["start"] : clause_toks[-1]["end"]].strip()
+                        if clause_str.upper().startswith("RETURNS"):
+                            returns_type = clause_str[7:].strip()
+                        else:
+                            returns_type = clause_str
+                        returns_type_str = format_returns_table(returns_type, max_len)
+                        returns_str = "RETURNS " + returns_type_str
                         
-                if not (returns_tok and language_tok and as_tok):
-                    i = body_tok["start"]
-                    continue
-                    
-                # Group tokens into clauses
-                # 1. RETURNS clause
-                returns_idx = header_active.index(returns_tok)
-                language_idx = header_active.index(language_tok)
-                as_idx = header_active.index(as_tok)
-                
-                # Check expected ordering
-                if not (returns_idx < language_idx < as_idx):
-                    i = body_tok["start"]
-                    continue
-                    
-                returns_type_tokens = header_active[returns_idx + 1 : language_idx]
-                options_tokens = header_active[language_idx + 2 : as_idx]
-                
-                # Format clauses by keeping their original content and formatting
-                returns_type_str = content[returns_type_tokens[0]["start"] : returns_type_tokens[-1]["end"]].strip()
-                returns_type_str = format_returns_table(returns_type_str, max_len)
-                returns_str = "RETURNS " + returns_type_str
-                language_str = "LANGUAGE plpgsql"
-                
-                options_str = ""
-                if options_tokens:
-                    options_str = content[options_tokens[0]["start"] : options_tokens[-1]["end"]].strip()
-                    
-                options_clause = "LANGUAGE plpgsql"
-                if options_str:
-                    options_clause += " " + options_str
+                    elif val_up == "LANGUAGE":
+                        idx_opt += 1
+                        if idx_opt < num_tokens:
+                            lang_name = all_active[idx_opt]["value"]
+                            idx_opt += 1
+                        
+                    elif val_up in ("STABLE", "VOLATILE", "IMMUTABLE", "STRICT"):
+                        other_options.append(tok["value"])
+                        idx_opt += 1
+                        
+                    elif val_up in ("PARALLEL", "SECURITY", "COST", "ROWS"):
+                        clause_toks = [tok]
+                        idx_opt += 1
+                        if idx_opt < num_tokens:
+                            clause_toks.append(all_active[idx_opt])
+                            idx_opt += 1
+                        clause_str = content[clause_toks[0]["start"] : clause_toks[-1]["end"]].strip()
+                        other_options.append(clause_str)
+                        
+                    else:
+                        other_options.append(tok["value"])
+                        idx_opt += 1
+
+                options_clause = "LANGUAGE " + lang_name
+                if other_options:
+                    options_clause += " " + " ".join(other_options)
                 options_clause += " AS"
                 
-                clauses = [returns_str, options_clause]
+                if returns_str:
+                    clauses = [returns_str, options_clause]
+                else:
+                    clauses = [options_clause]
                 
+                base_indent = ""
+                line_start_char = content.rfind("\n", 0, t["start"])
+                if line_start_char == -1:
+                    prefix_str = content[0 : t["start"]]
+                else:
+                    prefix_str = content[line_start_char + 1 : t["start"]]
+                if prefix_str.strip() == "":
+                    base_indent = prefix_str
+                    
                 func_sig_cleaned = content[t["start"] : tokens[close_paren_idx]["end"]].strip()
                 
                 def indent_clause(clause_text: str) -> str:
@@ -182,33 +237,34 @@ class FunctionHeaderLayoutRule(BaseRule):
                     res_lines = []
                     for line_idx, line in enumerate(lines):
                         if line_idx == 0:
-                            res_lines.append("    " + line.strip())
+                            res_lines.append(base_indent + "    " + line.strip())
                         else:
                             # Keep relative indentation of inner lines
-                            res_lines.append("    " + line)
+                            res_lines.append(base_indent + "    " + line)
                     return "\n".join(res_lines)
                 
                 # Check if any clause is multiline or if the single line signature is too long
                 has_multiline_clause = any("\n" in c for c in clauses)
                 header_single = func_sig_cleaned + " " + " ".join(clauses)
                 
-                if not has_multiline_clause and len(header_single) <= max_len:
+                if not has_multiline_clause and len(base_indent + header_single) <= max_len and "\n" not in func_sig_cleaned:
                     expected_header = header_single
                 else:
-                    clauses_line = "    " + " ".join(clauses)
-                    if not has_multiline_clause and len(clauses_line) <= max_len:
+                    clauses_line = base_indent + "    " + " ".join(clauses)
+                    if not has_multiline_clause and len(clauses_line) <= max_len and "\n" not in func_sig_cleaned:
                         expected_header = func_sig_cleaned + "\n" + clauses_line
                     else:
                         formatted_clauses = [indent_clause(c) for c in clauses]
                         expected_header = func_sig_cleaned + "\n" + "\n".join(formatted_clauses)
                         
-                # Compare original text from CREATE start to body_tok start with expected
-                original_header_text = content[t["start"] : body_tok["start"]].rstrip()
-                if original_header_text != expected_header:
+                # Compare original text from CREATE start to end_offset with expected
+                original_full_text = content[t["start"] : end_offset].rstrip()
+                expected_full_text = (expected_header + "\n" + base_indent + body_tok["value"]).rstrip()
+                if original_full_text != expected_full_text:
                     violations.append({
                         "start_offset": t["start"],
-                        "end_offset": body_tok["start"],
-                        "replacement": expected_header + "\n",
+                        "end_offset": end_offset,
+                        "replacement": expected_header + "\n" + base_indent + body_tok["value"],
                         "line": t["line"]
                     })
                     

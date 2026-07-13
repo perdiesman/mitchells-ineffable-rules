@@ -9,7 +9,11 @@ EXCLUDED_WORDS = {
     "by", "window", "group", "order", "limit", "offset",
     "union", "all", "intersect", "except", "distinct",
     "with", "recursive", "case", "when", "then", "else", "end",
-    "table", "row", "any", "some", "array", "if", "while", "return"
+    "table", "row", "any", "some", "array", "if", "while", "return",
+    "geometry", "numeric", "varchar", "integer", "int", "bigint",
+    "smallint", "text", "boolean", "bool", "decimal", "json", "jsonb",
+    "uuid", "date", "timestamp", "timestamptz", "time", "timetz", "real",
+    "char", "character", "double"
 }
 
 class FunctionCaseRule(BaseRule):
@@ -136,9 +140,16 @@ class FunctionCaseRule(BaseRule):
                     peek_idx += 1
                     
                 if peek_idx < n and content[peek_idx] == '(':
-                    if word.lower() not in exclusions:
+                    is_cast = False
+                    prev_idx = w_start - 1
+                    while prev_idx >= 0 and content[prev_idx].isspace():
+                        prev_idx -= 1
+                    if prev_idx >= 1 and content[prev_idx-1:prev_idx+1] == "::":
+                        is_cast = True
+                        
+                    if not is_cast and word.lower() not in exclusions:
                         matches.append((w_start, i, word, w_line))
-                continue
+                    continue
                 
             i += 1
             

@@ -51,7 +51,24 @@ class SubqueryDepthLimitRule(BaseRule):
                             first_inner = tokens[idx]
                             break
                     if first_inner and first_inner["type"] == "KEYWORD" and first_inner["value"].upper() == "SELECT":
-                        subqueries.append((i, close_idx, first_inner))
+                        # Check if it is a CTE definition (preceded by AS, which is preceded by an identifier)
+                        is_cte = False
+                        prev1_idx = None
+                        for idx in range(i - 1, -1, -1):
+                            if tokens[idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                                prev1_idx = idx
+                                break
+                        if prev1_idx is not None and tokens[prev1_idx]["value"].upper() == "AS":
+                            prev2_idx = None
+                            for idx in range(prev1_idx - 1, -1, -1):
+                                if tokens[idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                                    prev2_idx = idx
+                                    break
+                            if prev2_idx is not None and tokens[prev2_idx]["type"] == "IDENTIFIER":
+                                is_cte = True
+                                
+                        if not is_cte:
+                            subqueries.append((i, close_idx, first_inner))
                         
         violations = []
         for i, close_idx, first_inner in subqueries:

@@ -113,6 +113,19 @@ class SubqueryIndentRule(BaseRule):
                     else:
                         needs_fix = True
                             
+                    # Check first non-empty content line
+                    first_content_indent = None
+                    for line_no in range(start_line, end_line):
+                        line_text = lines[line_no - 1]
+                        if line_text.strip() != "" and not line_text.strip().startswith("--") and not line_text.strip().startswith("/*"):
+                            stripped = line_text.lstrip()
+                            first_content_indent = line_text[:len(line_text) - len(stripped)]
+                            break
+                            
+                    if first_content_indent is not None:
+                        if first_content_indent != expected_content_indent:
+                            needs_fix = True
+                            
                     for line_no in range(start_line, end_line):
                         line_text = lines[line_no - 1]
                         if line_text.strip() != "":

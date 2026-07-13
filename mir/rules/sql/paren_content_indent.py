@@ -22,17 +22,15 @@ class ParenContentIndentRule(BaseRule):
         'SELECT COALESCE(a, b) FROM users;'
     ]
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _get_line_expected_indents(self, content: str) -> Dict[int, str]:
         tokens = tokenize_sql(content)
-        depths = get_token_depths(tokens)
-        violations = []
+        lines = content.splitlines()
         n = len(tokens)
         
+        # Find all multiline parentheses that are NOT subqueries
+        multiline_parens = []
         for i, tok in enumerate(tokens):
             if tok["type"] == "PAREN" and tok["value"] == "(":
-                if depths[i] > 1:
-                    continue
-                    
                 next_active = None
                 for idx in range(i + 1, n):
                     if tokens[idx]["type"] == "WHITESPACE":
@@ -44,100 +42,99 @@ class ParenContentIndentRule(BaseRule):
                     continue
                     
                 close_idx = find_matching_paren(tokens, i)
-                if close_idx is None:
-                    continue
-                    
-                close_tok = tokens[close_idx]
-                if tok["line"] == close_tok["line"]:
-                    continue
-                    
-                line_start = content.rfind("\n", 0, tok["start"]) + 1
-                line_prefix = content[line_start:tok["start"]]
-                open_indent = ""
-                for char in line_prefix:
-                    if char in (" ", "\t"):
-                        open_indent += char
-                    else:
-                        break
+                if close_idx is not None:
+                    close_tok = tokens[close_idx]
+                    if tok["line"] < close_tok["line"]:
+                        multiline_parens.append((i, close_idx, tok, close_tok))
                         
-                expected_content_indent = open_indent + "    "
-                expected_close_indent = open_indent
+        # Map each line to its expected indent
+        expected_indents = {}
+        
+        for line_no in range(1, len(lines) + 1):
+            line = lines[line_no - 1]
+            if line.strip() == "":
+                continue
                 
-                lines = content.splitlines()
-                start_line = tok["line"] + 1
-                end_line = close_tok["line"]
-                
-                needs_fix = False
-                
-                close_line_text = lines[end_line - 1]
-                stripped_close = close_line_text.lstrip()
-                if stripped_close.startswith(")"):
-                    actual_close_indent = close_line_text[:len(close_line_text) - len(stripped_close)]
-                    if actual_close_indent != expected_close_indent:
-                        needs_fix = True
-                        
-                for line_no in range(start_line, end_line):
-                    line_text = lines[line_no - 1]
-                    if line_text.strip() != "":
-                        stripped = line_text.lstrip()
-                        actual_indent = line_text[:len(line_text) - len(stripped)]
-                        if not actual_indent.startswith(expected_content_indent):
-                            needs_fix = True
-                            break
-                            
-                if needs_fix:
-                    violations.append({
-                        "open_tok": tok,
-                        "close_tok": close_tok,
-                        "open_line": tok["line"],
-                        "close_line": close_tok["line"],
-                        "content_indent": expected_content_indent,
-                        "close_indent": expected_close_indent
-                    })
+            # Find all active multiline parentheses for this line
+            active = []
+            for open_idx, close_idx, open_tok, close_tok in multiline_parens:
+                # Is L a content line?
+                if open_tok["line"] < line_no < close_tok["line"]:
+                    active.append((open_idx, "content", open_tok, close_tok))
+                # Is L the closing line, and the line starts with ')'?
+                elif line_no == close_tok["line"] and line.lstrip().startswith(")"):
+                    active.append((open_idx, "close", open_tok, close_tok))
                     
-        return violations
+            if not active:
+                continue
+                
+            # Sort by open_idx descending to get the innermost active one
+            active.sort(key=lambda x: x[0], reverse=True)
+            inner = active[0]
+            open_tok = inner[2]
+            
+            # Get opening indent of open_tok's line
+            open_line_text = lines[open_tok["line"] - 1]
+            open_indent = open_line_text[:len(open_line_text) - len(open_line_text.lstrip())]
+            
+            if inner[1] == "content":
+                expected_indents[line_no] = open_indent + "    "
+            else:
+                expected_indents[line_no] = open_indent
+                
+        return expected_indents
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content)
+        expected_indents = self._get_line_expected_indents(content)
         
-        for item in offending:
-            tok = item["open_tok"]
-            violations.append(
-                Violation(
-                    rule_id=self.rule_id,
-                    line_number=tok["line"],
-                    message="Content inside parentheses or closing parenthesis are not indented correctly.",
-                    offending_lines=[lines[tok["line"] - 1] if tok["line"] - 1 < len(lines) else ""],
-                    is_fixable=True
+        for line_no, expected_indent in expected_indents.items():
+            line_text = lines[line_no - 1]
+            actual_indent = line_text[:len(line_text) - len(line_text.lstrip())]
+            
+            is_close_line = line_text.lstrip().startswith(")")
+            if is_close_line:
+                mismatch = actual_indent != expected_indent
+            else:
+                mismatch = not actual_indent.startswith(expected_indent)
+                
+            if mismatch:
+                violations.append(
+                    Violation(
+                        rule_id=self.rule_id,
+                        line_number=line_no,
+                        message="Content inside parentheses or closing parenthesis are not indented correctly.",
+                        offending_lines=[line_text],
+                        is_fixable=True
+                    )
                 )
-            )
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        offending = self._find_violations(content)
-        if not offending:
+        expected_indents = self._get_line_expected_indents(content)
+        if not expected_indents:
             return content
             
         lines = content.splitlines()
-        offending.sort(key=lambda x: x["open_line"], reverse=True)
         
-        for item in offending:
-            start_line = item["open_line"] + 1
-            end_line = item["close_line"]
-            expected_content_indent = item["content_indent"]
-            expected_close_indent = item["close_indent"]
-            
-            for line_no in range(start_line, end_line):
+        for line_no in range(1, len(lines) + 1):
+            if line_no in expected_indents:
+                expected_indent = expected_indents[line_no]
                 line_text = lines[line_no - 1]
-                if line_text.strip() != "":
-                    lines[line_no - 1] = expected_content_indent + line_text.lstrip()
-                    
-            close_line_text = lines[end_line - 1]
-            stripped_close = close_line_text.lstrip()
-            if stripped_close.startswith(")"):
-                lines[end_line - 1] = expected_close_indent + stripped_close
+                actual_indent = line_text[:len(line_text) - len(line_text.lstrip())]
                 
+                is_close_line = line_text.lstrip().startswith(")")
+                if is_close_line:
+                    mismatch = actual_indent != expected_indent
+                else:
+                    mismatch = not actual_indent.startswith(expected_indent)
+                    
+                if mismatch:
+                    lines[line_no - 1] = expected_indent + line_text.lstrip()
+                    # Re-evaluate expected indents since we modified the line prefix
+                    # which might be an opening parenthesis line for nested parens
+                    expected_indents = self._get_line_expected_indents("\n".join(lines))
+                    
         ending = "\n" if content.endswith("\n") else ""
         return "\n".join(lines) + ending

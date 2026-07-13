@@ -29,187 +29,247 @@ class ExpressionSplitRule(BaseRule):
         "SELECT min(id) FROM users;"
     ]
 
-    def _find_violations(self, content: str, max_len: int) -> List[dict]:
+    def _get_edits(self, content: str, max_len: int) -> List[tuple]:
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
-        violations = []
-        
-        # Calculate line lengths
         lines = content.splitlines()
+        edits = []
         
-        # We process line-by-line
-        for line_no, line in enumerate(lines, start=1):
+        for line_no in range(1, len(lines) + 1):
+            line = lines[line_no - 1]
             if len(line) <= max_len:
                 continue
                 
-            # Find the first open parenthesis ( on this line that is not preceded by another '('
-            line_tokens = [tok for tok in tokens if tok["line"] == line_no]
+            line_tokens = [t for t in tokens if t["line"] == line_no]
+            active_tokens = [t for t in line_tokens if t["type"] not in ("WHITESPACE", "COMMENT")]
+            if not active_tokens:
+                continue
+                
+            # Find base indent
+            line_prefix = line[:len(line) - len(line.lstrip())]
+            base_indent = line_prefix
+            content_indent = base_indent + "    "
+            
+            # Case 1: Split on first non-empty open parenthesis on this line
             open_tok = None
-            for tok in line_tokens:
-                if tok["type"] == "PAREN" and tok["value"] == "(":
-                    try:
-                        idx = tokens.index(tok)
-                        prev_active = None
-                        for p_idx in range(idx - 1, -1, -1):
-                            if tokens[p_idx]["type"] != "WHITESPACE":
-                                prev_active = tokens[p_idx]
-                                break
-                        if prev_active and prev_active["type"] == "PAREN" and prev_active["value"] == "(":
-                            continue
-                    except ValueError:
-                        pass
-                    open_tok = tok
-                    break
+            for t in active_tokens:
+                if t["type"] == "PAREN" and t["value"] == "(":
+                    idx = tokens.index(t)
+                    close_idx = find_matching_paren(tokens, idx)
+                    if close_idx is not None:
+                        active_between = [
+                            tokens[k] for k in range(idx + 1, close_idx)
+                            if tokens[k]["type"] not in ("WHITESPACE", "COMMENT")
+                        ]
+                        if active_between:
+                            open_tok = t
+                            break
                     
-            if not open_tok:
-                continue
-                
-            # Find matching close parenthesis
-            open_idx = tokens.index(open_tok)
-            close_idx = find_matching_paren(tokens, open_idx)
-            if close_idx is None:
-                continue
-                
-            close_tok = tokens[close_idx]
-            
-            # Skip empty parentheses
-            active_between = [
-                tokens[idx] for idx in range(open_idx + 1, close_idx)
-                if tokens[idx]["type"] not in ("WHITESPACE", "COMMENT")
-            ]
-            if not active_between:
-                continue
-            
-            # Check if it is already multiline
-            is_multiline = False
-            for idx in range(open_idx + 1, close_idx):
-                if "\n" in tokens[idx]["value"] if tokens[idx]["type"] == "WHITESPACE" else False:
-                    is_multiline = True
-                    break
+            if open_tok:
+                open_idx = tokens.index(open_tok)
+                close_idx = find_matching_paren(tokens, open_idx)
+                if close_idx is not None:
+                    # Split before open paren
+                    ws_before_open = None
+                    if open_idx - 1 >= 0 and tokens[open_idx - 1]["type"] == "WHITESPACE":
+                        ws_before_open = tokens[open_idx - 1]
+                    edit_start_pre = ws_before_open["start"] if ws_before_open else open_tok["start"]
+                    edit_end_pre = ws_before_open["end"] if ws_before_open else open_tok["start"]
+                    edits.append((edit_start_pre, edit_end_pre, "\n" + base_indent, line_no))
+
+                    # Split after open paren
+                    ws_after = None
+                    if open_idx + 1 < len(tokens) and tokens[open_idx + 1]["type"] == "WHITESPACE":
+                        ws_after = tokens[open_idx + 1]
+                    edit_start = open_tok["end"]
+                    edit_end = ws_after["end"] if ws_after else open_tok["end"]
+                    edits.append((edit_start, edit_end, "\n" + content_indent, line_no))
                     
-            if is_multiline:
-                # If already multiline, check if any line inside exceeds max_len
-                # and contains additive/logical operators that can be split
-                has_long_inner = False
-                for inner_l_no in range(open_tok["line"] + 1, close_tok["line"]):
-                    if inner_l_no - 1 < len(lines) and len(lines[inner_l_no - 1]) > max_len:
-                        has_long_inner = True
-                        break
-                if not has_long_inner:
+                    # Split before close paren
+                    close_tok = tokens[close_idx]
+                    ws_before = None
+                    if close_idx - 1 >= 0 and tokens[close_idx - 1]["type"] == "WHITESPACE":
+                        ws_before = tokens[close_idx - 1]
+                    edit_start = ws_before["start"] if ws_before else close_tok["start"]
+                    edit_end = ws_before["end"] if ws_before else close_tok["start"]
+                    edits.append((edit_start, edit_end, "\n" + base_indent, line_no))
+
+                    # Check if we should also split operators/keywords/commas inside this parenthesis
+                    base_depth = depths[open_idx] + 1
+                    inner_str = "".join([tokens[idx]["value"] for idx in range(open_idx + 1, close_idx)]).strip()
+                    if len(content_indent + inner_str) > max_len:
+                        keywords = []
+                        commas = []
+                        operators = []
+                        for idx in range(open_idx + 1, close_idx):
+                            t = tokens[idx]
+                            if depths[idx] == base_depth:
+                                if t["type"] == "OPERATOR" and t["value"] in ("+", "-", "||", "*", "/"):
+                                    operators.append(t)
+                                elif t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR", "ORDER", "PARTITION", "BY"):
+                                    if t["value"].upper() == "BY":
+                                        prev_active = None
+                                        for p_idx in range(idx - 1, open_idx, -1):
+                                            if tokens[p_idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                                                prev_active = tokens[p_idx]
+                                                break
+                                        if prev_active and prev_active["value"].upper() in ("ORDER", "GROUP", "PARTITION"):
+                                            pass
+                                        else:
+                                            keywords.append(t)
+                                    else:
+                                        keywords.append(t)
+                                elif t["type"] == "COMMA":
+                                    commas.append(t)
+                                    
+                        if keywords:
+                            targets = [(t, "keyword") for t in keywords]
+                        elif commas:
+                            targets = [(t, "comma") for t in commas]
+                        else:
+                            targets = [(t, "operator") for t in operators]
+                            
+                        for op, t_type in targets:
+                            op_idx = tokens.index(op)
+                            if t_type == "keyword":
+                                ws_before = None
+                                if op_idx - 1 >= 0 and tokens[op_idx - 1]["type"] == "WHITESPACE":
+                                    ws_before = tokens[op_idx - 1]
+                                edit_start_op = ws_before["start"] if ws_before else op["start"]
+                                edit_end_op = ws_before["end"] if ws_before else op["start"]
+                                edits.append((edit_start_op, edit_end_op, "\n" + content_indent, line_no))
+                            elif t_type == "comma":
+                                ws_after = None
+                                if op_idx + 1 < len(tokens) and tokens[idx + 1]["type"] == "WHITESPACE":
+                                    ws_after = tokens[op_idx + 1]
+                                edit_start_op = op["end"]
+                                edit_end_op = ws_after["end"] if ws_after else op["end"]
+                                edits.append((edit_start_op, edit_end_op, "\n" + content_indent, line_no))
+                            else:
+                                ws_before = None
+                                if op_idx - 1 >= 0 and tokens[op_idx - 1]["type"] == "WHITESPACE":
+                                    ws_before = tokens[op_idx - 1]
+                                edit_start_op = ws_before["start"] if ws_before else op["start"]
+                                edit_end_op = ws_before["end"] if ws_before else op["start"]
+                                edits.append((edit_start_op, edit_end_op, "\n" + content_indent, line_no))
                     continue
                     
-            violations.append({
-                "open_tok": open_tok,
-                "close_tok": close_tok,
-                "open_idx": open_idx,
-                "close_idx": close_idx
-            })
-            
-        return violations
+            # Case 2: Split on operators/keywords/commas
+            # Find enclosing parenthesis active at this line
+            enclosing_open = None
+            first_tok_idx = tokens.index(active_tokens[0])
+            for idx in range(first_tok_idx - 1, -1, -1):
+                t = tokens[idx]
+                if t["type"] == "PAREN" and t["value"] == "(":
+                    c_idx = find_matching_paren(tokens, idx)
+                    if c_idx is not None and tokens[c_idx]["line"] >= line_no:
+                        enclosing_open = t
+                        break
+                        
+            if enclosing_open:
+                eo_idx = tokens.index(enclosing_open)
+                base_depth = depths[eo_idx] + 1
+            else:
+                base_depth = 0
+                
+            # Find operators/keywords/commas at base_depth on this line
+            keywords = []
+            commas = []
+            operators = []
+            for t in active_tokens:
+                t_idx = tokens.index(t)
+                if depths[t_idx] == base_depth:
+                    if t["type"] == "OPERATOR" and t["value"] in ("+", "-", "||", "*", "/"):
+                        operators.append(t)
+                    elif t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR", "ORDER", "PARTITION", "BY"):
+                        if t["value"].upper() == "BY":
+                            prev_active = None
+                            for prev_idx in range(t_idx - 1, -1, -1):
+                                if tokens[prev_idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                                    prev_active = tokens[prev_idx]
+                                    break
+                            if prev_active and prev_active["value"].upper() in ("ORDER", "GROUP", "PARTITION"):
+                                pass
+                            else:
+                                keywords.append(t)
+                        else:
+                            keywords.append(t)
+                    elif t["type"] == "COMMA":
+                         commas.append(t)
+                         
+            if keywords:
+                targets = [(t, "keyword") for t in keywords]
+            elif commas:
+                targets = [(t, "comma") for t in commas]
+            else:
+                targets = [(t, "operator") for t in operators]
+                
+            if targets:
+                for op, t_type in targets:
+                    op_idx = tokens.index(op)
+                    if t_type == "keyword":
+                        ws_before = None
+                        if op_idx - 1 >= 0 and tokens[op_idx - 1]["type"] == "WHITESPACE":
+                            ws_before = tokens[op_idx - 1]
+                        edit_start = ws_before["start"] if ws_before else op["start"]
+                        edit_end = ws_before["end"] if ws_before else op["start"]
+                        edits.append((edit_start, edit_end, "\n" + base_indent, line_no))
+                    elif t_type == "comma":
+                        ws_after = None
+                        if op_idx + 1 < len(tokens) and tokens[op_idx + 1]["type"] == "WHITESPACE":
+                            ws_after = tokens[op_idx + 1]
+                        edit_start = op["end"]
+                        edit_end = ws_after["end"] if ws_after else op["end"]
+                        edits.append((edit_start, edit_end, "\n" + content_indent, line_no))
+                    else:
+                        ws_before = None
+                        if op_idx - 1 >= 0 and tokens[op_idx - 1]["type"] == "WHITESPACE":
+                            ws_before = tokens[op_idx - 1]
+                        edit_start = ws_before["start"] if ws_before else op["start"]
+                        edit_end = ws_before["end"] if ws_before else op["start"]
+                        edits.append((edit_start, edit_end, "\n" + content_indent, line_no))
+                    
+        return edits
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         max_len = rule_config.get("max_line_length", self.default_config["max_line_length"])
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content, max_len)
+        edits = self._get_edits(content, max_len)
         
-        for item in offending:
-            tok = item["open_tok"]
-            violations.append(
-                Violation(
-                    rule_id=self.rule_id,
-                    line_number=tok["line"],
-                    message=f"Line exceeds {max_len} characters and can be split on parenthesis or operators.",
-                    offending_lines=[lines[tok["line"] - 1] if tok["line"] - 1 < len(lines) else ""],
-                    is_fixable=True
+        reported_lines = set()
+        for start, end, rep, line_no in edits:
+            if line_no not in reported_lines:
+                reported_lines.add(line_no)
+                violations.append(
+                    Violation(
+                        rule_id=self.rule_id,
+                        line_number=line_no,
+                        message=f"Line exceeds {max_len} characters and can be split on parenthesis or operators.",
+                        offending_lines=[lines[line_no - 1] if line_no - 1 < len(lines) else ""],
+                        is_fixable=True
+                    )
                 )
-            )
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
         max_len = rule_config.get("max_line_length", self.default_config["max_line_length"])
-        offending = self._find_violations(content, max_len)
-        if not offending:
+        edits = self._get_edits(content, max_len)
+        if not edits:
             return content
             
-        tokens = tokenize_sql(content)
-        depths = get_token_depths(tokens)
-        edits = []
+        unique_edits = {}
+        for start, end, rep, line_no in edits:
+            unique_edits[(start, end)] = rep
+            
+        sorted_edits = sorted(
+            [(start, end, rep) for (start, end), rep in unique_edits.items()],
+            key=lambda x: x[0],
+            reverse=True
+        )
         
-        for item in offending:
-            open_tok = item["open_tok"]
-            close_tok = item["close_tok"]
-            open_idx = item["open_idx"]
-            close_idx = item["close_idx"]
-            
-            # Find base indentation
-            line_start = content.rfind("\n", 0, open_tok["start"]) + 1
-            line_prefix = content[line_start:open_tok["start"]]
-            base_indent = ""
-            for char in line_prefix:
-                if char in (" ", "\t"):
-                    base_indent += char
-                else:
-                    break
-                    
-            content_indent = base_indent + "    "
-            
-            # 1. Format parenthesis boundaries
-            # Check whitespace before open parenthesis
-            ws_before_open = None
-            if open_idx - 1 >= 0 and tokens[open_idx - 1]["type"] == "WHITESPACE":
-                ws_before_open = tokens[open_idx - 1]
-            # Check whitespace after open parenthesis
-            ws_after = None
-            if open_idx + 1 < len(tokens) and tokens[open_idx + 1]["type"] == "WHITESPACE":
-                ws_after = tokens[open_idx + 1]
-            # Check whitespace before close parenthesis
-            ws_before = None
-            if close_idx - 1 >= 0 and tokens[close_idx - 1]["type"] == "WHITESPACE":
-                ws_before = tokens[close_idx - 1]
-                
-            open_pre_replacement = "\n" + base_indent
-            open_replacement = "\n" + content_indent
-            close_replacement = "\n" + base_indent
-            
-            # Apply boundary edits
-            edits.append((ws_before_open["start"] if ws_before_open else open_tok["start"], ws_before_open["end"] if ws_before_open else open_tok["start"], open_pre_replacement))
-            edits.append((ws_after["start"] if ws_after else open_tok["end"], ws_after["end"] if ws_after else open_tok["end"], open_replacement))
-            edits.append((ws_before["start"] if ws_before else close_tok["start"], ws_before["end"] if ws_before else close_tok["start"], close_replacement))
-            
-            # 2. Check if inner expression should be split on operators
-            # Find operators at base depth inside (depths[open_idx] + 1)
-            base_depth = depths[open_idx] + 1
-            inner_tokens = tokens[open_idx + 1:close_idx]
-            inner_depths = depths[open_idx + 1:close_idx]
-            
-            # Check if the estimated split line length would exceed max_len
-            # Estimate inner expression length
-            inner_str = "".join([t["value"] for t in inner_tokens]).strip()
-            if len(content_indent + inner_str) > max_len:
-                for idx, (t, d) in enumerate(zip(inner_tokens, inner_depths)):
-                    if d == base_depth:
-                        # Split on operators + - || * / AND OR
-                        is_split_operator = False
-                        if t["type"] == "OPERATOR" and t["value"] in ("+", "-", "||", "*", "/"):
-                            is_split_operator = True
-                        elif t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
-                            is_split_operator = True
-                            
-                        if is_split_operator:
-                            actual_idx = open_idx + 1 + idx
-                            # Check whitespace before this operator
-                            op_ws_before = None
-                            if actual_idx - 1 >= 0 and tokens[actual_idx - 1]["type"] == "WHITESPACE":
-                                op_ws_before = tokens[actual_idx - 1]
-                                
-                            op_replacement = "\n" + content_indent
-                            edits.append((op_ws_before["start"] if op_ws_before else t["start"], op_ws_before["end"] if op_ws_before else t["start"], op_replacement))
-                            
-        # Sort and apply edits in reverse order
-        edits.sort(key=lambda x: x[0], reverse=True)
         chars = list(content)
-        for start, end, new_text in edits:
+        for start, end, new_text in sorted_edits:
             chars[start:end] = list(new_text)
             
         return "".join(chars)

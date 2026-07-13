@@ -64,9 +64,9 @@ class UnresolvedAliasRule(BaseRule):
                         break
                     idx += 1
                     
-        # Parse FROM, JOIN, UPDATE, INTO clauses
+        # Parse FROM, JOIN, UPDATE, INTO, VIEW, TABLE, EXISTS, TRUNCATE, SEQUENCE, INDEX clauses
         for i, t in enumerate(tokens):
-            if t["type"] == "KEYWORD" and t["value"].upper() in ("FROM", "JOIN", "UPDATE", "INTO"):
+            if t["type"] == "KEYWORD" and t["value"].upper() in ("FROM", "JOIN", "UPDATE", "INTO", "VIEW", "TABLE", "EXISTS", "TRUNCATE", "SEQUENCE", "INDEX"):
                 idx = i + 1
                 while idx < n and tokens[idx]["type"] in ("WHITESPACE", "COMMENT"):
                     idx += 1
@@ -112,6 +112,9 @@ class UnresolvedAliasRule(BaseRule):
                 if path_tokens:
                     ids = [pt for pt in path_tokens if pt["type"] == "IDENTIFIER"]
                     if ids:
+                        # If it's a qualified name like schema.table, add the schema parts to valid
+                        for schema_id in ids[:-1]:
+                            valid.add(schema_id["value"].lower())
                         last_table_id = ids[-1]["value"].lower()
                         valid.add(last_table_id)
                     full_path = "".join(pt["value"].lower() for pt in path_tokens)
@@ -138,7 +141,7 @@ class UnresolvedAliasRule(BaseRule):
                     if tokens[k]["type"] not in ("WHITESPACE", "COMMENT"):
                         prev_active = tokens[k]
                         break
-                if prev_active and prev_active["type"] == "KEYWORD" and prev_active["value"].upper() in ("FROM", "JOIN", "TABLE"):
+                if prev_active and prev_active["type"] == "KEYWORD" and prev_active["value"].upper() in ("FROM", "JOIN", "TABLE", "VIEW", "EXISTS", "INTO", "UPDATE", "TRUNCATE", "SEQUENCE", "INDEX"):
                     is_declaration = True
                     
                 if is_declaration:
