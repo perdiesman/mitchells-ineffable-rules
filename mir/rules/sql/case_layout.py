@@ -2,6 +2,7 @@ from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 from mir.rules.sql.indent import IndentRule
+from mir.rules.sql.line_length import LineLengthRule
 
 class CaseLayoutRule(BaseRule):
     rule_id = "IR-case"
@@ -51,6 +52,12 @@ class CaseLayoutRule(BaseRule):
         return blocks
 
     def _find_violations(self, content: str, rule_config: Dict[str, Any]) -> List[dict]:
+        max_len = self.get_config_value(
+            rule_config,
+            "max_length",
+            default_value=100,
+            fallbacks=[(LineLengthRule, "max_length")]
+        )
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
         blocks = self._find_case_blocks(tokens)
@@ -164,20 +171,61 @@ class CaseLayoutRule(BaseRule):
                     if then_part:
                         then_keyword_idx = then_part[1] - 1
                         cond_tokens = tokens[start_c:then_keyword_idx]
-                        cond_text = "".join([t["value"] for t in cond_tokens]).strip()
                         
                         res_tokens = tokens[then_part[1]:then_part[2]]
                         res_text = "".join([t["value"] for t in res_tokens]).strip()
                         
-                        line_text = f"\n{case_indent}    WHEN {cond_text} THEN {res_text}"
+                        # Split condition tokens on AND/OR at depth 0
+                        import re
+                        cond_parts = []
+                        current_part = []
+                        depth = 0
+                        for t_c in cond_tokens:
+                            if t_c["type"] == "PAREN" and t_c["value"] == "(":
+                                depth += 1
+                            elif t_c["type"] == "PAREN" and t_c["value"] == ")":
+                                depth -= 1
+                                
+                            if depth == 0 and t_c["type"] == "KEYWORD" and t_c["value"].upper() in ("AND", "OR"):
+                                if current_part:
+                                    cond_parts.append(current_part)
+                                current_part = [t_c]
+                            else:
+                                current_part.append(t_c)
+                        if current_part:
+                            cond_parts.append(current_part)
+                            
+                        cond_strs = []
+                        for part in cond_parts:
+                            part_str = "".join([t["value"] for t in part]).strip()
+                            if "\n" not in part_str:
+                                part_str = re.sub(r"\s+", " ", part_str)
+                            cond_strs.append(part_str)
+                            
+                        is_multiline = len(cond_strs) > 1 or len(f"{case_indent}    WHEN {cond_strs[0]} THEN {res_text}") > max_len
+                        
+                        if is_multiline:
+                            first_line = f"\n{case_indent}    WHEN {cond_strs[0]}"
+                            subsequent_lines = []
+                            for cs in cond_strs[1:]:
+                                subsequent_lines.append(f"\n{case_indent}        {cs}")
+                            then_line = f"\n{case_indent}        THEN {res_text}"
+                            line_text = first_line + "".join(subsequent_lines) + then_line
+                        else:
+                            line_text = f"\n{case_indent}    WHEN {cond_strs[0]} THEN {res_text}"
+                            
                         rebuilt_parts.append(line_text)
                         
                         kw_token_idx = tokens.index(kw_tok)
                         ws_tok = None
                         if kw_token_idx - 1 >= 0 and tokens[kw_token_idx - 1]["type"] == "WHITESPACE":
                             ws_tok = tokens[kw_token_idx - 1]
-                        expected_ws = f"\n{case_indent}    "
-                        if not ws_tok or ws_tok["value"] != expected_ws:
+                        
+                        # Re-calculate expectations: for multi-line conditions, original spaces might span multiple lines.
+                        # We trigger format correction if original text didn't match the new formatted layout.
+                        orig_sub_block = content[kw_tok["start"]:tokens[then_part[2]]["start"]]
+                        formatted_sub_block = line_text.lstrip("\n")
+                        if orig_sub_block.strip() != formatted_sub_block.strip():
                             needs_fix = True
                             
                         i_idx += 2
