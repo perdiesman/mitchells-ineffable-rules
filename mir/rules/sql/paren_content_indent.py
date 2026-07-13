@@ -28,7 +28,9 @@ class ParenContentIndentRule(BaseRule):
     ]
     additional_validations = [
         'SELECT COALESCE(a, b) FROM users;',
-        'SELECT (a + b) FROM users;'
+        'SELECT (a + b) FROM users;',
+        'INSERT INTO t(c) VALUES (1);',
+        'INSERT INTO t(c) VALUES\n    (1),\n    (2);'
     ]
 
     def _get_line_expected_indents(self, content: str) -> Dict[int, str]:

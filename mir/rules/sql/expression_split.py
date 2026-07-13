@@ -35,7 +35,8 @@ class ExpressionSplitRule(BaseRule):
     ]
     additional_validations = [
         "SELECT min(id) FROM users;",
-        "SELECT (id) FROM users;"
+        "SELECT (id) FROM users;",
+        "INSERT INTO t (c) VALUES (1);"
     ]
 
     def _get_edits(self, content: str, max_len: int) -> List[tuple]:
