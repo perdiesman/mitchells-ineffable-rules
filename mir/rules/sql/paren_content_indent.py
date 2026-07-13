@@ -169,11 +169,12 @@ class ParenContentIndentRule(BaseRule):
                         break
                 if prev_tok:
                     val_up = prev_tok["value"].upper()
-                    if prev_tok["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST"):
+                    if prev_tok["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST", "IN", "ANY", "SOME"):
                         if prev_tok["line"] < tok["line"]:
                             start_ws = prev_tok["end"]
                             end_ws = tok["start"]
-                            edits.append((start_ws, end_ws, ""))
+                            val = " " if val_up in ("IN", "ANY", "SOME") else ""
+                            edits.append((start_ws, end_ws, val))
         if edits:
             edits.sort(key=lambda x: x[0], reverse=True)
             chars = list(content)
