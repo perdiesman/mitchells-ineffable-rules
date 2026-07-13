@@ -21,12 +21,17 @@ class ExpressionSplitRule(BaseRule):
     
     examples = [
         {
+            "violating": "SELECT (date_trunc('hour', start_time) + date_part('minutes', start_time)::int / 15 * '15 Minutes'::interval) AS start_time;",
+            "correct": "SELECT\n(\n    date_trunc('hour', start_time)\n    + date_part('minutes', start_time)::int\n    / 15\n    * '15 Minutes'::interval\n) AS start_time;"
+        },
+        {
             "violating": "SELECT min(date_trunc('hour', start_time) + date_part('minutes', start_time)::int / 15 * '15 Minutes'::interval) AS start_time;",
-            "correct": "SELECT min\n(\n    date_trunc('hour', start_time)\n    + date_part('minutes', start_time)::int\n    / 15\n    * '15 Minutes'::interval\n) AS start_time;"
+            "correct": "SELECT min(\n        date_trunc('hour', start_time)\n        + date_part('minutes', start_time)::int\n        / 15\n        * '15 Minutes'::interval\n    ) AS start_time;"
         }
     ]
     additional_validations = [
-        "SELECT min(id) FROM users;"
+        "SELECT min(id) FROM users;",
+        "SELECT (id) FROM users;"
     ]
 
     def _get_edits(self, content: str, max_len: int) -> List[tuple]:
@@ -48,7 +53,6 @@ class ExpressionSplitRule(BaseRule):
             # Find base indent
             line_prefix = line[:len(line) - len(line.lstrip())]
             base_indent = line_prefix
-            content_indent = base_indent + "    "
             
             # Case 1: Split on first non-empty open parenthesis on this line
             open_tok = None
@@ -64,18 +68,41 @@ class ExpressionSplitRule(BaseRule):
                         if active_between:
                             open_tok = t
                             break
-                    
+                            
             if open_tok:
                 open_idx = tokens.index(open_tok)
                 close_idx = find_matching_paren(tokens, open_idx)
                 if close_idx is not None:
+                    # Detect if the parenthesis is function-like
+                    prev_tok = None
+                    for p_idx in range(open_idx - 1, -1, -1):
+                        if tokens[p_idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                            prev_tok = tokens[p_idx]
+                            break
+                    is_func_like = False
+                    if prev_tok:
+                        val_up = prev_tok["value"].upper()
+                        if prev_tok["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST"):
+                            is_func_like = True
+                            
+                    if is_func_like:
+                        content_indent = base_indent + "        "
+                        close_indent = base_indent + "    "
+                    else:
+                        content_indent = base_indent + "    "
+                        close_indent = base_indent
+                        
                     # Split before open paren
                     ws_before_open = None
                     if open_idx - 1 >= 0 and tokens[open_idx - 1]["type"] == "WHITESPACE":
                         ws_before_open = tokens[open_idx - 1]
-                    edit_start_pre = ws_before_open["start"] if ws_before_open else open_tok["start"]
-                    edit_end_pre = ws_before_open["end"] if ws_before_open else open_tok["start"]
-                    edits.append((edit_start_pre, edit_end_pre, "\n" + base_indent, line_no))
+                    if is_func_like:
+                        if ws_before_open:
+                            edits.append((ws_before_open["start"], ws_before_open["end"], "", line_no))
+                    else:
+                        edit_start_pre = ws_before_open["start"] if ws_before_open else open_tok["start"]
+                        edit_end_pre = ws_before_open["end"] if ws_before_open else open_tok["start"]
+                        edits.append((edit_start_pre, edit_end_pre, "\n" + base_indent, line_no))
 
                     # Split after open paren
                     ws_after = None
@@ -92,7 +119,7 @@ class ExpressionSplitRule(BaseRule):
                         ws_before = tokens[close_idx - 1]
                     edit_start = ws_before["start"] if ws_before else close_tok["start"]
                     edit_end = ws_before["end"] if ws_before else close_tok["start"]
-                    edits.append((edit_start, edit_end, "\n" + base_indent, line_no))
+                    edits.append((edit_start, edit_end, "\n" + close_indent, line_no))
 
                     # Check if we should also split operators/keywords/commas inside this parenthesis
                     base_depth = depths[open_idx] + 1
@@ -176,7 +203,7 @@ class ExpressionSplitRule(BaseRule):
             keywords = []
             commas = []
             operators = []
-            for t in active_tokens:
+            for t in active_tokens[:-1]:
                 t_idx = tokens.index(t)
                 if depths[t_idx] == base_depth:
                     if t["type"] == "OPERATOR" and t["value"] in ("+", "-", "||", "*", "/"):
