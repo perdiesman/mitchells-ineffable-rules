@@ -97,7 +97,7 @@ class ExpressionSplitRule(BaseRule):
                     if open_idx - 1 >= 0 and tokens[open_idx - 1]["type"] == "WHITESPACE":
                         ws_before_open = tokens[open_idx - 1]
                     if is_func_like:
-                        is_keyword_op = prev_tok["value"].upper() in ("IN", "ANY", "SOME")
+                        is_keyword_op = prev_tok["value"].upper() in ("VALUES", "TABLE", "IN", "ANY", "SOME")
                         replacement = " " if is_keyword_op else ""
                         if ws_before_open:
                             edits.append((ws_before_open["start"], ws_before_open["end"], replacement, line_no))

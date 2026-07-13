@@ -121,7 +121,9 @@ class ParenContentIndentRule(BaseRule):
                         break
                 if prev_tok:
                     val_up = prev_tok["value"].upper()
-                    if prev_tok["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST", "IN", "ANY", "SOME"):
+                    is_keyword_op = val_up in ("VALUES", "TABLE", "IN", "ANY", "SOME")
+                    is_func_like = (prev_tok["type"] == "IDENTIFIER") or (val_up in ("COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST")) or is_keyword_op
+                    if is_func_like:
                         if prev_tok["line"] < tok["line"]:
                             violations.append(
                                 Violation(
@@ -132,6 +134,21 @@ class ParenContentIndentRule(BaseRule):
                                     is_fixable=True
                                 )
                             )
+                        else:
+                            start_ws = prev_tok["end"]
+                            end_ws = tok["start"]
+                            spaces = content[start_ws:end_ws]
+                            expected_spaces = " " if is_keyword_op else ""
+                            if spaces != expected_spaces:
+                                violations.append(
+                                    Violation(
+                                        rule_id=self.rule_id,
+                                        line_number=tok["line"],
+                                        message=f"Spacing before parenthesis is incorrect. Expected {repr(expected_spaces)}, got {repr(spaces)}.",
+                                        offending_lines=[lines[tok["line"] - 1] if tok["line"] - 1 < len(lines) else ""],
+                                        is_fixable=True
+                                    )
+                                )
                             
         expected_indents = self._get_line_expected_indents(content)
         for line_no, expected_indent in expected_indents.items():
@@ -169,12 +186,14 @@ class ParenContentIndentRule(BaseRule):
                         break
                 if prev_tok:
                     val_up = prev_tok["value"].upper()
-                    if prev_tok["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST", "IN", "ANY", "SOME"):
-                        if prev_tok["line"] < tok["line"]:
-                            start_ws = prev_tok["end"]
-                            end_ws = tok["start"]
-                            val = " " if val_up in ("IN", "ANY", "SOME") else ""
-                            edits.append((start_ws, end_ws, val))
+                    is_keyword_op = val_up in ("VALUES", "TABLE", "IN", "ANY", "SOME")
+                    is_func_like = (prev_tok["type"] == "IDENTIFIER") or (val_up in ("COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST")) or is_keyword_op
+                    if is_func_like:
+                        start_ws = prev_tok["end"]
+                        end_ws = tok["start"]
+                        expected_spaces = " " if is_keyword_op else ""
+                        if content[start_ws:end_ws] != expected_spaces:
+                            edits.append((start_ws, end_ws, expected_spaces))
         if edits:
             edits.sort(key=lambda x: x[0], reverse=True)
             chars = list(content)
