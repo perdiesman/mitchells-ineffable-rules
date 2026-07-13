@@ -66,8 +66,15 @@ class WhereMultiRule(BaseRule):
                 clause_depths = depths[i + 1:clause_end]
                 
                 has_multi = False
+                case_depth = 0
                 for t, d in zip(clause_tokens, clause_depths):
-                    if d == outer_depth and t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
+                    if t["type"] == "KEYWORD":
+                        val_up = t["value"].upper()
+                        if val_up == "CASE":
+                            case_depth += 1
+                        elif val_up == "END" and case_depth > 0:
+                            case_depth -= 1
+                    if case_depth == 0 and d == outer_depth and t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
                         has_multi = True
                         break
                         
@@ -106,8 +113,15 @@ class WhereMultiRule(BaseRule):
                             })
                             
                     # 2. Format subsequent AND/OR keywords onto their own lines
+                    case_depth = 0
                     for j_idx, (t, d) in enumerate(zip(clause_tokens, clause_depths)):
-                        if d == outer_depth and t["type"] == "KEYWORD":
+                        if t["type"] == "KEYWORD":
+                            val_up = t["value"].upper()
+                            if val_up == "CASE":
+                                case_depth += 1
+                            elif val_up == "END" and case_depth > 0:
+                                case_depth -= 1
+                        if case_depth == 0 and d == outer_depth and t["type"] == "KEYWORD":
                             val_upper = t["value"].upper()
                             if val_upper in ("AND", "OR"):
                                 actual_idx = i + 1 + j_idx
