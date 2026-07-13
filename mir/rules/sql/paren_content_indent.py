@@ -109,8 +109,31 @@ class ParenContentIndentRule(BaseRule):
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        expected_indents = self._get_line_expected_indents(content)
         
+        # Check opening parenthesis position
+        tokens = tokenize_sql(content)
+        for i, tok in enumerate(tokens):
+            if tok["type"] == "PAREN" and tok["value"] == "(":
+                prev_tok = None
+                for p_idx in range(i - 1, -1, -1):
+                    if tokens[p_idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                        prev_tok = tokens[p_idx]
+                        break
+                if prev_tok:
+                    val_up = prev_tok["value"].upper()
+                    if prev_tok["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST"):
+                        if prev_tok["line"] < tok["line"]:
+                            violations.append(
+                                Violation(
+                                    rule_id=self.rule_id,
+                                    line_number=tok["line"],
+                                    message="Opening parenthesis of a function call or definition must be on the same line as the function name.",
+                                    offending_lines=[lines[tok["line"] - 1] if tok["line"] - 1 < len(lines) else ""],
+                                    is_fixable=True
+                                )
+                            )
+                            
+        expected_indents = self._get_line_expected_indents(content)
         for line_no, expected_indent in expected_indents.items():
             line_text = lines[line_no - 1]
             actual_indent = line_text[:len(line_text) - len(line_text.lstrip())]
@@ -134,12 +157,35 @@ class ParenContentIndentRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        # First fix opening parenthesis position
+        tokens = tokenize_sql(content)
+        edits = []
+        for i, tok in enumerate(tokens):
+            if tok["type"] == "PAREN" and tok["value"] == "(":
+                prev_tok = None
+                for p_idx in range(i - 1, -1, -1):
+                    if tokens[p_idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                        prev_tok = tokens[p_idx]
+                        break
+                if prev_tok:
+                    val_up = prev_tok["value"].upper()
+                    if prev_tok["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST"):
+                        if prev_tok["line"] < tok["line"]:
+                            start_ws = prev_tok["end"]
+                            end_ws = tok["start"]
+                            edits.append((start_ws, end_ws, ""))
+        if edits:
+            edits.sort(key=lambda x: x[0], reverse=True)
+            chars = list(content)
+            for start, end, val in edits:
+                chars[start:end] = list(val)
+            content = "".join(chars)
+            
         expected_indents = self._get_line_expected_indents(content)
         if not expected_indents:
             return content
             
         lines = content.splitlines()
-        
         for line_no in range(1, len(lines) + 1):
             if line_no in expected_indents:
                 expected_indent = expected_indents[line_no]
