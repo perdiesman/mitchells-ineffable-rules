@@ -1,3 +1,4 @@
+import re
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
@@ -34,15 +35,35 @@ class JoinOnMultiRule(BaseRule):
             if tok["type"] == "KEYWORD" and tok["value"].upper() == "ON":
                 outer_depth = depths[i]
                 
-                line_start = content.rfind("\n", 0, tok["start"]) + 1
-                line_prefix = content[line_start:tok["start"]]
-                on_indent = ""
-                for char in line_prefix:
-                    if char in (" ", "\t"):
-                        on_indent += char
-                    else:
+                # Find the preceding JOIN token at the same depth to reconstruct join prefix
+                join_tok = None
+                for idx in range(i - 1, -1, -1):
+                    t = tokens[idx]
+                    d = depths[idx]
+                    if d == outer_depth and t["type"] == "KEYWORD" and t["value"].upper() in (
+                        "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "NATURAL"
+                    ):
+                        join_tok = t
                         break
-                        
+                
+                if join_tok:
+                    join_line_start = content.rfind("\n", 0, join_tok["start"]) + 1
+                    join_part = content[join_line_start:tok["start"]]
+                    join_indent = join_part[:len(join_part) - len(join_part.lstrip())]
+                    join_text_normalized = re.sub(r'\s+', ' ', join_part.strip())
+                    join_prefix_for_on = join_indent + join_text_normalized + " "
+                    on_indent = join_indent
+                else:
+                    line_start = content.rfind("\n", 0, tok["start"]) + 1
+                    line_prefix = content[line_start:tok["start"]]
+                    join_prefix_for_on = line_prefix
+                    on_indent = ""
+                    for char in line_prefix:
+                        if char in (" ", "\t"):
+                            on_indent += char
+                        else:
+                            break
+                            
                 expected_indent = on_indent + "    "
                 
                 clause_end = n
@@ -68,7 +89,6 @@ class JoinOnMultiRule(BaseRule):
                 
                 on_clause_tokens = tokens[i : clause_end]
                 on_clause_str = "".join(t["value"] for t in on_clause_tokens)
-                import re
                 on_clause_single = re.sub(r'\s+', ' ', on_clause_str)
                 estimated_line_len = len(on_indent) + len("JOIN ") + len(on_clause_single)
                 
@@ -87,7 +107,7 @@ class JoinOnMultiRule(BaseRule):
                 first_cond_str = "".join(t["value"] for t in first_cond_toks).strip()
                 first_cond_str_normalized = re.sub(r'\s+', ' ', first_cond_str)
                 
-                estimated_first_line_len = len(line_prefix) + len("ON ") + len(first_cond_str_normalized)
+                estimated_first_line_len = len(join_prefix_for_on) + len("ON ") + len(first_cond_str_normalized)
                 expected_pre_on_ws = "\n" + expected_indent if estimated_first_line_len > max_len else " "
                 expected_post_on_ws = " "
                 
