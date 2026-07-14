@@ -2,12 +2,39 @@ import os
 import sys
 import select
 import difflib
+import shutil
+import subprocess
 from typing import List, Dict, Set, Tuple
 from mir.engine.config import Config
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.engine.rules_loader import load_rules_for_language
 from mir.engine.disabler import get_disabled_rules_map, get_file_language
 from mir.engine.rules_help import get_supported_languages
+
+def print_diff_with_delta(diff_lines: List[str]) -> None:
+    diff_text = "".join(diff_lines)
+    delta_path = shutil.which("delta")
+    if delta_path:
+        try:
+            # We pass --side-by-side. 
+            # In delta, we can also pass --width or let it auto-detect. 
+            # We want to keep it interactive/paginated if possible, but for a tool run, 
+            # passing -s / --side-by-side prints directly to output.
+            process = subprocess.Popen(
+                [delta_path, "--side-by-side"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            stdout, stderr = process.communicate(input=diff_text)
+            if process.returncode == 0 and stdout:
+                print(stdout, end="")
+                return
+        except Exception:
+            pass
+            
+    print(diff_text, end="")
 
 def run_rule_check_recursively(rule: BaseRule, content: str, file_path: str, rule_config: dict, lang: str) -> List[Violation]:
     if rule.only_recursive:
@@ -409,13 +436,13 @@ def run_linter(config: Config) -> int:
                     except Exception as e:
                         pass
                 if current_content != content and not config.quiet:
-                    diff = difflib.unified_diff(
+                    diff_lines = list(difflib.unified_diff(
                         content.splitlines(keepends=True),
                         current_content.splitlines(keepends=True),
                         fromfile=f"a/{file_path}",
                         tofile=f"b/{file_path}"
-                    )
-                    sys.stdout.writelines(diff)
+                    ))
+                    print_diff_with_delta(diff_lines)
                     
             has_errors = False
             for v, rule in file_violations:
@@ -635,22 +662,15 @@ def run_linter(config: Config) -> int:
                         pass
                 
                 if current_content != content:
-                    if not config.quiet:
-                        print(f"--- {file_path} (original)")
-                        print(f"+++ {file_path} (dry-run fix)")
-                    diff = list(difflib.unified_diff(
+                    diff_lines = list(difflib.unified_diff(
                         content.splitlines(keepends=True),
                         current_content.splitlines(keepends=True),
-                        fromfile=file_path,
-                        tofile=file_path + ".fixed",
+                        fromfile=f"a/{file_path}",
+                        tofile=f"b/{file_path}",
                         n=2
                     ))
-                    # Print diff lines (excluding the header which we customized)
                     if not config.quiet:
-                        for line in diff[2:]:
-                            print(line, end="")
-                        if not diff[-1].endswith("\n"):
-                            print()
+                        print_diff_with_delta(diff_lines)
                     for v, rule in fixable:
                         rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                         if rule.get_config_value(rule_config, "severity", "error") != "warning":
