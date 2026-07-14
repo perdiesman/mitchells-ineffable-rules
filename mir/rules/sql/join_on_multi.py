@@ -50,8 +50,20 @@ class JoinOnMultiRule(BaseRule):
                     join_line_start = content.rfind("\n", 0, join_tok["start"]) + 1
                     join_part = content[join_line_start:tok["start"]]
                     join_indent = join_part[:len(join_part) - len(join_part.lstrip())]
-                    join_text_normalized = re.sub(r'\s+', ' ', join_part.strip())
-                    join_prefix_for_on = join_indent + join_text_normalized + " "
+                    if "\n" in join_part:
+                        last_line = join_part.splitlines()[-1]
+                        if last_line.strip() == "":
+                            non_empty_lines = [l for l in join_part.splitlines() if l.strip() != ""]
+                            if non_empty_lines:
+                                join_text_normalized = re.sub(r'\s+', ' ', non_empty_lines[-1].strip())
+                                join_prefix_for_on = join_indent + join_text_normalized + " "
+                            else:
+                                join_prefix_for_on = join_indent
+                        else:
+                            join_prefix_for_on = last_line
+                    else:
+                        join_text_normalized = re.sub(r'\s+', ' ', join_part.strip())
+                        join_prefix_for_on = join_indent + join_text_normalized + " "
                     on_indent = join_indent
                 else:
                     line_start = content.rfind("\n", 0, tok["start"]) + 1

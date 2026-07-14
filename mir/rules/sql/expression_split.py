@@ -100,13 +100,22 @@ class ExpressionSplitRule(BaseRule):
                             break
                     is_func_like = False
                     is_val_multi = False
+                    is_subquery = False
                     if prev_tok:
                         val_up = prev_tok["value"].upper()
                         if prev_tok["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST", "IN", "ANY", "SOME"):
                             is_func_like = True
+                        elif prev_tok["type"] == "KEYWORD" and val_up in ("JOIN", "FROM"):
+                            is_subquery = True
                         is_val_multi = (val_up == "VALUES" and is_values_multi(tokens, open_idx))
                             
-                    if is_func_like:
+                    if is_subquery:
+                        p_line_no = prev_tok["line"]
+                        p_line = lines[p_line_no - 1]
+                        p_base_indent = p_line[:len(p_line) - len(p_line.lstrip())]
+                        content_indent = p_base_indent + "    "
+                        close_indent = p_base_indent
+                    elif is_func_like:
                         p_line_no = prev_tok["line"]
                         p_line = lines[p_line_no - 1]
                         p_base_indent = p_line[:len(p_line) - len(p_line.lstrip())]
@@ -120,7 +129,13 @@ class ExpressionSplitRule(BaseRule):
                     ws_before_open = None
                     if open_idx - 1 >= 0 and tokens[open_idx - 1]["type"] == "WHITESPACE":
                         ws_before_open = tokens[open_idx - 1]
-                    if is_val_multi:
+                    if is_subquery:
+                        replacement = " "
+                        if ws_before_open:
+                            edits.append((ws_before_open["start"], ws_before_open["end"], replacement, line_no))
+                        else:
+                            edits.append((open_tok["start"], open_tok["start"], " ", line_no))
+                    elif is_val_multi:
                         v_line_no = prev_tok["line"]
                         v_line = lines[v_line_no - 1]
                         val_base_indent = v_line[:len(v_line) - len(v_line.lstrip())]
