@@ -298,7 +298,7 @@ def run_linter(config: Config) -> int:
                     print(f"Error running rule {rule.rule_id} on {file_path}: {e}", file=sys.stderr)
                 continue
                 
-            rule_disabled_lines = disabled_map.get(rule.rule_id, set())
+            rule_disabled_lines = disabled_map.get(rule.rule_id, set()) | disabled_map.get("IR-all", set())
             for v in violations:
                 if v.line_number not in rule_disabled_lines:
                     severity = rule.get_config_value(rule_config, "severity", "error")
@@ -354,7 +354,7 @@ def run_linter(config: Config) -> int:
                     except Exception as e:
                         continue
                         
-                    rule_disabled_lines = disabled_map.get(rule.rule_id, set())
+                    rule_disabled_lines = disabled_map.get(rule.rule_id, set()) | disabled_map.get("IR-all", set())
                     for v in violations:
                         if v.line_number not in rule_disabled_lines:
                             severity = rule.get_config_value(rule_config, "severity", "error")
@@ -510,7 +510,7 @@ def run_linter(config: Config) -> int:
                 continue
                 
             # Filter violations based on in-file disable comments
-            rule_disabled_lines = disabled_map.get(rule.rule_id, set())
+            rule_disabled_lines = disabled_map.get(rule.rule_id, set()) | disabled_map.get("IR-all", set())
             for v in violations:
                 if v.line_number not in rule_disabled_lines:
                     severity = rule.get_config_value(rule_config, "severity", "error")
@@ -567,7 +567,7 @@ def run_linter(config: Config) -> int:
                     except Exception as e:
                         continue
                         
-                    rule_disabled_lines = disabled_map.get(rule.rule_id, set())
+                    rule_disabled_lines = disabled_map.get(rule.rule_id, set()) | disabled_map.get("IR-all", set())
                     for v in violations:
                         if v.line_number not in rule_disabled_lines:
                             severity = rule.get_config_value(rule_config, "severity", "error")

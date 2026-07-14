@@ -48,5 +48,27 @@ SELECT * FROM long_line;
         # The single line disable on line 1 should carry over lines 2 & 3 (comments) to line 4
         self.assertIn(4, disabled_map.get("IR-line-length", set()))
 
+    def test_disable_all_rules(self):
+        content = """SELECT * FROM users;
+-- IR-all
+SELECT * FROM table_with_a_very_long_name_that_exceeds_the_limit_of_characters_on_one_line;
+-- IR-start-all
+select * from users;
+select * from products;
+-- IR-end-all
+select * from orders;
+"""
+        disabled_map = get_disabled_rules_map(content, "test.sql")
+        # Line 3 should have IR-all disabled (single line disable on line 2)
+        all_disabled = disabled_map.get("IR-all", set())
+        self.assertIn(3, all_disabled)
+        self.assertNotIn(4, all_disabled)
+        
+        # Block disable of all rules starts at line 4 (comment on 4, block spans 5, 6)
+        self.assertIn(5, all_disabled)
+        self.assertIn(6, all_disabled)
+        # Ends after line 7 comment, so line 8 is not disabled
+        self.assertNotIn(8, all_disabled)
+
 if __name__ == "__main__":
     unittest.main()
