@@ -20,8 +20,9 @@ def print_diff_with_delta(diff_lines: List[str]) -> None:
             # In delta, we can also pass --width or let it auto-detect. 
             # We want to keep it interactive/paginated if possible, but for a tool run, 
             # passing -s / --side-by-side prints directly to output.
+            columns = shutil.get_terminal_size().columns
             process = subprocess.Popen(
-                [delta_path, "--side-by-side"],
+                [delta_path, "--side-by-side", "--width", str(columns)],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
