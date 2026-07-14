@@ -563,6 +563,7 @@ def run_linter(config: Config) -> int:
             pass_num = 0
             max_passes = 10
             unfixable_violations = unfixable
+            rules_fixed = set()
             
             while has_changes and pass_num < max_passes:
                 pass_num += 1
@@ -620,7 +621,10 @@ def run_linter(config: Config) -> int:
                     for rule in rules_to_fix:
                         rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
                         try:
-                            current_content = run_rule_fix_recursively(rule, current_content, file_path, rule_config, lang)
+                            new_content = run_rule_fix_recursively(rule, current_content, file_path, rule_config, lang)
+                            if new_content != current_content:
+                                rules_fixed.add(rule.rule_id)
+                                current_content = new_content
                         except Exception as e:
                             pass
                     if current_content != old_content:
@@ -633,8 +637,9 @@ def run_linter(config: Config) -> int:
                 try:
                     with open(file_path, "w", encoding="utf-8") as f:
                         f.write(current_content)
-                    if config.verbose and not config.quiet:
-                        print(f"Fixed issues in {file_path}")
+                    if not config.quiet:
+                        rules_str = ", ".join(sorted(rules_fixed))
+                        print(f"Fixed issues in {file_path} ({rules_str})")
                 except Exception as e:
                     if not config.quiet:
                         print(f"Error writing fixed content to '{file_path}': {e}")
