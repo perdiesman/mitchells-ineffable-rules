@@ -234,8 +234,31 @@ class ExpressionSplitRule(BaseRule):
             if enclosing_open:
                 eo_idx = tokens.index(enclosing_open)
                 base_depth = depths[eo_idx] + 1
+                
+                prev_tok_eo = None
+                for p_idx in range(eo_idx - 1, -1, -1):
+                    if tokens[p_idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                        prev_tok_eo = tokens[p_idx]
+                        break
+                is_eo_func_like = False
+                if prev_tok_eo:
+                    val_up = prev_tok_eo["value"].upper()
+                    if prev_tok_eo["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST", "IN", "ANY", "SOME"):
+                        is_eo_func_like = True
+                        
+                if is_eo_func_like:
+                    eo_line_no = prev_tok_eo["line"]
+                    eo_line = lines[eo_line_no - 1]
+                    eo_base_indent = eo_line[:len(eo_line) - len(eo_line.lstrip())]
+                    content_indent = eo_base_indent + "        "
+                else:
+                    eo_line_no = enclosing_open["line"]
+                    eo_line = lines[eo_line_no - 1]
+                    eo_base_indent = eo_line[:len(eo_line) - len(eo_line.lstrip())]
+                    content_indent = eo_base_indent + "    "
             else:
                 base_depth = 0
+                content_indent = base_indent + "    "
                 
             # Find operators/keywords/commas at base_depth on this line
             keywords = []
@@ -307,7 +330,17 @@ class ExpressionSplitRule(BaseRule):
                             ws_before = tokens[op_idx - 1]
                         edit_start = ws_before["start"] if ws_before else op["start"]
                         edit_end = ws_before["end"] if ws_before else op["start"]
-                        edits.append((edit_start, edit_end, "\n" + content_indent, line_no))
+                        
+                        line_starts_with_op = False
+                        if active_tokens:
+                            first_tok = active_tokens[0]
+                            if first_tok["type"] == "OPERATOR" and first_tok["value"] in ("+", "-", "||", "*", "/"):
+                                line_starts_with_op = True
+                                
+                        if line_starts_with_op:
+                            edits.append((edit_start, edit_end, "\n" + base_indent, line_no))
+                        else:
+                            edits.append((edit_start, edit_end, "\n" + content_indent + "    ", line_no))
                     
         return [e for e in edits if content[e[0]:e[1]] != e[2]]
 
