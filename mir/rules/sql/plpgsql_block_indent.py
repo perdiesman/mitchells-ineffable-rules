@@ -134,14 +134,10 @@ class PlpgsqlBlockIndentRule(BaseRule):
                     should_check = True
                     exact_enforce = True
                     
-                if should_check:
+                if should_check and exact_enforce:
                     is_violation = False
-                    if exact_enforce:
-                        if leading_spaces != expected_spaces:
-                            is_violation = True
-                    else:
-                        if leading_spaces < expected_spaces:
-                            is_violation = True
+                    if leading_spaces != expected_spaces:
+                        is_violation = True
                             
                     if is_violation:
                         violations.append({

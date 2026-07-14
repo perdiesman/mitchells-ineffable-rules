@@ -128,7 +128,13 @@ class SubqueryCompactRule(BaseRule):
                         line_prefix = content[line_start:paren_tok["start"]]
                         effective_prefix_len = max(0, len(line_prefix) - base_indent_spaces)
                         
-                        if effective_prefix_len + len(compacted_full) <= max_len:
+                        close_line_end = content.find("\n", close_tok["end"])
+                        if close_line_end == -1:
+                            close_line_end = len(content)
+                        suffix = content[close_tok["end"]:close_line_end]
+                        
+                        total_len = effective_prefix_len + len(compacted_full) + len(suffix)
+                        if total_len <= max_len:
                             violations.append({
                                 "open_tok": paren_tok,
                                 "close_tok": close_tok,
