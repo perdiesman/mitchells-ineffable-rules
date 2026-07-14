@@ -20,7 +20,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-function-case`](rules/general/IR-function-case.md) | Function names should be the same case (default lowercase). | Yes | [View Details](rules/general/IR-function-case.md) |
 | [`IR-indent`](rules/general/IR-indent.md) | Indent should be equal amounts of spaces (default 4). | Yes | [View Details](rules/general/IR-indent.md) |
 | [`IR-keyword-case`](rules/general/IR-keyword-case.md) | SQL keywords must be in uppercase. | Yes | [View Details](rules/general/IR-keyword-case.md) |
-| [`IR-line-length`](rules/general/IR-line-length.md) | Lines must not exceed the configured maximum length. | No | [View Details](rules/general/IR-line-length.md) |
+| [`IR-line-length`](rules/general/IR-line-length.md) | Lines must not exceed the configured maximum length. | Sometimes | [View Details](rules/general/IR-line-length.md) |
 | [`IR-operator-spacing`](rules/general/IR-operator-spacing.md) | Operators should have a single space on both sides. | Yes | [View Details](rules/general/IR-operator-spacing.md) |
 | [`IR-plpgsql-keyword-case`](rules/general/IR-plpgsql-keyword-case.md) | Procedural PL/pgSQL keywords and trigger variables must be in uppercase. | Yes | [View Details](rules/general/IR-plpgsql-keyword-case.md) |
 | [`IR-redundant-keywords`](rules/general/IR-redundant-keywords.md) | Remove redundant implied keywords like INNER, OUTER, and ASC. | Yes | [View Details](rules/general/IR-redundant-keywords.md) |

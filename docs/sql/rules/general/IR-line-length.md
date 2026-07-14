@@ -2,7 +2,7 @@
 
 Lines must not exceed the configured maximum length.
 
-- **Auto-Fixable**: No
+- **Auto-Fixable**: Sometimes
 - **Enabled by Default**: Yes
 - **Category**: General Rules
 - **Configuration Options**:
@@ -12,15 +12,11 @@ Lines must not exceed the configured maximum length.
 
 #### ❌ Violating Example
 ```sql
-SELECT first_name, last_name, email, phone_number, mailing_address, date_of_birth, join_date, status, premium_member_flag FROM accounts_primary_table WHERE status = 'active';
+-- This is a very long comment line that exceeds the maximum line length limit of 120 characters to demonstrate how the comment wrapping works.
 ```
 
 ####  Correct Example
 ```sql
-SELECT
-    first_name,
-    last_name,
-    email
-FROM accounts_primary_table
-WHERE status = 'active';
+-- This is a very long comment line that exceeds the maximum line length limit of 120 characters to demonstrate how the
+-- comment wrapping works.
 ```
