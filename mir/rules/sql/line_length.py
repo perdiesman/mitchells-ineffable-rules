@@ -2,11 +2,59 @@ from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.indent import IndentRule
 
+def wrap_comment_line(line: str, max_length: int) -> List[str]:
+    # Find leading indentation
+    indent = line[:len(line) - len(line.lstrip())]
+    stripped = line.lstrip()
+    
+    if not stripped.startswith("--"):
+        return [line]
+        
+    if stripped.startswith("-- "):
+        comment_prefix = "-- "
+        comment_text = stripped[3:]
+    else:
+        comment_prefix = "--"
+        comment_text = stripped[2:]
+        
+    prefix = indent + comment_prefix
+    
+    if len(line) <= max_length:
+        return [line]
+        
+    max_text_len = max(1, max_length - len(prefix))
+    
+    words = comment_text.split(" ")
+    wrapped_lines = []
+    current_line_words = []
+    current_line_len = 0
+    
+    for word in words:
+        word_len = len(word)
+        space_len = 1 if current_line_words else 0
+        if current_line_len + space_len + word_len > max_text_len:
+            if current_line_words:
+                wrapped_lines.append(prefix + " ".join(current_line_words))
+                current_line_words = [word]
+                current_line_len = word_len
+            else:
+                wrapped_lines.append(prefix + word)
+                current_line_words = []
+                current_line_len = 0
+        else:
+            current_line_words.append(word)
+            current_line_len += space_len + word_len
+            
+    if current_line_words:
+        wrapped_lines.append(prefix + " ".join(current_line_words))
+        
+    return wrapped_lines
+
 class LineLengthRule(BaseRule):
     rule_id = "IR-line-length"
     description = "Lines must not exceed the configured maximum length."
     category = "general"
-    is_fixable = "no"
+    is_fixable = "sometimes"
     exclude_recursive = True
     
     default_config = {
@@ -27,8 +75,8 @@ class LineLengthRule(BaseRule):
     
     examples = [
         {
-            "violating": "SELECT first_name, last_name, email, phone_number, mailing_address, date_of_birth, join_date, status, premium_member_flag FROM accounts_primary_table WHERE status = 'active';",
-            "correct": "SELECT\n    first_name,\n    last_name,\n    email\nFROM accounts_primary_table\nWHERE status = 'active';"
+            "violating": "-- This is a very long comment line that exceeds the maximum line length limit of 120 characters to demonstrate how the comment wrapping works.",
+            "correct": "-- This is a very long comment line that exceeds the maximum line length limit of 120 characters to demonstrate how the\n-- comment wrapping works."
         }
     ]
 
@@ -60,14 +108,27 @@ class LineLengthRule(BaseRule):
         for idx, line in enumerate(lines, start=1):
             effective_len = len(line) - base_indent_spaces
             if effective_len > max_length:
+                is_comment = line.lstrip().startswith("--")
                 violations.append(
                     Violation(
                         rule_id=self.rule_id,
                         line_number=idx,
                         message=f"Line exceeds maximum length of {max_length} characters (actual effective length: {effective_len}, total length: {len(line)}).",
                         offending_lines=[line],
-                        is_fixable=self.is_fixable
+                        is_fixable=is_comment
                     )
                 )
                 
         return violations
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        max_length = rule_config.get("max_length", self.default_config["max_length"])
+        lines = content.splitlines()
+        fixed_lines = []
+        for line in lines:
+            if line.lstrip().startswith("--"):
+                fixed_lines.extend(wrap_comment_line(line, max_length))
+            else:
+                fixed_lines.append(line)
+                
+        return "\n".join(fixed_lines) + ("\n" if content.endswith("\n") else "")
