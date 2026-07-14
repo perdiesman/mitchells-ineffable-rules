@@ -7,6 +7,7 @@ class BlankLinesRule(BaseRule):
     category = "general"
     is_fixable = "yes"
     enabled_by_default = True
+    exclude_recursive = True
     
     default_config = {
         "max_blank_lines": 1

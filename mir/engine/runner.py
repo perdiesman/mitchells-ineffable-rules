@@ -9,25 +9,8 @@ from mir.engine.rules_loader import load_rules_for_language
 from mir.engine.disabler import get_disabled_rules_map, get_file_language
 from mir.engine.rules_help import get_supported_languages
 
-EXCLUDED_RECURSIVE_RULES = {
-    "IR-plpgsql-keyword-case",
-    "IR-plpgsql-assignment",
-    "IR-function-body-indent",
-    "IR-function-header-layout",
-    "IR-eof-newline",
-    "IR-trailing-semicolon",
-    "IR-statement-semicolon",
-    "IR-statement-blank-lines",
-    "IR-line-length",
-    "IR-blank-lines"
-}
-
-ONLY_RECURSIVE_RULES = {
-    "IR-plpgsql-block-indent"
-}
-
 def run_rule_check_recursively(rule: BaseRule, content: str, file_path: str, rule_config: dict, lang: str) -> List[Violation]:
-    if rule.rule_id in ONLY_RECURSIVE_RULES:
+    if rule.only_recursive:
         violations = []
     else:
         try:
@@ -35,7 +18,7 @@ def run_rule_check_recursively(rule: BaseRule, content: str, file_path: str, rul
         except Exception as e:
             raise e
         
-    if lang != "sql" or rule.rule_id in EXCLUDED_RECURSIVE_RULES:
+    if lang != "sql" or rule.exclude_recursive:
         return violations
         
     try:
@@ -94,7 +77,7 @@ def run_rule_check_recursively(rule: BaseRule, content: str, file_path: str, rul
     return violations
 
 def run_rule_fix_recursively(rule: BaseRule, content: str, file_path: str, rule_config: dict, lang: str) -> str:
-    if rule.rule_id in ONLY_RECURSIVE_RULES:
+    if rule.only_recursive:
         current_content = content
     else:
         try:
@@ -102,7 +85,7 @@ def run_rule_fix_recursively(rule: BaseRule, content: str, file_path: str, rule_
         except Exception:
             current_content = content
         
-    if lang != "sql" or rule.rule_id in EXCLUDED_RECURSIVE_RULES:
+    if lang != "sql" or rule.exclude_recursive:
         return current_content
         
     try:

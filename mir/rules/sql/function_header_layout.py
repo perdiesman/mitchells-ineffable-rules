@@ -49,6 +49,7 @@ class FunctionHeaderLayoutRule(BaseRule):
     category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
+    exclude_recursive = True
     
     default_config = {
         "max_length": 100

@@ -8,6 +8,7 @@ class StatementBlankLinesRule(BaseRule):
     category = "general"
     is_fixable = "yes"
     enabled_by_default = True
+    exclude_recursive = True
     
     default_config = {
         "min_blank_lines": 1

@@ -7,6 +7,7 @@ class LineLengthRule(BaseRule):
     description = "Lines must not exceed the configured maximum length."
     category = "general"
     is_fixable = "no"
+    exclude_recursive = True
     
     default_config = {
         "max_length": 120,

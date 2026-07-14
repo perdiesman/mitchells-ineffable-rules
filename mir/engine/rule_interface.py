@@ -29,6 +29,8 @@ class BaseRule:
     category: str = "general"
     is_fixable: str = "no"  # Must be "yes", "no", or "sometimes"
     enabled_by_default: bool = True
+    exclude_recursive: bool = False
+    only_recursive: bool = False
     default_config: Dict[str, Any] = {}
     config_options: Dict[str, Dict[str, Any]] = {}
     examples: List[Dict[str, str]] = []
