@@ -17,7 +17,9 @@ EXCLUDED_RECURSIVE_RULES = {
     "IR-eof-newline",
     "IR-trailing-semicolon",
     "IR-statement-semicolon",
-    "IR-statement-blank-lines"
+    "IR-statement-blank-lines",
+    "IR-line-length",
+    "IR-blank-lines"
 }
 
 ONLY_RECURSIVE_RULES = {
