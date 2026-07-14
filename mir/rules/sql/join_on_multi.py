@@ -88,19 +88,33 @@ class JoinOnMultiRule(BaseRule):
                 first_cond_str_normalized = re.sub(r'\s+', ' ', first_cond_str)
                 
                 estimated_first_line_len = len(line_prefix) + len("ON ") + len(first_cond_str_normalized)
-                expected_on_ws = "\n" + expected_indent if estimated_first_line_len > max_len else " "
+                expected_pre_on_ws = "\n" + expected_indent if estimated_first_line_len > max_len else " "
+                expected_post_on_ws = " "
                 
+                ws_before_on = None
+                if i - 1 >= 0 and tokens[i - 1]["type"] == "WHITESPACE":
+                    ws_before_on = tokens[i - 1]
+                    
+                actual_pre_on_ws = ws_before_on["value"] if ws_before_on else ""
+                if actual_pre_on_ws != expected_pre_on_ws:
+                    violations.append({
+                        "token": tok,
+                        "ws_start": ws_before_on["start"] if ws_before_on else tok["start"],
+                        "ws_end": tok["start"],
+                        "replacement": expected_pre_on_ws
+                    })
+                    
                 ws_after_on = None
                 if i + 1 < n and tokens[i + 1]["type"] == "WHITESPACE":
                     ws_after_on = tokens[i + 1]
                     
-                actual_on_ws = ws_after_on["value"] if ws_after_on else ""
-                if actual_on_ws != expected_on_ws:
+                actual_post_on_ws = ws_after_on["value"] if ws_after_on else ""
+                if actual_post_on_ws != expected_post_on_ws:
                     violations.append({
                         "token": tok,
                         "ws_start": ws_after_on["start"] if ws_after_on else tok["end"],
                         "ws_end": ws_after_on["end"] if ws_after_on else tok["end"],
-                        "replacement": expected_on_ws
+                        "replacement": expected_post_on_ws
                     })
                 
                 if estimated_line_len <= max_len:
