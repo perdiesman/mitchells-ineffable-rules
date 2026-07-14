@@ -51,6 +51,8 @@ All rule classes must subclass `BaseRule` (imported from `mir.engine.rule_interf
 
 ### Optional Fields & Methods
 - **`enabled_by_default`** (boolean, default: `True`): Controls whether the rule runs when not explicitly configured.
+- **`exclude_recursive`** (boolean, default: `False`): If `True`, excludes the rule from being executed recursively on PL/pgSQL function bodies. Use this for general rules (like line length or blank line counts) that run on the entire file content and do not require AST/tokenization recursive checks.
+- **`only_recursive`** (boolean, default: `False`): If `True`, the rule is only run recursively on PL/pgSQL function bodies, and is skipped on the outer main file checking/fixing. Use this for rules that specifically format code structures unique to function bodies (like block-level indentations).
 - **`default_config`** (dictionary, default: `{}`): Holds default configuration values for rule options.
 - **`config_options`** (dictionary, default: `{}`): Declares detailed parameter options, descriptions, default values, and fallback instructions.
 - **`examples`** (list of dictionaries): Paired violating/correct code snippets demonstrating formatting violations and corrections.
