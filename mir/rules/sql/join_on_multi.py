@@ -75,6 +75,34 @@ class JoinOnMultiRule(BaseRule):
                 from mir.rules.sql.line_length import LineLengthRule
                 max_len = self.get_config_value(rule_config, "max_line_length", 100, fallbacks=[(LineLengthRule, "max_length")])
                 
+                first_cond_toks = []
+                for t, d in zip(clause_tokens, clause_depths):
+                    if d == outer_depth and t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
+                        break
+                    first_cond_toks.append(t)
+                
+                if first_cond_toks and first_cond_toks[0]["type"] == "WHITESPACE":
+                    first_cond_toks.pop(0)
+                    
+                first_cond_str = "".join(t["value"] for t in first_cond_toks).strip()
+                first_cond_str_normalized = re.sub(r'\s+', ' ', first_cond_str)
+                
+                estimated_first_line_len = len(line_prefix) + len("ON ") + len(first_cond_str_normalized)
+                expected_on_ws = "\n" + expected_indent if estimated_first_line_len > max_len else " "
+                
+                ws_after_on = None
+                if i + 1 < n and tokens[i + 1]["type"] == "WHITESPACE":
+                    ws_after_on = tokens[i + 1]
+                    
+                actual_on_ws = ws_after_on["value"] if ws_after_on else ""
+                if actual_on_ws != expected_on_ws:
+                    violations.append({
+                        "token": tok,
+                        "ws_start": ws_after_on["start"] if ws_after_on else tok["end"],
+                        "ws_end": ws_after_on["end"] if ws_after_on else tok["end"],
+                        "replacement": expected_on_ws
+                    })
+                
                 if estimated_line_len <= max_len:
                     continue
                     
