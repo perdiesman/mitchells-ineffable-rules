@@ -99,14 +99,19 @@ class ExpressionSplitRule(BaseRule):
                             prev_tok = tokens[p_idx]
                             break
                     is_func_like = False
+                    is_val_multi = False
                     if prev_tok:
                         val_up = prev_tok["value"].upper()
                         if prev_tok["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST", "IN", "ANY", "SOME"):
                             is_func_like = True
+                        is_val_multi = (val_up == "VALUES" and is_values_multi(tokens, open_idx))
                             
                     if is_func_like:
-                        content_indent = base_indent + "        "
-                        close_indent = base_indent + "    "
+                        p_line_no = prev_tok["line"]
+                        p_line = lines[p_line_no - 1]
+                        p_base_indent = p_line[:len(p_line) - len(p_line.lstrip())]
+                        content_indent = p_base_indent + "        "
+                        close_indent = p_base_indent + "    "
                     else:
                         content_indent = base_indent + "    "
                         close_indent = base_indent
@@ -115,7 +120,6 @@ class ExpressionSplitRule(BaseRule):
                     ws_before_open = None
                     if open_idx - 1 >= 0 and tokens[open_idx - 1]["type"] == "WHITESPACE":
                         ws_before_open = tokens[open_idx - 1]
-                    is_val_multi = (prev_tok and prev_tok["value"].upper() == "VALUES" and is_values_multi(tokens, open_idx))
                     if is_val_multi:
                         v_line_no = prev_tok["line"]
                         v_line = lines[v_line_no - 1]
