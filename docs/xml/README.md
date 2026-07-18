@@ -13,6 +13,7 @@ This document describes all XML linting rules supported by Mitchell's Ineffable 
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
+| [`IR-xml-indent`](rules/general/IR-xml-indent.md) | Enforce correct tag nesting indentation in XML files. | Yes | [View Details](rules/general/IR-xml-indent.md) |
 | [`IR-xml-well-formed`](rules/general/IR-xml-well-formed.md) | Ensure that XML content is well-formed. | No | [View Details](rules/general/IR-xml-well-formed.md) |
 
 ## Tags and Elements

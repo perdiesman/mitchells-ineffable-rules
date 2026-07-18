@@ -508,5 +508,20 @@ class TestRunnerIntegration(unittest.TestCase):
         with open(path, "r") as f:
             self.assertEqual(f.read(), '<root attr="val" />')
 
+        # 3. XML indentation check and fix
+        bad_indent = "<root>\n  <child />\n</root>"
+        with open(path, "w") as f:
+            f.write(bad_indent)
+
+        config_indent = Config()
+        config_indent.paths = [path]
+        config_indent.disable_all = True
+        config_indent.rules_to_enable = ["IR-xml-indent"]
+        config_indent.fix = True
+        self.assertEqual(run_linter(config_indent), 0)
+
+        with open(path, "r") as f:
+            self.assertEqual(f.read(), "<root>\n    <child />\n</root>")
+
 if __name__ == "__main__":
     unittest.main()
