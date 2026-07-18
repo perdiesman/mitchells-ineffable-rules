@@ -15,12 +15,20 @@ CREATE OR REPLACE FUNCTION my_func()
  RETURNS trigger
  LANGUAGE plpgsql
 AS $function$
+BEGIN
+    NULL;
+END;
+$function$;
 ```
 
 ####  Correct Example #1
 ```sql
 CREATE OR REPLACE FUNCTION my_func() RETURNS trigger LANGUAGE plpgsql AS
 $function$
+BEGIN
+    NULL;
+END;
+$function$;
 ```
 
 #### ❌ Violating Example #2
