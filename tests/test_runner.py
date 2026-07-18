@@ -523,5 +523,16 @@ class TestRunnerIntegration(unittest.TestCase):
         with open(path, "r") as f:
             self.assertEqual(f.read(), "<root>\n    <child />\n</root>")
 
+        # 4. XML line length check
+        long_line = "<root>\n    <child />\n" + ("A" * 121) + "\n</root>"
+        with open(path, "w") as f:
+            f.write(long_line)
+
+        config_len = Config()
+        config_len.paths = [path]
+        config_len.disable_all = True
+        config_len.rules_to_enable = ["IR-xml-line-length"]
+        self.assertEqual(run_linter(config_len), 1)
+
 if __name__ == "__main__":
     unittest.main()
