@@ -133,7 +133,7 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                 i = tag_end_idx + 1
                 continue
                 
-        if tok["type"] == "TEXT":
+        if tok["type"] in ("TEXT", "WHITESPACE"):
             val = tok["value"]
             start_offset = tok["start"]
             for offset_in_val, char in enumerate(val):
