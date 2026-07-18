@@ -1,6 +1,6 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
+from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths, find_datatype_token_groups
 
 class AliasAsRule(BaseRule):
     rule_id = "IR-alias-as"
@@ -26,6 +26,8 @@ class AliasAsRule(BaseRule):
     def _find_violations(self, content: str) -> List[dict]:
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
+        datatype_groups = find_datatype_token_groups(tokens, content)
+        datatype_tok_ids = {id(tok) for group in datatype_groups for tok in group}
         violations = []
         n = len(tokens)
         
@@ -72,9 +74,14 @@ class AliasAsRule(BaseRule):
                     active = [t for t in item if t["type"] not in ("WHITESPACE", "COMMENT")]
                     if len(active) >= 2:
                         last_tok = active[-1]
+                        # Skip if it is part of a data type name
+                        if id(last_tok) in datatype_tok_ids:
+                            continue
                         # Check if last token is identifier (column alias)
                         if last_tok["type"] == "IDENTIFIER":
                             prev_tok = active[-2]
+                            if id(prev_tok) in datatype_tok_ids:
+                                continue
                             if prev_tok["value"] == ".":
                                 continue
                             if prev_tok["type"] in ("OPERATOR", "CAST"):

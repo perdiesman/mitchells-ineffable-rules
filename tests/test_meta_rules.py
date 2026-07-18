@@ -92,3 +92,55 @@ class TestMetaRules(unittest.TestCase):
                 rules_checked_count += 1
                 
         print(f"\n[Meta-Testing] Dynamically validated {rules_checked_count} rules using embedded class examples.")
+
+    def test_ruleset_idempotency(self):
+        """
+        Verifies that running all fixable rules for a language recursively
+        on any of the examples or validations is idempotent.
+        """
+        languages = get_supported_languages()
+        
+        for lang in languages:
+            rules = load_rules_for_language(lang)
+            fixable_rules = [r for r in rules if r.is_fixable in ("yes", "sometimes")]
+            
+            # Helper to run all fixable rules recursively
+            def run_fixers(content):
+                curr = content
+                for r in fixable_rules:
+                    try:
+                        curr = r.fix(curr, f"test.{lang}", r.default_config)
+                    except NotImplementedError:
+                        pass
+                return curr
+                
+            for rule in rules:
+                all_snippets = []
+                for ex in rule.examples:
+                    if ex.get("violating"):
+                        all_snippets.append(ex["violating"])
+                    if ex.get("correct"):
+                        all_snippets.append(ex["correct"])
+                additional_vals = getattr(rule, "additional_validations", [])
+                all_snippets.extend(additional_vals)
+                
+                for idx, snippet in enumerate(all_snippets):
+                    if not snippet.strip():
+                        continue
+                    
+                    # Run fixers until content stabilizes (max 5 passes)
+                    curr = snippet
+                    for _ in range(5):
+                        nxt = run_fixers(curr)
+                        if nxt == curr:
+                            break
+                        curr = nxt
+                        
+                    # Now curr is the stable state. One more pass must yield the exact same content!
+                    final_pass = run_fixers(curr)
+                    self.assertEqual(
+                        final_pass, curr,
+                        f"Ruleset idempotency failure in language '{lang}' for rule '{rule.rule_id}' snippet:\n"
+                        f"Stable state:\n{curr}\nNext pass:\n{final_pass}"
+                    )
+

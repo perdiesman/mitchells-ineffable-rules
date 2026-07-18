@@ -63,8 +63,8 @@ class FunctionHeaderLayoutRule(BaseRule):
     
     examples = [
         {
-            "violating": "CREATE OR REPLACE FUNCTION my_func()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$",
-            "correct": "CREATE OR REPLACE FUNCTION my_func() RETURNS trigger LANGUAGE plpgsql AS\n$function$"
+            "violating": "CREATE OR REPLACE FUNCTION my_func()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n    NULL;\nEND;\n$function$;",
+            "correct": "CREATE OR REPLACE FUNCTION my_func() RETURNS trigger LANGUAGE plpgsql AS\n$function$\nBEGIN\n    NULL;\nEND;\n$function$;"
         },
         {
             "violating": "CREATE FUNCTION test_func()\nAS $body$\nBEGIN\n    RETURN 1;\nEND;\n$body$ LANGUAGE plpgsql STABLE RETURNS integer;",
