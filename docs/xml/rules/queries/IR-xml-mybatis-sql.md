@@ -12,9 +12,9 @@ Format embedded SQL inside MyBatis XML mapper files using SQL rules.
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="gov.ornl.gist.location.CountyMapper">
+<mapper namespace="my_namespace.MyMapper">
     <select id="selectListByQuery">
-        select county.id from outage_data.county county
+        select my_column from my_schema.my_table t
     </select>
 </mapper>
 ```
@@ -23,9 +23,9 @@ Format embedded SQL inside MyBatis XML mapper files using SQL rules.
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="gov.ornl.gist.location.CountyMapper">
+<mapper namespace="my_namespace.MyMapper">
     <select id="selectListByQuery">
-        SELECT county.id FROM outage_data.county county
+        SELECT my_column FROM my_schema.my_table t
     </select>
 </mapper>
 ```
@@ -34,9 +34,9 @@ Format embedded SQL inside MyBatis XML mapper files using SQL rules.
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="gov.ornl.gist.location.CountyMapper">
+<mapper namespace="my_namespace.MyMapper">
     <select id="selectListByQuery">
-        SELECT county.id FROM outage_data.county county
+        SELECT my_column FROM my_schema.my_table t
     </select>
 </mapper>
 ```
