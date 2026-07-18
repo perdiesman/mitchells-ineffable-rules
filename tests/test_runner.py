@@ -33,7 +33,7 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(exit_code, 1) # Has violations
         
     def test_runner_fix_mode(self):
-        path = self.write_temp_file("test.sql", "select * from t;")
+        path = self.write_temp_file("test.sql", "select id from t;")
         config = Config()
         config.paths = [path]
         config.fix = True
@@ -42,11 +42,11 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(exit_code, 0) # Fixed successfully
         
         with open(path, "r") as f:
-            self.assertEqual(f.read(), "SELECT * FROM t;")
+            self.assertEqual(f.read(), "SELECT id FROM t;")
 
     def test_language_specific_disable(self):
         # A file with select (which violates keyword case)
-        path = self.write_temp_file("test.sql", "select * from t;")
+        path = self.write_temp_file("test.sql", "select id from t;")
         
         # 1. Disable globally
         config = Config()
@@ -71,9 +71,9 @@ class TestRunnerIntegration(unittest.TestCase):
 
     def test_language_specific_config_override(self):
         # Write a file with 15 characters on line 1
-        path = self.write_temp_file("test.sql", "SELECT * FROM t;")
+        path = self.write_temp_file("test.sql", "SELECT id FROM t;")
         
-        # 1. Global max_length is 120 (default), line length is 16. No violations.
+        # 1. Global max_length is 120 (default), line length is 17. No violations.
         config = Config()
         config.paths = [path]
         exit_code = run_linter(config)
@@ -100,7 +100,7 @@ class TestRunnerIntegration(unittest.TestCase):
 
     def test_rule_config_disablement_boolean(self):
         # Violates keyword case
-        path = self.write_temp_file("test.sql", "select * from t;")
+        path = self.write_temp_file("test.sql", "select id from t;")
         
         # Disable via boolean config
         config = Config()
@@ -114,7 +114,7 @@ class TestRunnerIntegration(unittest.TestCase):
 
     def test_rule_config_disablement_dict(self):
         # Violates keyword case
-        path = self.write_temp_file("test.sql", "select * from t;")
+        path = self.write_temp_file("test.sql", "select id from t;")
         
         # Disable via enabled parameter in dict
         config = Config()
@@ -128,7 +128,7 @@ class TestRunnerIntegration(unittest.TestCase):
 
     def test_rule_config_disablement_lang_override(self):
         # Violates keyword case
-        path = self.write_temp_file("test.sql", "select * from t;")
+        path = self.write_temp_file("test.sql", "select id from t;")
         
         # Enable globally, but override for sql to false
         config = Config()
