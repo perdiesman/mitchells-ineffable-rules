@@ -24,5 +24,10 @@ dependencies = [
 mir = "mir.main:main"
 mir-linter = "mir.main:main"
 
+[project.urls]
+Homepage = "https://github.com/perdiesman/mitchells-ineffable-rules"
+Repository = "https://github.com/perdiesman/mitchells-ineffable-rules"
+"Bug Tracker" = "https://github.com/perdiesman/mitchells-ineffable-rules/issues"
+
 [tool.setuptools.packages.find]
 include = ["mir*"]
