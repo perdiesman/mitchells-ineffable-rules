@@ -108,9 +108,7 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                 j += 1
                 
             if tag_end_idx != -1:
-                # Find local def
                 if refid:
-                    # Strip mapper namespace prefixes if present (e.g. namespace.id)
                     short_refid = refid.split(".")[-1]
                     matched_tokens = None
                     if refid in sql_defs:
@@ -120,6 +118,18 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                         
                     if matched_tokens:
                         expand_tokens(matched_tokens, sql_defs, expanded_chars, mapping)
+                    else:
+                        refid_lower = refid.lower()
+                        if "column" in refid_lower or "col" in refid_lower or "list" in refid_lower:
+                            placeholder = "dummy_column"
+                        elif "where" in refid_lower or "clause" in refid_lower or "cond" in refid_lower or "example" in refid_lower:
+                            placeholder = "1 = 1"
+                        else:
+                            placeholder = "1 = 1"
+                            
+                        for char in placeholder:
+                            expanded_chars.append(char)
+                            mapping.append(tok["start"])
                 i = tag_end_idx + 1
                 continue
                 
@@ -135,11 +145,19 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
         if tok["type"] == "TAG_OPEN_START":
             tag_name = tok["value"][1:].lower()
             tag_end_idx = -1
+            
+            attrs = {}
             j = i + 1
             while j < n_tok:
                 if inner_tokens[j]["type"] == "TAG_END":
                     tag_end_idx = j
                     break
+                if inner_tokens[j]["type"] == "ATTR_NAME":
+                    if j + 2 < n_tok and inner_tokens[j+1]["type"] == "EQUAL" and inner_tokens[j+2]["type"] == "ATTR_VALUE":
+                        attr_val = inner_tokens[j+2]["value"]
+                        if len(attr_val) >= 2 and attr_val[0] in ("'", '"') and attr_val[-1] == attr_val[0]:
+                            attr_val = attr_val[1:-1]
+                        attrs[inner_tokens[j]["value"].lower()] = attr_val
                 j += 1
                 
             if tag_end_idx != -1:
@@ -164,6 +182,21 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                     k += 1
                     
                 if close_idx != -1:
+                    prefix_to_add = None
+                    if tag_name == "where":
+                        prefix_to_add = "WHERE "
+                    elif tag_name == "set":
+                        prefix_to_add = "SET "
+                    elif tag_name == "trim":
+                        prefix = attrs.get("prefix", "").strip().upper()
+                        if prefix in ("WHERE", "SET"):
+                            prefix_to_add = prefix + " "
+                            
+                    if prefix_to_add:
+                        for char in prefix_to_add:
+                            expanded_chars.append(char)
+                            mapping.append(tok["start"])
+                            
                     expand_tokens(inner_tokens[tag_end_idx + 1 : close_idx], sql_defs, expanded_chars, mapping)
                     close_end_idx = -1
                     for m in range(close_idx + 1, n_tok):
