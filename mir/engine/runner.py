@@ -187,6 +187,9 @@ def resolve_rule_config(config: Config, rule_id: str, lang: str, detected_base_i
         
     rule_config["_all_configs"] = config.rule_configs
     rule_config["_lang"] = lang
+    rule_config["_rules_to_disable"] = config.rules_to_disable
+    rule_config["_rules_to_enable"] = config.rules_to_enable
+    rule_config["_disable_all"] = config.disable_all
     
     if "base_indent" not in rule_config and detected_base_indent is not None:
         rule_config["base_indent"] = detected_base_indent

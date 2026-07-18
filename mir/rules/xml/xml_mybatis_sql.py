@@ -212,24 +212,47 @@ class XmlMybatisSqlRule(BaseRule):
         }
         self.sql_rules = None
 
-    def _get_sql_rules(self) -> List[BaseRule]:
-        if self.sql_rules is None:
-            all_rules = load_rules_for_language("sql")
-            self.sql_rules = [r for r in all_rules if r.rule_id not in self.excluded_rule_ids]
-        return self.sql_rules
+    def _get_sql_rules(self, rule_config: Dict[str, Any]) -> List[BaseRule]:
+        all_rules = load_rules_for_language("sql")
+        all_configs = rule_config.get("_all_configs", {})
+        rules_to_disable = rule_config.get("_rules_to_disable", set())
+        rules_to_enable = rule_config.get("_rules_to_enable", set())
+        
+        filtered = []
+        for rule in all_rules:
+            if rule.rule_id in self.excluded_rule_ids:
+                continue
+                
+            if rule.rule_id in rules_to_disable or f"sql:{rule.rule_id}" in rules_to_disable:
+                continue
+                
+            individual_cfg = all_configs.get(rule.rule_id, {})
+            if isinstance(individual_cfg, dict) and individual_cfg.get("enabled") is False:
+                continue
+                
+            is_enabled = True
+            if isinstance(individual_cfg, dict) and "enabled" in individual_cfg:
+                is_enabled = individual_cfg["enabled"]
+            else:
+                is_enabled = rule.enabled_by_default
+                    
+            if is_enabled:
+                filtered.append(rule)
+                
+        return filtered
 
     def _is_mybatis_file(self, content: str) -> bool:
         lower_content = content.lower()
         return "mybatis.org" in lower_content or "<mapper" in lower_content
 
-    def _find_violations(self, content: str, file_path: str) -> List[dict]:
+    def _find_violations(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[dict]:
         if not self._is_mybatis_file(content):
             return []
 
         tokens = tokenize_xml(content)
         root_elements = parse_xml_elements(tokens)
         elements = get_all_elements_recursively(root_elements)
-        sql_rules_to_run = self._get_sql_rules()
+        sql_rules_to_run = self._get_sql_rules(rule_config)
 
         # Build sql_defs mapping local SQL ids
         sql_defs = {}
@@ -297,12 +320,12 @@ class XmlMybatisSqlRule(BaseRule):
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content, file_path)
+        offending = self._find_violations(content, file_path, rule_config)
         for v in offending:
             line_idx = v["line"] - 1
             offending_line = lines[line_idx] if line_idx < len(lines) else ""
             violations.append(Violation(
-                rule_id=self.rule_id,
+                rule_id=v["rule_id"],
                 line_number=v["line"],
                 message=v["message"],
                 offending_lines=[offending_line],
@@ -317,7 +340,7 @@ class XmlMybatisSqlRule(BaseRule):
         tokens = tokenize_xml(content)
         root_elements = parse_xml_elements(tokens)
         elements = get_all_elements_recursively(root_elements)
-        sql_rules_to_run = self._get_sql_rules()
+        sql_rules_to_run = self._get_sql_rules(rule_config)
 
         # Build sql_defs mapping local SQL ids
         sql_defs = {}
