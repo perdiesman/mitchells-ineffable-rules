@@ -13,19 +13,19 @@ This document describes all XML linting rules supported by Mitchell's Ineffable 
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
-| *No rules active* | *Future general rules will be listed here* | - | - |
+| [`IR-xml-well-formed`](rules/general/IR-xml-well-formed.md) | Ensure that XML content is well-formed. | No | [View Details](rules/general/IR-xml-well-formed.md) |
 
 ## Tags and Elements
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
-| *No rules active* | *Future tags/elements rules will be listed here* | - | - |
+| [`IR-xml-self-closing`](rules/tags/elements/IR-xml-self-closing.md) | Enforce exactly one space before self-closing tag endings (e.g. <tag />). | Yes | [View Details](rules/tags/elements/IR-xml-self-closing.md) |
 
 ## Attributes
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
-| *No rules active* | *Future attributes rules will be listed here* | - | - |
+| [`IR-xml-attribute-quotes`](rules/attributes/IR-xml-attribute-quotes.md) | Enforce double quotes around attribute values instead of single quotes. | Yes | [View Details](rules/attributes/IR-xml-attribute-quotes.md) |
 
 ## Namespaces
 

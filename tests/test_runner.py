@@ -482,5 +482,31 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(captured_stdout.getvalue(), "")
 
+    def test_xml_linting(self):
+        # 1. Malformed XML fails
+        malformed = "<root>\n  <child>\n</root>"
+        path = self.write_temp_file("test.xml", malformed)
+        
+        config = Config()
+        config.paths = [path]
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-well-formed"]
+        self.assertEqual(run_linter(config), 1)
+
+        # 2. Fix single quotes to double quotes in XML attributes
+        single_quoted = "<root attr='val' />"
+        with open(path, "w") as f:
+            f.write(single_quoted)
+
+        config_fix = Config()
+        config_fix.paths = [path]
+        config_fix.disable_all = True
+        config_fix.rules_to_enable = ["IR-xml-attribute-quotes"]
+        config_fix.fix = True
+        self.assertEqual(run_linter(config_fix), 0)
+
+        with open(path, "r") as f:
+            self.assertEqual(f.read(), '<root attr="val" />')
+
 if __name__ == "__main__":
     unittest.main()
