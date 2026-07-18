@@ -15,6 +15,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
 | [`IR-blank-lines`](rules/general/IR-blank-lines.md) | Limit consecutive blank lines to a configurable maximum. | Yes | [View Details](rules/general/IR-blank-lines.md) |
+| [`IR-comma-style`](rules/general/IR-comma-style.md) | Enforce trailing commas in multiline listings and forbid leading commas. | Yes | [View Details](rules/general/IR-comma-style.md) |
 | [`IR-comment-spacing`](rules/general/IR-comment-spacing.md) | Enforce a single space after the double-dash comment prefix. | Yes | [View Details](rules/general/IR-comment-spacing.md) |
 | [`IR-eof-newline`](rules/general/IR-eof-newline.md) | Enforce that every SQL file ends with exactly one newline character. | Yes | [View Details](rules/general/IR-eof-newline.md) |
 | [`IR-indent`](rules/general/IR-indent.md) | Indent should be equal amounts of spaces (default 4). | Yes | [View Details](rules/general/IR-indent.md) |
@@ -63,6 +64,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-subquery-depth-limit`](rules/queries/IR-subquery-depth-limit.md) | Subquery nesting depth should not exceed the configured limit (default: 3). When over the limit, Common Table Expressions (CTEs) are preferred. | No | [View Details](rules/queries/IR-subquery-depth-limit.md) |
 | [`IR-subquery-indent`](rules/queries/IR-subquery-indent.md) | Subqueries should be indented 4 spaces relative to their opening parenthesis. | Yes | [View Details](rules/queries/IR-subquery-indent.md) |
 | [`IR-table-alias-as`](rules/queries/IR-table-alias-as.md) | Table and subquery aliases should not use the AS keyword. | Yes | [View Details](rules/queries/IR-table-alias-as.md) |
+| [`IR-union-layout`](rules/queries/IR-union-layout.md) | Enforce that set operators (UNION, UNION ALL, INTERSECT, EXCEPT) are on their own line, aligned with the query block. | Yes | [View Details](rules/queries/IR-union-layout.md) |
 | [`IR-where-multi`](rules/queries/IR-where-multi.md) | Each AND/OR clause in a multi-condition WHERE clause should start on its own line, indented at 4 spaces. | Yes | [View Details](rules/queries/IR-where-multi.md) |
 | [`IR-where-single`](rules/queries/IR-where-single.md) | Single WHERE condition should be on the same line as the WHERE keyword. | Yes | [View Details](rules/queries/IR-where-single.md) |
 
