@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql
 class FunctionBodyIndentRule(BaseRule):
     rule_id = "IR-function-body-indent"
     description = "Standardize indentation of PL/pgSQL function bodies relative to the AS tag."
-    category = "queries"
+    category = "routines"
     is_fixable = "yes"
     enabled_by_default = True
     exclude_recursive = True

@@ -19,7 +19,7 @@ EXCLUDED_WORDS = {
 class FunctionCaseRule(BaseRule):
     rule_id = "IR-function-case"
     description = "Function names should be the same case (default lowercase)."
-    category = "general"
+    category = "routines"
     is_fixable = "yes"
     enabled_by_default = True
     

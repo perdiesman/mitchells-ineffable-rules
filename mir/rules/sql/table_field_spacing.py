@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql
 class TableFieldSpacingRule(BaseRule):
     rule_id = "IR-table-field-spacing"
     description = "Enforce exactly one space between column/field name and its data type."
-    category = "queries"
+    category = "schema-definition"
     is_fixable = "yes"
     enabled_by_default = True
     

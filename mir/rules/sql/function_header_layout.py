@@ -46,7 +46,7 @@ def format_returns_table(returns_type_str: str, max_len: int = 120) -> str:
 class FunctionHeaderLayoutRule(BaseRule):
     rule_id = "IR-function-header-layout"
     description = "Standardize formatting, line-wrapping, and indentation of function creation headers."
-    category = "queries"
+    category = "routines"
     is_fixable = "yes"
     enabled_by_default = True
     exclude_recursive = True

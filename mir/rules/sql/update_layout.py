@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql
 class UpdateLayoutRule(BaseRule):
     rule_id = "IR-update-layout"
     description = "Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent assignments."
-    category = "queries"
+    category = "data-modification"
     is_fixable = "yes"
     enabled_by_default = True
     

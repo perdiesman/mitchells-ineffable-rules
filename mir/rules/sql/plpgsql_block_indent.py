@@ -6,7 +6,7 @@ from mir.rules.sql.indent import IndentRule
 class PlpgsqlBlockIndentRule(BaseRule):
     rule_id = "IR-plpgsql-block-indent"
     description = "Enforce block structure indentation inside PL/pgSQL procedural code blocks."
-    category = "queries"
+    category = "routines"
     is_fixable = "yes"
     enabled_by_default = True
     only_recursive = True

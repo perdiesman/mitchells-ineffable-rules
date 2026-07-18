@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql
 class TriggerLayoutRule(BaseRule):
     rule_id = "IR-trigger-layout"
     description = "Format and wrap long CREATE TRIGGER statements to standard multiline layout."
-    category = "queries"
+    category = "schema-definition"
     is_fixable = "yes"
     enabled_by_default = True
     

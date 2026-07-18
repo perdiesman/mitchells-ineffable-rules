@@ -5,7 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql
 class RaiseLayoutRule(BaseRule):
     rule_id = "IR-raise-layout"
     description = "Format and wrap long RAISE statements onto multiple lines."
-    category = "queries"
+    category = "routines"
     is_fixable = "yes"
     enabled_by_default = True
     
