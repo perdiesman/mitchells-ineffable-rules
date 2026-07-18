@@ -22,7 +22,7 @@ class CommaStyleRule(BaseRule):
         "SELECT id, name FROM users;"
     ]
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _find_violations(self, content: str, rule_config: Dict[str, Any] = None) -> List[dict]:
         tokens = tokenize_sql(content)
         violations = []
         n = len(tokens)
@@ -37,8 +37,14 @@ class CommaStyleRule(BaseRule):
         # Find map of token ID to index in tokens
         token_to_idx = {id(t): idx for idx, t in enumerate(tokens)}
 
+        ignored_offsets = set()
+        if rule_config and "ignored_comma_offsets" in rule_config:
+            ignored_offsets = rule_config["ignored_comma_offsets"]
+
         for idx, t in enumerate(active):
             if t["value"] == ",":
+                if t["start"] in ignored_offsets:
+                    continue
                 if idx > 0:
                     prev_active = active[idx - 1]
                     prev_active_idx = token_to_idx[id(prev_active)]
@@ -68,7 +74,7 @@ class CommaStyleRule(BaseRule):
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         for v in offending:
             line_idx = v["line"] - 1
             offending_line = lines[line_idx] if line_idx < len(lines) else ""
@@ -82,7 +88,7 @@ class CommaStyleRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         if not offending:
             return content
             

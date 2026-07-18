@@ -86,7 +86,9 @@ def get_all_elements_recursively(elements: List[dict]) -> List[dict]:
         res.extend(get_all_elements_recursively(inner_el))
     return res
 
-def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], expanded_chars: List[str], mapping: List[int]):
+def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], expanded_chars: List[str], mapping: List[int], is_after_tag: List[bool], state: dict = None):
+    if state is None:
+        state = {"last_tag_line": -1, "last_tag_type": None}
     n_tok = len(inner_tokens)
     i = 0
     while i < n_tok:
@@ -108,6 +110,8 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                 j += 1
                 
             if tag_end_idx != -1:
+                state["last_tag_line"] = inner_tokens[tag_end_idx]["line"]
+                state["last_tag_type"] = "include"
                 if refid:
                     short_refid = refid.split(".")[-1]
                     matched_tokens = None
@@ -117,7 +121,7 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                         matched_tokens = sql_defs[short_refid]
                         
                     if matched_tokens:
-                        expand_tokens(matched_tokens, sql_defs, expanded_chars, mapping)
+                        expand_tokens(matched_tokens, sql_defs, expanded_chars, mapping, is_after_tag, state)
                     else:
                         refid_lower = refid.lower()
                         if "column" in refid_lower or "col" in refid_lower or "list" in refid_lower:
@@ -130,15 +134,27 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                         for char in placeholder:
                             expanded_chars.append(char)
                             mapping.append(tok["start"])
+                            is_after_tag.append(False)
                 i = tag_end_idx + 1
                 continue
                 
         if tok["type"] in ("TEXT", "WHITESPACE"):
             val = tok["value"]
             start_offset = tok["start"]
+            start_line = tok["line"] - val.count('\n')
             for offset_in_val, char in enumerate(val):
                 expanded_chars.append(char)
                 mapping.append(start_offset + offset_in_val)
+                
+                after = False
+                if state["last_tag_type"] in ("if", "choose", "when", "otherwise", "include", "case"):
+                    char_line = start_line + val[:offset_in_val].count('\n')
+                    if char_line <= state["last_tag_line"] + 1:
+                        after = True
+                is_after_tag.append(after)
+                
+                if char not in " \t\r\n," and after:
+                    state["last_tag_type"] = None
             i += 1
             continue
             
@@ -163,6 +179,8 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
             if tag_end_idx != -1:
                 is_self_closing = inner_tokens[tag_end_idx]["value"] == "/>"
                 if is_self_closing:
+                    state["last_tag_line"] = inner_tokens[tag_end_idx]["line"]
+                    state["last_tag_type"] = tag_name
                     i = tag_end_idx + 1
                     continue
                     
@@ -182,6 +200,9 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                     k += 1
                     
                 if close_idx != -1:
+                    state["last_tag_line"] = inner_tokens[tag_end_idx]["line"]
+                    state["last_tag_type"] = tag_name
+                    
                     prefix_to_add = None
                     if tag_name == "where":
                         prefix_to_add = "WHERE "
@@ -196,8 +217,9 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                         for char in prefix_to_add:
                             expanded_chars.append(char)
                             mapping.append(tok["start"])
+                            is_after_tag.append(False)
                             
-                    expand_tokens(inner_tokens[tag_end_idx + 1 : close_idx], sql_defs, expanded_chars, mapping)
+                    expand_tokens(inner_tokens[tag_end_idx + 1 : close_idx], sql_defs, expanded_chars, mapping, is_after_tag, state)
                     close_end_idx = -1
                     for m in range(close_idx + 1, n_tok):
                         if inner_tokens[m]["type"] == "TAG_END":
@@ -222,10 +244,15 @@ class XmlMybatisSqlRule(BaseRule):
         {
             "violating": '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        select my_column from my_schema.my_table t\n    </select>\n</mapper>',
             "correct": '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT my_column FROM my_schema.my_table t\n    </select>\n</mapper>'
+        },
+        {
+            "violating": '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT id\n            , name\n        FROM users\n        <if test="distinct">\n            , distinct_val\n        </if>\n    </select>\n</mapper>',
+            "correct": '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT id,\n             name\n        FROM users\n        <if test="distinct">\n            , distinct_val\n        </if>\n    </select>\n</mapper>'
         }
     ]
     additional_validations = [
-        '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT my_column FROM my_schema.my_table t\n    </select>\n</mapper>'
+        '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT my_column FROM my_schema.my_table t\n    </select>\n</mapper>',
+        '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT id,\n             name\n        FROM users\n        <if test="distinct">\n            , distinct_val\n        </if>\n    </select>\n</mapper>'
     ]
 
     def __init__(self) -> None:
@@ -241,7 +268,7 @@ class XmlMybatisSqlRule(BaseRule):
             "IR-table-field-spacing", "IR-trigger-layout", "IR-create-view-indent",
             "IR-function-body-indent", "IR-function-header-layout", "IR-raise-layout",
             "IR-plpgsql-block-indent", "IR-update-layout", "IR-case-layout",
-            "IR-join-on-multi", "IR-comma-style"
+            "IR-join-on-multi"
         }
         self.sql_rules = None
 
@@ -304,16 +331,22 @@ class XmlMybatisSqlRule(BaseRule):
             if el["tag"] in target_tags and "id" in el["attrs"]:
                 expanded_chars = []
                 mapping = []
-                expand_tokens(el["inner_tokens"], sql_defs, expanded_chars, mapping)
+                is_after_tag = []
+                expand_tokens(el["inner_tokens"], sql_defs, expanded_chars, mapping, is_after_tag)
                 sql_text = "".join(expanded_chars)
                 
                 if not sql_text.strip():
                     continue
                     
+                ignored_comma_offsets = set()
+                for idx, char in enumerate(sql_text):
+                    if char == "," and idx < len(is_after_tag) and is_after_tag[idx]:
+                        ignored_comma_offsets.add(idx)
+                        
                 # Run SQL rules on this block
                 for rule in sql_rules_to_run:
                     try:
-                        sql_violations = rule.check(sql_text, file_path, {})
+                        sql_violations = rule.check(sql_text, file_path, {"ignored_comma_offsets": ignored_comma_offsets})
                         for sv in sql_violations:
                             # Map line relative to sql block start line in XML file
                             # Find line number of the start character of this violation
@@ -391,18 +424,24 @@ class XmlMybatisSqlRule(BaseRule):
             if el["tag"] in target_tags and "id" in el["attrs"]:
                 expanded_chars = []
                 mapping = []
-                expand_tokens(el["inner_tokens"], sql_defs, expanded_chars, mapping)
+                is_after_tag = []
+                expand_tokens(el["inner_tokens"], sql_defs, expanded_chars, mapping, is_after_tag)
                 sql_text = "".join(expanded_chars)
                 
                 if not sql_text.strip():
                     continue
                     
+                ignored_comma_offsets = set()
+                for idx, char in enumerate(sql_text):
+                    if char == "," and idx < len(is_after_tag) and is_after_tag[idx]:
+                        ignored_comma_offsets.add(idx)
+                        
                 # Run fixes on the expanded SQL
                 fixed_sql = sql_text
                 for rule in sql_rules_to_run:
                     if rule.is_fixable in ("yes", "sometimes"):
                         try:
-                            fixed_sql = rule.fix(fixed_sql, file_path, {})
+                            fixed_sql = rule.fix(fixed_sql, file_path, {"ignored_comma_offsets": ignored_comma_offsets})
                         except Exception:
                             pass
                 
