@@ -50,11 +50,13 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-from-multi`](rules/queries/IR-from-multi.md) | Multi-table or JOINed FROM entries should be formatted with one entry per line, indented at 4 spaces. | Yes | [View Details](rules/queries/IR-from-multi.md) |
 | [`IR-from-paren-layout`](rules/queries/IR-from-paren-layout.md) | Parenthesized column alias lists in FROM/JOIN clauses should format entries one per line if the line exceeds max length. | Yes | [View Details](rules/queries/IR-from-paren-layout.md) |
 | [`IR-from-single`](rules/queries/IR-from-single.md) | Single FROM entry should be on the same line as the FROM keyword. | Yes | [View Details](rules/queries/IR-from-single.md) |
+| [`IR-having-without-group-by`](rules/queries/IR-having-without-group-by.md) | Detect HAVING clauses used without a corresponding GROUP BY clause. | No | [View Details](rules/queries/IR-having-without-group-by.md) |
 | [`IR-in-exists`](rules/queries/IR-in-exists.md) | EXISTS is preferred over IN with a subquery. | No | [View Details](rules/queries/IR-in-exists.md) |
 | [`IR-insert-columns`](rules/queries/IR-insert-columns.md) | Ensure INSERT statements explicitly list target columns. | No | [View Details](rules/queries/IR-insert-columns.md) |
 | [`IR-is-null`](rules/queries/IR-is-null.md) | Standardize NULL comparison predicates to use IS NULL and IS NOT NULL operators. | Yes | [View Details](rules/queries/IR-is-null.md) |
 | [`IR-join-on-multi`](rules/queries/IR-join-on-multi.md) | Split AND or OR conditions in JOIN ON clauses to separate lines, indented 4 spaces. | Yes | [View Details](rules/queries/IR-join-on-multi.md) |
 | [`IR-join-parens`](rules/queries/IR-join-parens.md) | Unnecessary parentheses around a JOIN clause should be removed. | Yes | [View Details](rules/queries/IR-join-parens.md) |
+| [`IR-like-no-wildcard`](rules/queries/IR-like-no-wildcard.md) | Simplify LIKE comparisons to standard = comparisons when the pattern contains no wildcard characters (% or _). | Yes | [View Details](rules/queries/IR-like-no-wildcard.md) |
 | [`IR-null-coalesce`](rules/queries/IR-null-coalesce.md) | Standardize nullable equality predicates to COALESCE(x, -1) form. | Yes | [View Details](rules/queries/IR-null-coalesce.md) |
 | [`IR-paren-content-indent`](rules/queries/IR-paren-content-indent.md) | Content inside multi-line parentheses should be indented 4 spaces relative to the opening parenthesis, and the closing parenthesis should align with it. | Yes | [View Details](rules/queries/IR-paren-content-indent.md) |
 | [`IR-paren-multi`](rules/queries/IR-paren-multi.md) | Parentheses wrapping multiple logical conditions in WHERE/ON clauses must format contents on separate lines, indented 4 spaces. | Yes | [View Details](rules/queries/IR-paren-multi.md) |
@@ -74,6 +76,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
+| [`IR-boolean-default`](rules/schema-definition/IR-boolean-default.md) | Enforce that boolean columns in table definitions explicitly define a DEFAULT constraint. | No | [View Details](rules/schema-definition/IR-boolean-default.md) |
 | [`IR-create-view-indent`](rules/schema-definition/IR-create-view-indent.md) | SELECT statements under a CREATE VIEW should be indented 4 spaces relative to the CREATE VIEW statement. | Yes | [View Details](rules/schema-definition/IR-create-view-indent.md) |
 | [`IR-table-field-spacing`](rules/schema-definition/IR-table-field-spacing.md) | Enforce exactly one space between column/field name and its data type. | Yes | [View Details](rules/schema-definition/IR-table-field-spacing.md) |
 | [`IR-trigger-layout`](rules/schema-definition/IR-trigger-layout.md) | Format and wrap long CREATE TRIGGER statements to standard multiline layout. | Yes | [View Details](rules/schema-definition/IR-trigger-layout.md) |
