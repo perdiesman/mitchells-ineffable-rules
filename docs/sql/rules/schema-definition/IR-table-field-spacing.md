@@ -1,6 +1,6 @@
 # IR-table-field-spacing
 
-Enforce exactly one space (no alignment padding) between column/field names and their data types across table column definitions, parameters, and variable declarations.
+Enforce exactly one space between column/field name and its data type.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
@@ -11,15 +11,20 @@ Enforce exactly one space (no alignment padding) between column/field names and 
 #### ❌ Violating Example
 ```sql
 CREATE TEMP TABLE t (
-    id       INTEGER,
-    name     TEXT
+    a      integer,
+    b          text
 );
 ```
 
 ####  Correct Example
 ```sql
 CREATE TEMP TABLE t (
-    id INTEGER,
-    name TEXT
+    a integer,
+    b text
 );
+```
+
+#### Additional Validations
+```sql
+CREATE TABLE t (a INTEGER);
 ```

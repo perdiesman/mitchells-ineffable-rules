@@ -10,18 +10,18 @@ Detect references to table aliases or qualifiers that are not declared in the qu
 
 #### ❌ Violating Example
 ```sql
-SELECT z.id FROM outage_data.zipcode;
--- z is not declared
+SELECT t.id FROM my_schema.my_table;
+-- t is not declared
 ```
 
 ####  Correct Example
 ```sql
-SELECT z.id FROM outage_data.zipcode z;
+SELECT t.id FROM my_schema.my_table t;
 ```
 
 #### Additional Validations
 ```sql
-SELECT c.id FROM outage_data.county c;
+SELECT o.id FROM other_schema.other_table o;
 ```
 
 ```sql

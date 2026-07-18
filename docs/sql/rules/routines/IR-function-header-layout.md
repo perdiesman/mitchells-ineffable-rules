@@ -4,7 +4,7 @@ Standardize formatting, line-wrapping, and indentation of function creation head
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Query Structure Rules
+- **Category**: Routine & Procedure Rules
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `max_length` (Default: `100`): Maximum line length before wrapping clauses.

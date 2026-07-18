@@ -4,20 +4,20 @@ Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent 
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Query Structure Rules
+- **Category**: Data Modification Rules
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `max_length` (Default: `120`): Maximum line length before wrapping UPDATE statements.
 
 #### ❌ Violating Example #1
 ```sql
-UPDATE dashboard.layout SET default_layout = false WHERE user_id = NEW.user_id AND type_id = NEW.type_id AND id != NEW.id;
+UPDATE my_schema.my_very_long_table_name SET is_active = false WHERE user_id = NEW.user_id AND type_id = NEW.type_id AND id != NEW.id;
 ```
 
 ####  Correct Example #1
 ```sql
-UPDATE dashboard.layout
-SET default_layout = false
+UPDATE my_schema.my_very_long_table_name
+SET is_active = false
 WHERE user_id = NEW.user_id AND type_id = NEW.type_id AND id != NEW.id;
 ```
 

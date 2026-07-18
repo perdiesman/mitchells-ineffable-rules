@@ -17,12 +17,10 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-blank-lines`](rules/general/IR-blank-lines.md) | Limit consecutive blank lines to a configurable maximum. | Yes | [View Details](rules/general/IR-blank-lines.md) |
 | [`IR-comment-spacing`](rules/general/IR-comment-spacing.md) | Enforce a single space after the double-dash comment prefix. | Yes | [View Details](rules/general/IR-comment-spacing.md) |
 | [`IR-eof-newline`](rules/general/IR-eof-newline.md) | Enforce that every SQL file ends with exactly one newline character. | Yes | [View Details](rules/general/IR-eof-newline.md) |
-| [`IR-function-case`](rules/general/IR-function-case.md) | Function names should be the same case (default lowercase). | Yes | [View Details](rules/general/IR-function-case.md) |
 | [`IR-indent`](rules/general/IR-indent.md) | Indent should be equal amounts of spaces (default 4). | Yes | [View Details](rules/general/IR-indent.md) |
 | [`IR-keyword-case`](rules/general/IR-keyword-case.md) | SQL keywords must be in uppercase. | Yes | [View Details](rules/general/IR-keyword-case.md) |
 | [`IR-line-length`](rules/general/IR-line-length.md) | Lines must not exceed the configured maximum length. | Sometimes | [View Details](rules/general/IR-line-length.md) |
 | [`IR-operator-spacing`](rules/general/IR-operator-spacing.md) | Operators should have a single space on both sides. | Yes | [View Details](rules/general/IR-operator-spacing.md) |
-| [`IR-plpgsql-keyword-case`](rules/general/IR-plpgsql-keyword-case.md) | Procedural PL/pgSQL keywords and trigger variables must be in uppercase. | Yes | [View Details](rules/general/IR-plpgsql-keyword-case.md) |
 | [`IR-redundant-keywords`](rules/general/IR-redundant-keywords.md) | Remove redundant implied keywords like INNER, OUTER, and ASC. | Yes | [View Details](rules/general/IR-redundant-keywords.md) |
 | [`IR-statement-blank-lines`](rules/general/IR-statement-blank-lines.md) | Ensure at least one blank line between consecutive SQL statements. | Yes | [View Details](rules/general/IR-statement-blank-lines.md) |
 | [`IR-statement-semicolon`](rules/general/IR-statement-semicolon.md) | Enforce that all top-level statements end with a trailing semicolon. | Yes | [View Details](rules/general/IR-statement-semicolon.md) |
@@ -50,8 +48,6 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-from-multi`](rules/queries/IR-from-multi.md) | Multi-table or JOINed FROM entries should be formatted with one entry per line, indented at 4 spaces. | Yes | [View Details](rules/queries/IR-from-multi.md) |
 | [`IR-from-paren-layout`](rules/queries/IR-from-paren-layout.md) | Parenthesized column alias lists in FROM/JOIN clauses should format entries one per line if the line exceeds max length. | Yes | [View Details](rules/queries/IR-from-paren-layout.md) |
 | [`IR-from-single`](rules/queries/IR-from-single.md) | Single FROM entry should be on the same line as the FROM keyword. | Yes | [View Details](rules/queries/IR-from-single.md) |
-| [`IR-function-body-indent`](rules/queries/IR-function-body-indent.md) | Standardize indentation of PL/pgSQL function bodies relative to the AS tag. | Yes | [View Details](rules/queries/IR-function-body-indent.md) |
-| [`IR-function-header-layout`](rules/queries/IR-function-header-layout.md) | Standardize formatting, line-wrapping, and indentation of function creation headers. | Yes | [View Details](rules/queries/IR-function-header-layout.md) |
 | [`IR-in-exists`](rules/queries/IR-in-exists.md) | EXISTS is preferred over IN with a subquery. | No | [View Details](rules/queries/IR-in-exists.md) |
 | [`IR-is-null`](rules/queries/IR-is-null.md) | Standardize NULL comparison predicates to use IS NULL and IS NOT NULL operators. | Yes | [View Details](rules/queries/IR-is-null.md) |
 | [`IR-join-on-multi`](rules/queries/IR-join-on-multi.md) | Split AND or OR conditions in JOIN ON clauses to separate lines, indented 4 spaces. | Yes | [View Details](rules/queries/IR-join-on-multi.md) |
@@ -61,16 +57,10 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-paren-multi`](rules/queries/IR-paren-multi.md) | Parentheses wrapping multiple logical conditions in WHERE/ON clauses must format contents on separate lines, indented 4 spaces. | Yes | [View Details](rules/queries/IR-paren-multi.md) |
 | [`IR-paren-same-op`](rules/queries/IR-paren-same-op.md) | Unnecessary parentheses around homogeneous logical conditions should be removed. | Yes | [View Details](rules/queries/IR-paren-same-op.md) |
 | [`IR-paren-single`](rules/queries/IR-paren-single.md) | Unnecessary parentheses around a single condition should be removed. | Yes | [View Details](rules/queries/IR-paren-single.md) |
-| [`IR-plpgsql-assignment`](rules/queries/IR-plpgsql-assignment.md) | PL/pgSQL variable and trigger field assignments must use the standard assignment operator (:=). | Yes | [View Details](rules/queries/IR-plpgsql-assignment.md) |
-| [`IR-plpgsql-block-indent`](rules/queries/IR-plpgsql-block-indent.md) | Enforce block structure indentation inside PL/pgSQL procedural code blocks. | Yes | [View Details](rules/queries/IR-plpgsql-block-indent.md) |
-| [`IR-raise-layout`](rules/queries/IR-raise-layout.md) | Format and wrap long RAISE statements onto multiple lines. | Yes | [View Details](rules/queries/IR-raise-layout.md) |
 | [`IR-subquery-compact`](rules/queries/IR-subquery-compact.md) | Multiline subquery sources inside FROM or JOIN clauses should be compacted to a single line if they fit within 140 characters. | Yes | [View Details](rules/queries/IR-subquery-compact.md) |
 | [`IR-subquery-depth-limit`](rules/queries/IR-subquery-depth-limit.md) | Subquery nesting depth should not exceed the configured limit (default: 3). When over the limit, Common Table Expressions (CTEs) are preferred. | No | [View Details](rules/queries/IR-subquery-depth-limit.md) |
 | [`IR-subquery-indent`](rules/queries/IR-subquery-indent.md) | Subqueries should be indented 4 spaces relative to their opening parenthesis. | Yes | [View Details](rules/queries/IR-subquery-indent.md) |
 | [`IR-table-alias-as`](rules/queries/IR-table-alias-as.md) | Table and subquery aliases should not use the AS keyword. | Yes | [View Details](rules/queries/IR-table-alias-as.md) |
-| [`IR-table-field-spacing`](rules/queries/IR-table-field-spacing.md) | Enforce exactly one space between column/field name and its data type. | Yes | [View Details](rules/queries/IR-table-field-spacing.md) |
-| [`IR-trigger-layout`](rules/queries/IR-trigger-layout.md) | Format and wrap long CREATE TRIGGER statements to standard multiline layout. | Yes | [View Details](rules/queries/IR-trigger-layout.md) |
-| [`IR-update-layout`](rules/queries/IR-update-layout.md) | Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent assignments. | Yes | [View Details](rules/queries/IR-update-layout.md) |
 | [`IR-where-multi`](rules/queries/IR-where-multi.md) | Each AND/OR clause in a multi-condition WHERE clause should start on its own line, indented at 4 spaces. | Yes | [View Details](rules/queries/IR-where-multi.md) |
 | [`IR-where-single`](rules/queries/IR-where-single.md) | Single WHERE condition should be on the same line as the WHERE keyword. | Yes | [View Details](rules/queries/IR-where-single.md) |
 
@@ -79,15 +69,23 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
 | [`IR-create-view-indent`](rules/schema-definition/IR-create-view-indent.md) | SELECT statements under a CREATE VIEW should be indented 4 spaces relative to the CREATE VIEW statement. | Yes | [View Details](rules/schema-definition/IR-create-view-indent.md) |
+| [`IR-table-field-spacing`](rules/schema-definition/IR-table-field-spacing.md) | Enforce exactly one space between column/field name and its data type. | Yes | [View Details](rules/schema-definition/IR-table-field-spacing.md) |
+| [`IR-trigger-layout`](rules/schema-definition/IR-trigger-layout.md) | Format and wrap long CREATE TRIGGER statements to standard multiline layout. | Yes | [View Details](rules/schema-definition/IR-trigger-layout.md) |
 
 ## Data Modification Rules
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
-| *No rules active* | *Future data-modification rules will be listed here* | - | - |
+| [`IR-update-layout`](rules/data-modification/IR-update-layout.md) | Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent assignments. | Yes | [View Details](rules/data-modification/IR-update-layout.md) |
 
 ## Routine & Procedure Rules
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
-| *No rules active* | *Future routines rules will be listed here* | - | - |
+| [`IR-function-body-indent`](rules/routines/IR-function-body-indent.md) | Standardize indentation of PL/pgSQL function bodies relative to the AS tag. | Yes | [View Details](rules/routines/IR-function-body-indent.md) |
+| [`IR-function-case`](rules/routines/IR-function-case.md) | Function names should be the same case (default lowercase). | Yes | [View Details](rules/routines/IR-function-case.md) |
+| [`IR-function-header-layout`](rules/routines/IR-function-header-layout.md) | Standardize formatting, line-wrapping, and indentation of function creation headers. | Yes | [View Details](rules/routines/IR-function-header-layout.md) |
+| [`IR-plpgsql-assignment`](rules/routines/IR-plpgsql-assignment.md) | PL/pgSQL variable and trigger field assignments must use the standard assignment operator (:=). | Yes | [View Details](rules/routines/IR-plpgsql-assignment.md) |
+| [`IR-plpgsql-block-indent`](rules/routines/IR-plpgsql-block-indent.md) | Enforce block structure indentation inside PL/pgSQL procedural code blocks. | Yes | [View Details](rules/routines/IR-plpgsql-block-indent.md) |
+| [`IR-plpgsql-keyword-case`](rules/routines/IR-plpgsql-keyword-case.md) | Procedural PL/pgSQL keywords and trigger variables must be in uppercase. | Yes | [View Details](rules/routines/IR-plpgsql-keyword-case.md) |
+| [`IR-raise-layout`](rules/routines/IR-raise-layout.md) | Format and wrap long RAISE statements onto multiple lines. | Yes | [View Details](rules/routines/IR-raise-layout.md) |

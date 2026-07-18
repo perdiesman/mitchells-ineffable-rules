@@ -4,7 +4,7 @@ Standardize indentation of PL/pgSQL function bodies relative to the AS tag.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
-- **Category**: Query Structure Rules
+- **Category**: Routine & Procedure Rules
 - **Configuration Options**:
   - `enabled`: `true`
 
