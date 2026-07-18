@@ -21,8 +21,8 @@ class RaiseLayoutRule(BaseRule):
     
     examples = [
         {
-            "violating": "RAISE unique_violation USING MESSAGE = 'id: ' || NEW.id::text || ' already exists in outage_data.coverage_geometry_bypass_table_and_other_fields';",
-            "correct": "RAISE unique_violation\n    USING MESSAGE = 'id: '\n        || NEW.id::text\n        || ' already exists in outage_data.coverage_geometry_bypass_table_and_other_fields';"
+            "violating": "RAISE unique_violation USING MESSAGE = 'id: ' || NEW.id::text || ' already exists in my_schema.my_very_long_table_name_to_exceed_the_line_length_limit';",
+            "correct": "RAISE unique_violation\n    USING MESSAGE = 'id: '\n        || NEW.id::text\n        || ' already exists in my_schema.my_very_long_table_name_to_exceed_the_line_length_limit';"
         }
     ]
     additional_validations = [

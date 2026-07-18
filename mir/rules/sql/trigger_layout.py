@@ -21,8 +21,8 @@ class TriggerLayoutRule(BaseRule):
     
     examples = [
         {
-            "violating": "CREATE TRIGGER update_user_access BEFORE UPDATE OF manager ON community.community_user_xref FOR EACH ROW EXECUTE FUNCTION community.community_user_manager_access_function();",
-            "correct": "CREATE TRIGGER update_user_access\n    BEFORE UPDATE OF manager ON community.community_user_xref\n    FOR EACH ROW\n    EXECUTE FUNCTION community.community_user_manager_access_function();"
+            "violating": "CREATE TRIGGER update_user_access BEFORE UPDATE OF manager ON my_schema.my_table FOR EACH ROW EXECUTE FUNCTION my_schema.my_function();",
+            "correct": "CREATE TRIGGER update_user_access\n    BEFORE UPDATE OF manager ON my_schema.my_table\n    FOR EACH ROW\n    EXECUTE FUNCTION my_schema.my_function();"
         }
     ]
     additional_validations = [

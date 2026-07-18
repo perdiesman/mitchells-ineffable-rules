@@ -14,12 +14,12 @@ class UnresolvedAliasRule(BaseRule):
     
     examples = [
         {
-            "violating": "SELECT z.id FROM outage_data.zipcode;\n-- z is not declared",
-            "correct": "SELECT z.id FROM outage_data.zipcode z;"
+            "violating": "SELECT t.id FROM my_schema.my_table;\n-- t is not declared",
+            "correct": "SELECT t.id FROM my_schema.my_table t;"
         }
     ]
     additional_validations = [
-        "SELECT c.id FROM outage_data.county c;",
+        "SELECT o.id FROM other_schema.other_table o;",
         "SELECT NEW.id;"
     ]
 
@@ -29,7 +29,7 @@ class UnresolvedAliasRule(BaseRule):
         
         # 1. Collect valid qualifiers
         valid = {
-            "pg_catalog", "information_schema", "public", "outage_data", "utility", "dashboard", "community",
+            "pg_catalog", "information_schema", "public", "my_schema", "other_schema",
             "new", "old", "tg_op"
         }
         
