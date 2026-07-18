@@ -534,5 +534,21 @@ class TestRunnerIntegration(unittest.TestCase):
         config_len.rules_to_enable = ["IR-xml-line-length"]
         self.assertEqual(run_linter(config_len), 1)
 
+        # 5. XML MyBatis embedded SQL check and fix
+        mybatis_xml = '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="gov.ornl.gist.location.CountyMapper">\n    <select id="selectListByQuery">\n        select county.id from outage_data.county county\n    </select>\n</mapper>'
+        with open(path, "w") as f:
+            f.write(mybatis_xml)
+
+        config_mybatis = Config()
+        config_mybatis.paths = [path]
+        config_mybatis.disable_all = True
+        config_mybatis.rules_to_enable = ["IR-xml-mybatis-sql"]
+        config_mybatis.fix = True
+        self.assertEqual(run_linter(config_mybatis), 0)
+
+        with open(path, "r") as f:
+            expected = '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="gov.ornl.gist.location.CountyMapper">\n    <select id="selectListByQuery">\n        SELECT county.id FROM outage_data.county county\n    </select>\n</mapper>'
+            self.assertEqual(f.read(), expected)
+
 if __name__ == "__main__":
     unittest.main()

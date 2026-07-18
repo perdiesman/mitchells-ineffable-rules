@@ -8,6 +8,7 @@ This document describes all XML linting rules supported by Mitchell's Ineffable 
 - [Tags and Elements](#tags-and-elements)
 - [Attributes](#attributes)
 - [Namespaces](#namespaces)
+- [Queries Rules](#queries-rules)
 
 ## General Rules
 
@@ -34,3 +35,9 @@ This document describes all XML linting rules supported by Mitchell's Ineffable 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
 | *No rules active* | *Future namespaces rules will be listed here* | - | - |
+
+## Queries Rules
+
+| Rule Name | Short Description | Fixable | Details |
+| :--- | :--- | :---: | :---: |
+| [`IR-xml-mybatis-sql`](rules/queries/IR-xml-mybatis-sql.md) | Format embedded SQL inside MyBatis XML mapper files using SQL rules. | Yes | [View Details](rules/queries/IR-xml-mybatis-sql.md) |

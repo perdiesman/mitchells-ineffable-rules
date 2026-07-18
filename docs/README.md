@@ -25,6 +25,7 @@ Categories:
 - [Tags and Elements](xml/README.md#tags-and-elements)
 - [Attributes](xml/README.md#attributes)
 - [Namespaces](xml/README.md#namespaces)
+- [Queries Rules](xml/README.md#queries-rules)
 
 ## Additional Guides
 - [Custom Rules Guide](custom_rules.md)
