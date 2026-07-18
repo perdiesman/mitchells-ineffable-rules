@@ -241,7 +241,7 @@ class XmlMybatisSqlRule(BaseRule):
             "IR-table-field-spacing", "IR-trigger-layout", "IR-create-view-indent",
             "IR-function-body-indent", "IR-function-header-layout", "IR-raise-layout",
             "IR-plpgsql-block-indent", "IR-update-layout", "IR-case-layout",
-            "IR-join-on-multi"
+            "IR-join-on-multi", "IR-comma-style"
         }
         self.sql_rules = None
 
@@ -429,6 +429,11 @@ class XmlMybatisSqlRule(BaseRule):
                                 start_orig = mapping[i1] if i1 < len(mapping) else (mapping[-1] + 1 if mapping else 0)
                                 end_orig = mapping[i2 - 1] + 1 if i2 <= len(mapping) and i2 > 0 else start_orig
                                 replacement = fixed_sql[j1:j2]
+                                orig_str = sql_text[i1:i2]
+                                # Skip pure whitespace edits to avoid layout conflicts with XML indentation
+                                if orig_str.strip() == "" and replacement.strip() == "":
+                                    if all(c in " \t\r\n" for c in orig_str) and all(c in " \t\r\n" for c in replacement):
+                                        continue
                                 all_xml_edits.append((start_orig, end_orig, replacement))
 
         if not all_xml_edits:

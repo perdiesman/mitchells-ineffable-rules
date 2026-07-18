@@ -70,8 +70,10 @@ class AliasAsRule(BaseRule):
                     items.append(current_item)
                     
                 # Inspect each select item
-                for item in items:
+                for item_idx, item in enumerate(items):
                     active = [t for t in item if t["type"] not in ("WHITESPACE", "COMMENT")]
+                    if item_idx == 0 and active and active[0]["value"].upper() in ("DISTINCT", "ALL"):
+                        active = active[1:]
                     if len(active) >= 2:
                         last_tok = active[-1]
                         # Skip if it is part of a data type name
