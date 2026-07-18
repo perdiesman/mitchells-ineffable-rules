@@ -37,6 +37,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-boolean-comparison`](rules/queries/IR-boolean-comparison.md) | Standardize boolean comparison predicates to use idiomatic boolean predicates. | Yes | [View Details](rules/queries/IR-boolean-comparison.md) |
 | [`IR-case`](rules/queries/IR-case.md) | CASE statements should be formatted with WHEN/THEN on separate lines unless the block is simple (exactly one WHEN condition and an optional ELSE clause) and fits on a single line within length constraints. | Yes | [View Details](rules/queries/IR-case.md) |
 | [`IR-clause-alignment`](rules/queries/IR-clause-alignment.md) | Main query clause keywords (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT) must have the exact same indentation within the same query block when the query spans multiple lines. | Yes | [View Details](rules/queries/IR-clause-alignment.md) |
+| [`IR-coalesce-standard`](rules/queries/IR-coalesce-standard.md) | Use standard COALESCE instead of dialect-specific null-handling functions like NVL, IFNULL, or ISNULL. | Yes | [View Details](rules/queries/IR-coalesce-standard.md) |
 | [`IR-column-layout`](rules/queries/IR-column-layout.md) | On select, order by, group by, if all the columns fit on one line then put them on one line, otherwise wrap one per line. | Yes | [View Details](rules/queries/IR-column-layout.md) |
 | [`IR-count-star`](rules/queries/IR-count-star.md) | Standardize COUNT(1) or row-counting expressions to COUNT(*). | Yes | [View Details](rules/queries/IR-count-star.md) |
 | [`IR-cte-format`](rules/queries/IR-cte-format.md) | Format layout of CTE WITH blocks: align subquery aliases, parenthesis and the final query block. | Yes | [View Details](rules/queries/IR-cte-format.md) |
@@ -60,6 +61,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-paren-same-op`](rules/queries/IR-paren-same-op.md) | Unnecessary parentheses around homogeneous logical conditions should be removed. | Yes | [View Details](rules/queries/IR-paren-same-op.md) |
 | [`IR-paren-single`](rules/queries/IR-paren-single.md) | Unnecessary parentheses around a single condition should be removed. | Yes | [View Details](rules/queries/IR-paren-single.md) |
 | [`IR-select-wildcard`](rules/queries/IR-select-wildcard.md) | Avoid wildcard SELECT * in query headers and subqueries; explicitly list columns instead. | No | [View Details](rules/queries/IR-select-wildcard.md) |
+| [`IR-self-comparison`](rules/queries/IR-self-comparison.md) | Detect redundant self-comparisons where a column/identifier is compared to itself (e.g. x = x). | No | [View Details](rules/queries/IR-self-comparison.md) |
 | [`IR-subquery-compact`](rules/queries/IR-subquery-compact.md) | Multiline subquery sources inside FROM or JOIN clauses should be compacted to a single line if they fit within 140 characters. | Yes | [View Details](rules/queries/IR-subquery-compact.md) |
 | [`IR-subquery-depth-limit`](rules/queries/IR-subquery-depth-limit.md) | Subquery nesting depth should not exceed the configured limit (default: 3). When over the limit, Common Table Expressions (CTEs) are preferred. | No | [View Details](rules/queries/IR-subquery-depth-limit.md) |
 | [`IR-subquery-indent`](rules/queries/IR-subquery-indent.md) | Subqueries should be indented 4 spaces relative to their opening parenthesis. | Yes | [View Details](rules/queries/IR-subquery-indent.md) |
@@ -80,6 +82,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
+| [`IR-truncate-table`](rules/data-modification/IR-truncate-table.md) | Prefer TRUNCATE table_name over DELETE FROM table_name with no conditions. | No | [View Details](rules/data-modification/IR-truncate-table.md) |
 | [`IR-update-layout`](rules/data-modification/IR-update-layout.md) | Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent assignments. | Yes | [View Details](rules/data-modification/IR-update-layout.md) |
 
 ## Routine & Procedure Rules
