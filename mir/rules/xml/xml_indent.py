@@ -34,11 +34,6 @@ class XmlIndentRule(BaseRule):
         violations = []
         n = len(tokens)
 
-        # Group tokens by line
-        line_tokens = {}
-        for t in tokens:
-            line_tokens.setdefault(t["line"], []).append(t)
-
         depth = 0
         last_open_start = None
         first_active_seen_for_line = {}
@@ -63,41 +58,27 @@ class XmlIndentRule(BaseRule):
                     if line not in first_active_seen_for_line:
                         first_active_seen_for_line[line] = t
                         
-                        line_toks = line_tokens.get(line, [])
-                        t_idx_in_line = line_toks.index(t)
+                        # Find start of line in content string
+                        line_start_idx = t["start"]
+                        while line_start_idx > 0 and content[line_start_idx - 1] != '\n':
+                            line_start_idx -= 1
+                            
+                        # Actual indent is the string from line_start_idx to t["start"]
+                        actual_indent = content[line_start_idx : t["start"]]
                         
-                        actual_indent = ""
-                        ws_token = None
-                        if t_idx_in_line > 0:
-                            prev_tok = line_toks[t_idx_in_line - 1]
-                            if prev_tok["type"] == "WHITESPACE":
-                                parts = prev_tok["value"].split("\n")
-                                actual_indent = parts[-1]
-                                ws_token = prev_tok
-                        
-                        expected_depth = max(0, depth)
-                        expected_indent = " " * (expected_depth * indent_size)
-                        
-                        if actual_indent != expected_indent:
-                            if ws_token is not None:
-                                ws_parts = ws_token["value"].split("\n")
-                                ws_prefix = "\n".join(ws_parts[:-1]) + ("\n" if len(ws_parts) > 1 else "")
-                                replacement = ws_prefix + expected_indent
-                                start_offset = ws_token["start"]
-                                end_offset = ws_token["end"]
-                            else:
-                                start_offset = t["start"]
-                                end_offset = t["start"]
-                                replacement = expected_indent
-                                
-                            violations.append({
-                                "token": t,
-                                "line": line,
-                                "start_offset": start_offset,
-                                "end_offset": end_offset,
-                                "replacement": replacement,
-                                "message": f"XML tag indentation on line {line} should be {expected_depth * indent_size} spaces (depth {expected_depth}), but found {len(actual_indent)} spaces."
-                            })
+                        if not actual_indent or actual_indent.isspace():
+                            expected_depth = max(0, depth)
+                            expected_indent = " " * (expected_depth * indent_size)
+                            
+                            if actual_indent != expected_indent:
+                                violations.append({
+                                    "token": t,
+                                    "line": line,
+                                    "start_offset": line_start_idx,
+                                    "end_offset": t["start"],
+                                    "replacement": expected_indent,
+                                    "message": f"XML tag indentation on line {line} should be {expected_depth * indent_size} spaces (depth {expected_depth}), but found {len(actual_indent)} spaces."
+                                })
 
         return violations
 
