@@ -144,6 +144,8 @@ def load_rules_from_dir(directory: str, language: str, is_external: bool = False
             
     return rules
 
+_RULES_CACHE = {}
+
 def load_rules_for_language(
     language: str,
     include_dirs: Optional[List[str]] = None,
@@ -154,6 +156,10 @@ def load_rules_for_language(
       - rule_mode='extend': Loads built-in rules AND external rules.
       - rule_mode='replace': Loads only external rules if present.
     """
+    cache_key = (language, tuple(include_dirs) if include_dirs else (), rule_mode)
+    if cache_key in _RULES_CACHE:
+        return _RULES_CACHE[cache_key]
+        
     rules: List[BaseRule] = []
     has_external_rules = False
     
@@ -187,4 +193,6 @@ def load_rules_for_language(
             seen.add(r.rule_id)
             deduped_rules.append(r)
             
-    return list(reversed(deduped_rules))
+    result = list(reversed(deduped_rules))
+    _RULES_CACHE[cache_key] = result
+    return result

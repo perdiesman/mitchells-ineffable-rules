@@ -340,7 +340,12 @@ class XmlMybatisSqlRule(BaseRule):
         violations = []
         lines = content.splitlines()
         offending = self._find_violations(content, file_path, rule_config)
+        seen = set()
         for v in offending:
+            key = (v["rule_id"], v["line"])
+            if key in seen:
+                continue
+            seen.add(key)
             line_idx = v["line"] - 1
             offending_line = lines[line_idx] if line_idx < len(lines) else ""
             violations.append(Violation(
