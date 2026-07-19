@@ -39,6 +39,9 @@ A highly modular, extensible linting and auto-fixing utility for **SQL, Java, an
 ├── README.md                   # This instruction manual
 ├── requirements.txt            # Python dependencies (PyYAML)
 ├── pre-commit-hook.sh          # Shell hook executing linter via Docker
+├── pre-push-hook.sh            # Shell hook ensuring README time is updated on push
+├── scripts/
+│   └── update_readme.py        # Automation script to update README timestamp
 ├── mir/
 │   ├── main.py                 # Core CLI Entrypoint
 │   ├── engine/                 # Core engine mechanics
@@ -161,6 +164,23 @@ When committing files, the hook automatically detects staged SQL, Java, and XML 
 
 ---
 
+## Git Pre-push Hook Integration
+
+Ensure the `README.md` Last Developer Session timestamp is always up-to-date before pushing changes:
+
+1. Copy the hook script into your repository's hook directory:
+   ```bash
+   cp pre-push-hook.sh .git/hooks/pre-push
+   ```
+2. Make sure it is executable:
+   ```bash
+   chmod +x .git/hooks/pre-push
+   ```
+
+When pushing to a remote branch, the hook runs `scripts/update_readme.py`. If the timestamp is out of date, it updates the `README.md` and aborts the push, instructing you to commit the updated `README.md` first.
+
+---
+
 ## Configuration
 
 You can create an `.ir-config.yaml` file in the root of your project:
@@ -269,6 +289,6 @@ For instructions on building distribution archives, TestPyPI validation, and pub
 
 *This entire package was built using **Antigravity**, a powerful agentic AI coding assistant designed by the Google DeepMind team.*
 
-*Total Cumulative Development Time: ~11.5 hours*
+*Total Cumulative Development Time: ~19.3 hours*
 
-*Last Developer Session: 2026-07-13T10:57:00Z*
+*Last Developer Session: 2026-07-19T01:27:41Z*
