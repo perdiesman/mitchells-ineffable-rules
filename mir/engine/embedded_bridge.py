@@ -52,13 +52,29 @@ def check_embedded_content(
     guest_rules = get_guest_rules(guest_language, rule_config, excluded_rule_ids)
     violations = []
     
-    check_args = {}
-    if extra_check_args:
-        check_args.update(extra_check_args)
-        
+    all_configs = rule_config.get("_all_configs", {})
+    
     for rule in guest_rules:
+        guest_rule_config = {}
+        global_config = all_configs.get(rule.rule_id, {})
+        lang_config = all_configs.get(f"{guest_language}:{rule.rule_id}", {})
+        
+        if isinstance(global_config, dict):
+            guest_rule_config.update(global_config)
+        if isinstance(lang_config, dict):
+            guest_rule_config.update(lang_config)
+            
+        guest_rule_config["_all_configs"] = all_configs
+        guest_rule_config["_lang"] = guest_language
+        guest_rule_config["_rules_to_disable"] = rule_config.get("_rules_to_disable", set())
+        guest_rule_config["_rules_to_enable"] = rule_config.get("_rules_to_enable", set())
+        guest_rule_config["_disable_all"] = rule_config.get("_disable_all", False)
+        
+        if extra_check_args:
+            guest_rule_config.update(extra_check_args)
+            
         try:
-            sql_violations = rule.check(guest_text, file_path, check_args)
+            sql_violations = rule.check(guest_text, file_path, guest_rule_config)
             for sv in sql_violations:
                 guest_lines = guest_text.splitlines()
                 char_offset = 0
@@ -91,14 +107,30 @@ def fix_embedded_content(
     guest_rules = get_guest_rules(guest_language, rule_config, excluded_rule_ids)
     fixed_text = guest_text
     
-    fix_args = {}
-    if extra_fix_args:
-        fix_args.update(extra_fix_args)
-        
+    all_configs = rule_config.get("_all_configs", {})
+    
     for rule in guest_rules:
         if rule.is_fixable in ("yes", "sometimes"):
+            guest_rule_config = {}
+            global_config = all_configs.get(rule.rule_id, {})
+            lang_config = all_configs.get(f"{guest_language}:{rule.rule_id}", {})
+            
+            if isinstance(global_config, dict):
+                guest_rule_config.update(global_config)
+            if isinstance(lang_config, dict):
+                guest_rule_config.update(lang_config)
+                
+            guest_rule_config["_all_configs"] = all_configs
+            guest_rule_config["_lang"] = guest_language
+            guest_rule_config["_rules_to_disable"] = rule_config.get("_rules_to_disable", set())
+            guest_rule_config["_rules_to_enable"] = rule_config.get("_rules_to_enable", set())
+            guest_rule_config["_disable_all"] = rule_config.get("_disable_all", False)
+            
+            if extra_fix_args:
+                guest_rule_config.update(extra_fix_args)
+                
             try:
-                fixed_text = rule.fix(fixed_text, file_path, fix_args)
+                fixed_text = rule.fix(fixed_text, file_path, guest_rule_config)
             except Exception:
                 pass
                 

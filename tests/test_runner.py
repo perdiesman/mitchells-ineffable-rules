@@ -550,5 +550,40 @@ class TestRunnerIntegration(unittest.TestCase):
             expected = '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT my_column FROM my_schema.my_table t\n    </select>\n</mapper>'
             self.assertEqual(f.read(), expected)
 
+    def test_xml_mybatis_sql_severity(self):
+        # A select query violating IR-in-exists: select id from t where id in (select id from t2)
+        xml_content = '<?xml version="1.0" encoding="UTF-8"?>\n<mapper namespace="MyMapper">\n    <select id="query">\n        SELECT id FROM t WHERE id IN (SELECT id FROM t2)\n    </select>\n</mapper>'
+        path = self.write_temp_file("test_severity.xml", xml_content)
+
+        # 1. Without warning override (should fail with exit code 1)
+        config_error = Config()
+        config_error.paths = [path]
+        config_error.disable_all = True
+        config_error.rules_to_enable = ["IR-xml-mybatis-sql", "IR-in-exists"]
+        # Make sure SQL rules are configured to error
+        config_error.rule_configs = {
+            "IR-in-exists": {"severity": "error"}
+        }
+        
+        exit_code = run_linter(config_error)
+        self.assertEqual(exit_code, 1)
+
+        # 2. With warning override for IR-in-exists (should pass with exit code 0)
+        config_warn = Config()
+        config_warn.paths = [path]
+        config_warn.disable_all = True
+        config_warn.rules_to_enable = ["IR-xml-mybatis-sql", "IR-in-exists"]
+        config_warn.rule_configs = {
+            "IR-in-exists": {"severity": "warning"}
+        }
+
+        import io
+        captured_stdout = io.StringIO()
+        with patch("sys.stdout", captured_stdout):
+            exit_code = run_linter(config_warn)
+            
+        self.assertEqual(exit_code, 0)
+        self.assertIn("[WARN] IR-in-exists", captured_stdout.getvalue())
+
 if __name__ == "__main__":
     unittest.main()
