@@ -362,11 +362,7 @@ class XmlMybatisSqlRule(BaseRule):
                 )
                 
                 for ev in embedded_violations:
-                    abs_line = tokens[0]["line"]
-                    for tok in tokens:
-                        if tok["start"] <= ev["mapped_offset"] < tok["end"]:
-                            abs_line = tok["line"]
-                            break
+                    abs_line = content[:ev["mapped_offset"]].count('\n') + 1
                     violations.append({
                         "rule_id": ev["rule_id"],
                         "line": abs_line,

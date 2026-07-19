@@ -605,5 +605,31 @@ class TestRunnerIntegration(unittest.TestCase):
             self.assertIn("id &gt; 10", content)
             self.assertNotIn("&AS gt;", content)
 
+    def test_xml_mybatis_sql_line_mapping(self):
+        # XML file with a self-comparison on line 5
+        xml_content = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n' # 1
+            '<mapper namespace="MyMapper">\n'          # 2
+            '    <update id="query">\n'                # 3
+            '        SELECT id FROM t\n'               # 4
+            '        WHERE id = id;\n'                 # 5
+            '    </update>\n'                          # 6
+            '</mapper>'                                # 7
+        )
+        path = self.write_temp_file("test_mapping.xml", xml_content)
+
+        config = Config()
+        config.paths = [path]
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-mybatis-sql", "IR-self-comparison"]
+
+        import io
+        captured_stdout = io.StringIO()
+        with patch("sys.stdout", captured_stdout):
+            exit_code = run_linter(config)
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("test_mapping.xml:5", captured_stdout.getvalue())
+
 if __name__ == "__main__":
     unittest.main()
