@@ -35,7 +35,8 @@ class TableAliasAsRule(BaseRule):
         seen_as_starts = set()
         
         clause_keywords = [
-            "WHERE", "GROUP", "ORDER", "BY", "HAVING", "LIMIT", "OFFSET", "UNION", "INTERSECT", "EXCEPT", "ON", "USING"
+            "WHERE", "GROUP", "ORDER", "BY", "HAVING", "LIMIT", "OFFSET", "UNION", "INTERSECT", "EXCEPT", "ON", "USING",
+            "SELECT", "WITH", "INSERT", "UPDATE", "DELETE"
         ]
         
         for i, tok in enumerate(tokens):

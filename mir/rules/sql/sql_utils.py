@@ -1,5 +1,6 @@
 import re
 from typing import List, Dict, Optional
+from functools import lru_cache
 
 SQL_KEYWORDS = {
     "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "BY", "HAVING", "LIMIT", "OFFSET",
@@ -14,7 +15,8 @@ OPERATORS = {
     "=", "<>", "<=", ">=", "!=", "<", ">", "+", "-", "*", "/", "%", "||", "~*"
 }
 
-def tokenize_sql(content: str) -> List[dict]:
+@lru_cache(maxsize=1024)
+def _tokenize_sql_impl(content: str) -> List[dict]:
     n = len(content)
     i = 0
     tokens = []
@@ -665,3 +667,7 @@ def is_values_multi(tokens: List[dict], open_idx: int) -> bool:
     if next_tok and next_tok["type"] == "COMMA":
         return True
     return False
+
+def tokenize_sql(content: str) -> List[dict]:
+    res = _tokenize_sql_impl(content)
+    return [d.copy() for d in res]

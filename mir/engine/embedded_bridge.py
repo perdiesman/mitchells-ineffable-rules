@@ -104,26 +104,62 @@ def fix_embedded_content(
                 
     edits = []
     if fixed_text != guest_text:
-        sm = difflib.SequenceMatcher(None, guest_text, fixed_text)
-        for tag, i1, i2, j1, j2 in sm.get_opcodes():
-            if tag in ("replace", "delete", "insert"):
-                is_contiguous = True
-                if i1 < i2:
-                    for k in range(i1 + 1, i2):
-                        if mapping[k] - mapping[k - 1] != 1:
-                            is_contiguous = False
-                            break
-                            
-                if is_contiguous:
-                    start_orig = mapping[i1] if i1 < len(mapping) else (mapping[-1] + 1 if mapping else 0)
-                    end_orig = mapping[i2 - 1] + 1 if i2 <= len(mapping) and i2 > 0 else start_orig
-                    replacement = fixed_text[j1:j2]
-                    orig_str = guest_text[i1:i2]
+        guest_lines = guest_text.splitlines(keepends=True)
+        fixed_lines = fixed_text.splitlines(keepends=True)
+        
+        if len(guest_lines) == len(fixed_lines):
+            guest_offset = 0
+            for gl, fl in zip(guest_lines, fixed_lines):
+                if gl != fl:
+                    gl_stripped = gl.rstrip("\r\n")
+                    fl_stripped = fl.rstrip("\r\n")
                     
-                    if orig_str.strip() == "" and replacement.strip() == "":
-                        if all(c in " \t\r\n" for c in orig_str) and all(c in " \t\r\n" for c in replacement):
-                            continue
+                    sm = difflib.SequenceMatcher(None, gl_stripped, fl_stripped)
+                    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+                        if tag in ("replace", "delete", "insert"):
+                            g_i1 = guest_offset + i1
+                            g_i2 = guest_offset + i2
                             
-                    edits.append((start_orig, end_orig, replacement))
-                    
+                            is_contiguous = True
+                            if g_i1 < g_i2:
+                                for k in range(g_i1 + 1, g_i2):
+                                    if mapping[k] - mapping[k - 1] != 1:
+                                        is_contiguous = False
+                                        break
+                                        
+                            if is_contiguous:
+                                start_orig = mapping[g_i1] if g_i1 < len(mapping) else (mapping[-1] + 1 if mapping else 0)
+                                end_orig = mapping[g_i2 - 1] + 1 if g_i2 <= len(mapping) and g_i2 > 0 else start_orig
+                                replacement = fl_stripped[j1:j2]
+                                orig_str = gl_stripped[i1:i2]
+                                
+                                if orig_str.strip() == "" and replacement.strip() == "":
+                                    if all(c in " \t\r\n" for c in orig_str) and all(c in " \t\r\n" for c in replacement):
+                                        continue
+                                        
+                                edits.append((start_orig, end_orig, replacement))
+                guest_offset += len(gl)
+        else:
+            sm = difflib.SequenceMatcher(None, guest_text, fixed_text)
+            for tag, i1, i2, j1, j2 in sm.get_opcodes():
+                if tag in ("replace", "delete", "insert"):
+                    is_contiguous = True
+                    if i1 < i2:
+                        for k in range(i1 + 1, i2):
+                            if mapping[k] - mapping[k - 1] != 1:
+                                is_contiguous = False
+                                break
+                                
+                    if is_contiguous:
+                        start_orig = mapping[i1] if i1 < len(mapping) else (mapping[-1] + 1 if mapping else 0)
+                        end_orig = mapping[i2 - 1] + 1 if i2 <= len(mapping) and i2 > 0 else start_orig
+                        replacement = fixed_text[j1:j2]
+                        orig_str = guest_text[i1:i2]
+                        
+                        if orig_str.strip() == "" and replacement.strip() == "":
+                            if all(c in " \t\r\n" for c in orig_str) and all(c in " \t\r\n" for c in replacement):
+                                continue
+                                
+                        edits.append((start_orig, end_orig, replacement))
+                        
     return edits

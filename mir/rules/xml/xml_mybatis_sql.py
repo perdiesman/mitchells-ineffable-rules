@@ -269,7 +269,9 @@ class XmlMybatisSqlRule(BaseRule):
             "IR-table-field-spacing", "IR-trigger-layout", "IR-create-view-indent",
             "IR-function-body-indent", "IR-function-header-layout", "IR-raise-layout",
             "IR-plpgsql-block-indent", "IR-update-layout", "IR-case-layout",
-            "IR-join-on-multi"
+            "IR-join-on-multi", "IR-cte-format", "IR-expression-split",
+            "IR-paren-content-indent", "IR-case", "IR-paren-multi",
+            "IR-paren-single", "IR-join-parens", "IR-union-layout"
         }
         self.sql_rules = None
 
