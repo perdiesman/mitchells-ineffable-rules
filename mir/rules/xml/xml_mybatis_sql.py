@@ -2,6 +2,7 @@ from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.engine.rules_loader import load_rules_for_language
 from mir.rules.xml.xml_utils import tokenize_xml
+from mir.engine.embedded_bridge import check_embedded_content, fix_embedded_content
 
 def parse_xml_elements(tokens: List[dict]) -> List[dict]:
     elements = []
@@ -272,35 +273,6 @@ class XmlMybatisSqlRule(BaseRule):
         }
         self.sql_rules = None
 
-    def _get_sql_rules(self, rule_config: Dict[str, Any]) -> List[BaseRule]:
-        all_rules = load_rules_for_language("sql")
-        all_configs = rule_config.get("_all_configs", {})
-        rules_to_disable = rule_config.get("_rules_to_disable", set())
-        rules_to_enable = rule_config.get("_rules_to_enable", set())
-        
-        filtered = []
-        for rule in all_rules:
-            if rule.rule_id in self.excluded_rule_ids:
-                continue
-                
-            if rule.rule_id in rules_to_disable or f"sql:{rule.rule_id}" in rules_to_disable:
-                continue
-                
-            individual_cfg = all_configs.get(rule.rule_id, {})
-            if isinstance(individual_cfg, dict) and individual_cfg.get("enabled") is False:
-                continue
-                
-            is_enabled = True
-            if isinstance(individual_cfg, dict) and "enabled" in individual_cfg:
-                is_enabled = individual_cfg["enabled"]
-            else:
-                is_enabled = rule.enabled_by_default
-                    
-            if is_enabled:
-                filtered.append(rule)
-                
-        return filtered
-
     def _is_mybatis_file(self, content: str) -> bool:
         lower_content = content.lower()
         return "mybatis.org" in lower_content or "<mapper" in lower_content
@@ -312,15 +284,12 @@ class XmlMybatisSqlRule(BaseRule):
         tokens = tokenize_xml(content)
         root_elements = parse_xml_elements(tokens)
         elements = get_all_elements_recursively(root_elements)
-        sql_rules_to_run = self._get_sql_rules(rule_config)
 
-        # Build sql_defs mapping local SQL ids
         sql_defs = {}
         for el in elements:
             if el["tag"] == "sql" and "id" in el["attrs"]:
                 sql_id = el["attrs"]["id"]
                 sql_defs[sql_id] = el["inner_tokens"]
-                # Also index by short ID
                 if "." in sql_id:
                     sql_defs[sql_id.split(".")[-1]] = el["inner_tokens"]
 
@@ -343,44 +312,28 @@ class XmlMybatisSqlRule(BaseRule):
                     if char == "," and idx < len(is_after_tag) and is_after_tag[idx]:
                         ignored_comma_offsets.add(idx)
                         
-                # Run SQL rules on this block
-                for rule in sql_rules_to_run:
-                    try:
-                        sql_violations = rule.check(sql_text, file_path, {"ignored_comma_offsets": ignored_comma_offsets})
-                        for sv in sql_violations:
-                            # Map line relative to sql block start line in XML file
-                            # Find line number of the start character of this violation
-                            start_exp = None
-                            # We search for the first character of the offending range that has a mapping
-                            # (usually sv.line_number tells us the line number inside sql_text)
-                            sql_lines = sql_text.splitlines()
-                            # Estimate start character offset for this line
-                            char_offset = 0
-                            for line_idx in range(sv.line_number - 1):
-                                if line_idx < len(sql_lines):
-                                    char_offset += len(sql_lines[line_idx]) + 1
-                                    
-                            if char_offset < len(mapping):
-                                abs_line = tokens[0]["line"] # default fallback
-                                # Find first text token mapped to this range
-                                mapped_idx = mapping[char_offset]
-                                # Find line number corresponding to this original character index
-                                # by scanning XML tokens
-                                for tok in tokens:
-                                    if tok["start"] <= mapped_idx <= tok["end"]:
-                                        abs_line = tok["line"]
-                                        break
-                            else:
-                                abs_line = el["inner_tokens"][0]["line"] if el["inner_tokens"] else el["start_idx"]
-                                
-                            violations.append({
-                                "rule_id": rule.rule_id,
-                                "line": abs_line,
-                                "message": f"[MyBatis SQL: {rule.rule_id}] {sv.message}",
-                                "is_fixable": sv.is_fixable
-                            })
-                    except Exception:
-                        pass
+                embedded_violations = check_embedded_content(
+                    guest_language="sql",
+                    guest_text=sql_text,
+                    mapping=mapping,
+                    file_path=file_path,
+                    rule_config=rule_config,
+                    excluded_rule_ids=self.excluded_rule_ids,
+                    extra_check_args={"ignored_comma_offsets": ignored_comma_offsets}
+                )
+                
+                for ev in embedded_violations:
+                    abs_line = tokens[0]["line"]
+                    for tok in tokens:
+                        if tok["start"] <= ev["mapped_offset"] < tok["end"]:
+                            abs_line = tok["line"]
+                            break
+                    violations.append({
+                        "rule_id": ev["rule_id"],
+                        "line": abs_line,
+                        "message": f"[MyBatis SQL: {ev['rule_id']}] {ev['message']}",
+                        "is_fixable": ev["is_fixable"]
+                    })
         return violations
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
@@ -406,8 +359,6 @@ class XmlMybatisSqlRule(BaseRule):
         tokens = tokenize_xml(content)
         root_elements = parse_xml_elements(tokens)
         elements = get_all_elements_recursively(root_elements)
-        sql_rules_to_run = self._get_sql_rules(rule_config)
-
         # Build sql_defs mapping local SQL ids
         sql_defs = {}
         for el in elements:
@@ -436,44 +387,16 @@ class XmlMybatisSqlRule(BaseRule):
                     if char == "," and idx < len(is_after_tag) and is_after_tag[idx]:
                         ignored_comma_offsets.add(idx)
                         
-                # Run fixes on the expanded SQL
-                fixed_sql = sql_text
-                for rule in sql_rules_to_run:
-                    if rule.is_fixable in ("yes", "sometimes"):
-                        try:
-                            fixed_sql = rule.fix(fixed_sql, file_path, {"ignored_comma_offsets": ignored_comma_offsets})
-                        except Exception:
-                            pass
-                
-                if fixed_sql != sql_text:
-                    # Compute diff / edits between sql_text and fixed_sql
-                    # Since they can differ, we can do a simple character diff or use a sequence matcher.
-                    # A robust character-by-character replacement works if we do it segment by segment.
-                    # But simpler: if the rules only made small changes, we can find the changed parts.
-                    # Or we can do a standard python difflib SequenceMatcher!
-                    import difflib
-                    sm = difflib.SequenceMatcher(None, sql_text, fixed_sql)
-                    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-                        if tag in ("replace", "delete", "insert"):
-                            # Translate expanded SQL range [i1:i2] to original XML offsets
-                            # Check if the range is contiguous in the original XML content
-                            is_contiguous = True
-                            if i1 < i2:
-                                for k in range(i1 + 1, i2):
-                                    if mapping[k] - mapping[k - 1] != 1:
-                                        is_contiguous = False
-                                        break
-                                        
-                            if is_contiguous:
-                                start_orig = mapping[i1] if i1 < len(mapping) else (mapping[-1] + 1 if mapping else 0)
-                                end_orig = mapping[i2 - 1] + 1 if i2 <= len(mapping) and i2 > 0 else start_orig
-                                replacement = fixed_sql[j1:j2]
-                                orig_str = sql_text[i1:i2]
-                                # Skip pure whitespace edits to avoid layout conflicts with XML indentation
-                                if orig_str.strip() == "" and replacement.strip() == "":
-                                    if all(c in " \t\r\n" for c in orig_str) and all(c in " \t\r\n" for c in replacement):
-                                        continue
-                                all_xml_edits.append((start_orig, end_orig, replacement))
+                edits = fix_embedded_content(
+                    guest_language="sql",
+                    guest_text=sql_text,
+                    mapping=mapping,
+                    file_path=file_path,
+                    rule_config=rule_config,
+                    excluded_rule_ids=self.excluded_rule_ids,
+                    extra_fix_args={"ignored_comma_offsets": ignored_comma_offsets}
+                )
+                all_xml_edits.extend(edits)
 
         if not all_xml_edits:
             return content
