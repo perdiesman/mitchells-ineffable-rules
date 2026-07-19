@@ -523,6 +523,84 @@ class TestRunnerIntegration(unittest.TestCase):
         with open(path, "r") as f:
             self.assertEqual(f.read(), "<root>\n    <child />\n</root>")
 
+        # 3b. XML indentation with nested SQL tags (e.g. <if>) aligning to SQL indentation
+        sql_nested_tags = (
+            '<mapper namespace="MyMapper">\n'
+            '    <select id="query">\n'
+            '        SELECT id\n'
+            '        FROM users\n'
+            '        WHERE id IN (\n'
+            '            SELECT user_id\n'
+            '            FROM roles\n'
+            '          <if test="admin">\n'
+            '                WHERE role_name = \'admin\'\n'
+            '        </if>\n'
+            '        )\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        with open(path, "w") as f:
+            f.write(sql_nested_tags)
+
+        config_indent2 = Config()
+        config_indent2.paths = [path]
+        config_indent2.disable_all = True
+        config_indent2.rules_to_enable = ["IR-xml-indent"]
+        config_indent2.fix = True
+        self.assertEqual(run_linter(config_indent2), 0)
+
+        with open(path, "r") as f:
+            expected = (
+                '<mapper namespace="MyMapper">\n'
+                '    <select id="query">\n'
+                '        SELECT id\n'
+                '        FROM users\n'
+                '        WHERE id IN (\n'
+                '            SELECT user_id\n'
+                '            FROM roles\n'
+                '            <if test="admin">WHERE role_name = \'admin\'</if>\n'
+                '        )\n'
+                '    </select>\n'
+                '</mapper>'
+            )
+            self.assertEqual(f.read(), expected)
+
+        # 3c. XML indentation with nested SQL tags in <sql> fragment aligning to SQL indentation
+        sql_fragment_nested_tags = (
+            '<mapper namespace="MyMapper">\n'
+            '    <sql id="fragment">\n'
+            '        SELECT id\n'
+            '        FROM users\n'
+            '        WHERE active = 1\n'
+            '      <if test="admin">\n'
+            '            AND role = \'admin\'\n'
+            '    </if>\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        with open(path, "w") as f:
+            f.write(sql_fragment_nested_tags)
+
+        config_indent3 = Config()
+        config_indent3.paths = [path]
+        config_indent3.disable_all = True
+        config_indent3.rules_to_enable = ["IR-xml-indent"]
+        config_indent3.fix = True
+        self.assertEqual(run_linter(config_indent3), 0)
+
+        with open(path, "r") as f:
+            expected = (
+                '<mapper namespace="MyMapper">\n'
+                '    <sql id="fragment">\n'
+                '        SELECT id\n'
+                '        FROM users\n'
+                '        WHERE active = 1\n'
+                '        <if test="admin">AND role = \'admin\'</if>\n'
+                '    </sql>\n'
+                '</mapper>'
+            )
+            self.assertEqual(f.read(), expected)
+
         # 4. XML line length check
         long_line = "<root>\n    <child />\n" + ("A" * 121) + "\n</root>"
         with open(path, "w") as f:
@@ -542,7 +620,7 @@ class TestRunnerIntegration(unittest.TestCase):
         config_mybatis = Config()
         config_mybatis.paths = [path]
         config_mybatis.disable_all = True
-        config_mybatis.rules_to_enable = ["IR-xml-mybatis-sql"]
+        config_mybatis.rules_to_enable = ["IR-xml-mybatis-sql", "IR-keyword-case"]
         config_mybatis.fix = True
         self.assertEqual(run_linter(config_mybatis), 0)
 
@@ -630,6 +708,222 @@ class TestRunnerIntegration(unittest.TestCase):
 
         self.assertEqual(exit_code, 1)
         self.assertIn("test_mapping.xml:5", captured_stdout.getvalue())
+
+    def test_xml_mybatis_sql_indentation(self):
+        # XML file with a query having incorrect clause indentation relative to base indent (8 spaces)
+        xml_content = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<mapper namespace="MyMapper">\n'
+            '    <select id="query">\n'
+            '        SELECT id\n'
+            '      FROM t;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        path = self.write_temp_file("test_mybatis_indent.xml", xml_content)
+
+        config = Config()
+        config.paths = [path]
+        config.disable_all = True
+        # Enable IR-xml-mybatis-sql, IR-indent, and IR-clause-alignment
+        config.rules_to_enable = ["IR-xml-mybatis-sql", "IR-indent", "IR-clause-alignment"]
+        config.fix = True
+
+        exit_code = run_linter(config)
+        self.assertEqual(exit_code, 0)
+
+        # The FROM clause should be aligned to exactly 8 spaces (matching SELECT's base indentation)
+        with open(path, "r") as f:
+            content = f.read()
+            expected = (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<mapper namespace="MyMapper">\n'
+                '    <select id="query">\n'
+                '        SELECT id\n'
+                '        FROM t;\n'
+                '    </select>\n'
+                '</mapper>'
+            )
+            self.assertEqual(content, expected)
+
+    def test_line_ranges_filtering(self):
+        # A file with multiple violations on different lines
+        # Line 1: SELECT * (has wildcard check error)
+        # Line 2: FROM users
+        # Line 3: WHERE active = true (correct)
+        # Line 4: and age > 18 (keyword lowercase error)
+        sql_content = "SELECT *\nFROM users\nWHERE active = true\nand age > 18;"
+        path = self.write_temp_file("test_lines.sql", sql_content)
+
+        # 1. Check with lines config restricting to line 4 only
+        config = Config()
+        config.paths = [path]
+        config.disable_all = True
+        config.rules_to_enable = ["IR-select-wildcard", "IR-keyword-case"]
+        config.lines = {4}
+        config.fix = True
+
+        exit_code = run_linter(config)
+        self.assertEqual(exit_code, 0)
+
+        # Only line 4 should be fixed to 'AND age > 18;'. Line 1 SELECT * must NOT be fixed/altered.
+        with open(path, "r") as f:
+            content = f.read()
+            expected = "SELECT *\nFROM users\nWHERE active = true\nAND age > 18;"
+            self.assertEqual(content, expected)
+
+    def test_block_range_lines_filtering(self):
+        # A file with two MyBatis select blocks:
+        # Block 1 spans lines 3-7:
+        # Line 3: <select id="query1">
+        # Line 4:     SELECT id
+        # Line 5:     FROM users
+        # Line 6:     where active = true (keyword case error)
+        # Line 7: </select>
+        #
+        # Block 2 spans lines 8-12:
+        # Line 8: <select id="query2">
+        # Line 9:     SELECT name
+        # Line 10:    FROM roles
+        # Line 11:    where role_name = 'admin' (keyword case error)
+        # Line 12: </select>
+        xml_content = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<mapper namespace="MyMapper">\n'
+            '    <select id="query1">\n'
+            '        SELECT id\n'
+            '        FROM users\n'
+            '        where active = true\n'
+            '    </select>\n'
+            '    <select id="query2">\n'
+            '        SELECT name\n'
+            '        FROM roles\n'
+            '        where role_name = \'admin\'\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        path = self.write_temp_file("test_mybatis_blocks.xml", xml_content)
+
+        # We only pass line 5 (which is inside block 1, but doesn't have the violation).
+        # Because line 5 is in block 1, block 1's lines are expanded.
+        # So line 6 should get fixed! But block 2 has no line in lines, so line 11 should NOT get fixed.
+        config = Config()
+        config.paths = [path]
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-mybatis-sql", "IR-keyword-case"]
+        config.lines = {5}
+        config.fix = True
+
+        exit_code = run_linter(config)
+        self.assertEqual(exit_code, 0)
+
+        with open(path, "r") as f:
+            content = f.read()
+            expected = (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<mapper namespace="MyMapper">\n'
+                '    <select id="query1">\n'
+                '        SELECT id\n'
+                '        FROM users\n'
+                '        WHERE active = true\n'
+                '    </select>\n'
+                '    <select id="query2">\n'
+                '        SELECT name\n'
+                '        FROM roles\n'
+                '        where role_name = \'admin\'\n'
+                '    </select>\n'
+                '</mapper>'
+            )
+            self.assertEqual(content, expected)
+
+    def test_xml_line_length_attribute_wrapping(self):
+        # A root tag with long attributes exceeding 120 limit
+        xml_content = '<root firstAttribute="some_very_long_value_to_exceed_one_hundred_and_twenty_characters_limit_to_trigger_wrapping" secondAttribute="another_value_to_wrap" />'
+        path = self.write_temp_file("test_wrap.xml", xml_content)
+
+        config = Config()
+        config.paths = [path]
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-line-length"]
+        config.fix = True
+
+        exit_code = run_linter(config)
+        self.assertEqual(exit_code, 0)
+
+        # The wrapped attributes should be indented exactly 2 levels (8 spaces) relative to the tag opening line (which is at 0 spaces)
+        with open(path, "r") as f:
+            content = f.read()
+            expected = (
+                '<root firstAttribute="some_very_long_value_to_exceed_one_hundred_and_twenty_characters_limit_to_trigger_wrapping"\n'
+                '        secondAttribute="another_value_to_wrap" />'
+            )
+            self.assertEqual(content, expected)
+
+    def test_xml_tag_collapse(self):
+        # A choose-when block with multi-line tags that can fit under 120 chars
+        xml_content = (
+            '<mapper namespace="MyMapper">\n'
+            '    <choose>\n'
+            '        <when test="admin">\n'
+            '            role = \'admin\'\n'
+            '        </when>\n'
+            '        <otherwise>\n'
+            '            role = \'user\'\n'
+            '        </otherwise>\n'
+            '    </choose>\n'
+            '</mapper>'
+        )
+        path = self.write_temp_file("test_collapse.xml", xml_content)
+
+        config = Config()
+        config.paths = [path]
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-indent"]
+        config.fix = True
+
+        exit_code = run_linter(config)
+        self.assertEqual(exit_code, 0)
+
+        with open(path, "r") as f:
+            content = f.read()
+            expected = (
+                '<mapper namespace="MyMapper">\n'
+                '    <choose>\n'
+                '        <when test="admin">role = \'admin\'</when>\n'
+                '        <otherwise>role = \'user\'</otherwise>\n'
+                '    </choose>\n'
+                '</mapper>'
+            )
+            self.assertEqual(content, expected)
+
+    def test_sql_function_call_wrap(self):
+        # A long SQL function call exceeding 120 characters should be wrapped
+        sql_content = (
+            "SELECT id,\n"
+            "    outage_data.state_outages_for_run_start_time(#{runStartTime}::TIMESTAMP WITH TIME ZONE - INTERVAL '15 minute') sofrst\n"
+            "FROM users"
+        )
+        path = self.write_temp_file("test_func_wrap.sql", sql_content)
+
+        config = Config()
+        config.paths = [path]
+        config.disable_all = True
+        config.rules_to_enable = ["IR-line-length"]
+        config.fix = True
+
+        exit_code = run_linter(config)
+        self.assertEqual(exit_code, 0)
+
+        with open(path, "r") as f:
+            content = f.read()
+            expected = (
+                "SELECT id,\n"
+                "    outage_data.state_outages_for_run_start_time(\n"
+                "        #{runStartTime}::TIMESTAMP WITH TIME ZONE - INTERVAL '15 minute'\n"
+                "    ) sofrst\n"
+                "FROM users"
+            )
+            self.assertEqual(content, expected)
 
 if __name__ == "__main__":
     unittest.main()

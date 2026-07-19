@@ -22,7 +22,7 @@ class XmlLineLengthRule(BaseRule):
     examples = [
         {
             "violating": '<myTag firstAttribute="some_long_value_to_exceed_one_hundred_and_twenty_characters" secondAttribute="another_value_to_be_sure" />',
-            "correct": '<myTag firstAttribute="some_long_value_to_exceed_one_hundred_and_twenty_characters"\n       secondAttribute="another_value_to_be_sure" />'
+            "correct": '<myTag firstAttribute="some_long_value_to_exceed_one_hundred_and_twenty_characters"\n        secondAttribute="another_value_to_be_sure" />'
         }
     ]
     additional_validations = [
@@ -110,8 +110,16 @@ class XmlLineLengthRule(BaseRule):
                 else:
                     break
                     
+            xml_indent_config = rule_config.get("_all_configs", {}).get("IR-xml-indent", {})
+            if isinstance(xml_indent_config, bool):
+                indent_size = 4
+            elif isinstance(xml_indent_config, dict):
+                indent_size = xml_indent_config.get("indent_size", 4)
+            else:
+                indent_size = 4
+            attr_indent = indent + " " * (2 * indent_size)
+            
             pre_first_attr = "".join(t["value"] for t in tag_toks[:attr_indices[0]])
-            first_attr_col = len(indent) + len(pre_first_attr.lstrip("\r\n\t "))
             
             option_a_parts = [pre_first_attr]
             for idx, attr_idx in enumerate(attr_indices):
@@ -127,7 +135,7 @@ class XmlLineLengthRule(BaseRule):
                 if idx == 0:
                     option_a_parts.append(attr_text)
                 else:
-                    option_a_parts.append("\n" + (" " * first_attr_col) + attr_text)
+                    option_a_parts.append("\n" + attr_indent + attr_text)
             if tag_toks[-1]["type"] == "TAG_END":
                 option_a_parts.append(tag_toks[-1]["value"])
             formatted_a = "".join(option_a_parts)
@@ -137,7 +145,6 @@ class XmlLineLengthRule(BaseRule):
             if len(attr_indices) > 0:
                 option_b_parts = [tag_toks[0]["value"].rstrip("\r\n\t ")]
                 
-            attr_indent = indent + "    "
             for idx, attr_idx in enumerate(attr_indices):
                 next_attr_idx = attr_indices[idx + 1] if idx + 1 < len(attr_indices) else len(tag_toks)
                 end_bound = next_attr_idx

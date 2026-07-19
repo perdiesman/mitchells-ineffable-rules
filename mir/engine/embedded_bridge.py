@@ -3,6 +3,21 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.engine.rules_loader import load_rules_for_language
 import difflib
 
+def xml_encode(s: str) -> str:
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+def find_single_difference(s1: str, s2: str) -> Tuple[int, int, int, int]:
+    n1, n2 = len(s1), len(s2)
+    prefix_len = 0
+    while prefix_len < n1 and prefix_len < n2 and s1[prefix_len] == s2[prefix_len]:
+        prefix_len += 1
+    suffix_len = 0
+    while (suffix_len < n1 - prefix_len and 
+           suffix_len < n2 - prefix_len and 
+           s1[n1 - 1 - suffix_len] == s2[n2 - 1 - suffix_len]):
+        suffix_len += 1
+    return (prefix_len, n1 - suffix_len, prefix_len, n2 - suffix_len)
+
 def get_guest_rules(guest_language: str, rule_config: Dict[str, Any], excluded_rule_ids: set = None) -> List[BaseRule]:
     all_rules = load_rules_for_language(guest_language)
     all_configs = rule_config.get("_all_configs", {})
@@ -30,7 +45,7 @@ def get_guest_rules(guest_language: str, rule_config: Dict[str, Any], excluded_r
             
         if disable_all:
             is_enabled = (
-                (is_enabled is True) or
+                (is_enabled is True and isinstance(individual_cfg, dict) and individual_cfg.get("enabled") is True) or
                 (rule.rule_id in rules_to_enable) or
                 (f"{guest_language}:{rule.rule_id}" in rules_to_enable)
             )
@@ -136,62 +151,60 @@ def fix_embedded_content(
                 
     edits = []
     if fixed_text != guest_text:
-        guest_lines = guest_text.splitlines(keepends=True)
-        fixed_lines = fixed_text.splitlines(keepends=True)
-        
-        if len(guest_lines) == len(fixed_lines):
-            guest_offset = 0
-            for gl, fl in zip(guest_lines, fixed_lines):
-                if gl != fl:
-                    gl_stripped = gl.rstrip("\r\n")
-                    fl_stripped = fl.rstrip("\r\n")
-                    
-                    sm = difflib.SequenceMatcher(None, gl_stripped, fl_stripped)
-                    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-                        if tag in ("replace", "delete", "insert"):
-                            g_i1 = guest_offset + i1
-                            g_i2 = guest_offset + i2
-                            
-                            is_contiguous = True
-                            if g_i1 < g_i2:
-                                for k in range(g_i1 + 1, g_i2):
-                                    if mapping[k] - mapping[k - 1] != 1:
-                                        is_contiguous = False
-                                        break
-                                        
-                            if is_contiguous:
-                                start_orig = mapping[g_i1] if g_i1 < len(mapping) else (mapping[-1] + 1 if mapping else 0)
-                                end_orig = mapping[g_i2 - 1] + 1 if g_i2 <= len(mapping) and g_i2 > 0 else start_orig
-                                replacement = fl_stripped[j1:j2]
-                                orig_str = gl_stripped[i1:i2]
-                                
-                                if orig_str.strip() == "" and replacement.strip() == "":
-                                    if all(c in " \t\r\n" for c in orig_str) and all(c in " \t\r\n" for c in replacement):
-                                        continue
-                                        
-                                edits.append((start_orig, end_orig, replacement))
-                guest_offset += len(gl)
-        else:
-            sm = difflib.SequenceMatcher(None, guest_text, fixed_text)
-            for tag, i1, i2, j1, j2 in sm.get_opcodes():
-                if tag in ("replace", "delete", "insert"):
-                    is_contiguous = True
-                    if i1 < i2:
-                        for k in range(i1 + 1, i2):
+        guest_line_offsets = []
+        offset = 0
+        for line in guest_text.splitlines(keepends=True):
+            guest_line_offsets.append(offset)
+            offset += len(line)
+        guest_line_offsets.append(offset)
+
+        guest_lines_stripped = [l.rstrip("\r\n") for l in guest_text.splitlines(keepends=True)]
+        fixed_lines_stripped = [l.rstrip("\r\n") for l in fixed_text.splitlines(keepends=True)]
+
+        sm = difflib.SequenceMatcher(None, guest_lines_stripped, fixed_lines_stripped)
+        tag_ranges = extra_fix_args.get("tag_ranges") if extra_fix_args else None
+
+        for tag, i1, i2, j1, j2 in sm.get_opcodes():
+            if tag in ("replace", "delete", "insert"):
+                g_start_char = guest_line_offsets[i1]
+                g_end_char = guest_line_offsets[i2]
+
+                is_contiguous = True
+                start_orig = mapping[g_start_char] if g_start_char < len(mapping) else (mapping[-1] + 1 if mapping else 0)
+                end_orig = mapping[g_end_char - 1] + 1 if g_end_char <= len(mapping) and g_end_char > 0 else start_orig
+
+                if tag_ranges is not None:
+                    if start_orig < end_orig:
+                        for t_start, t_end in tag_ranges:
+                            if max(start_orig, t_start) < min(end_orig, t_end):
+                                is_contiguous = False
+                                break
+                    else:
+                        for t_start, t_end in tag_ranges:
+                            if t_start < start_orig < t_end:
+                                is_contiguous = False
+                                break
+                else:
+                    if g_start_char < g_end_char:
+                        for k in range(g_start_char + 1, g_end_char):
                             if mapping[k] - mapping[k - 1] != 1:
                                 is_contiguous = False
                                 break
-                                
-                    if is_contiguous:
-                        start_orig = mapping[i1] if i1 < len(mapping) else (mapping[-1] + 1 if mapping else 0)
-                        end_orig = mapping[i2 - 1] + 1 if i2 <= len(mapping) and i2 > 0 else start_orig
-                        replacement = fixed_text[j1:j2]
-                        orig_str = guest_text[i1:i2]
-                        
-                        if orig_str.strip() == "" and replacement.strip() == "":
-                            if all(c in " \t\r\n" for c in orig_str) and all(c in " \t\r\n" for c in replacement):
-                                continue
-                                
+
+                if is_contiguous:
+                    block_fixed_lines = fixed_text.splitlines(keepends=True)[j1:j2]
+                    replacement = "".join(block_fixed_lines)
+                    if file_path.endswith(".xml"):
+                        replacement = xml_encode(replacement)
+
+                    orig_str = guest_text[g_start_char:g_end_char]
+                    skip = False
+                    if orig_str.strip() == "" and replacement.strip() == "":
+                        if all(c in " \t\r\n" for c in orig_str) and all(c in " \t\r\n" for c in replacement):
+                            if not (extra_fix_args and "base_indent" in extra_fix_args):
+                                skip = True
+
+                    if not skip:
                         edits.append((start_orig, end_orig, replacement))
-                        
+
     return edits

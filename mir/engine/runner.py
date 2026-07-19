@@ -175,6 +175,89 @@ def run_rule_fix_recursively(rule: BaseRule, content: str, file_path: str, rule_
             
     return current_content
 
+def apply_filtered_fixes(original_content: str, fixed_content: str, target_lines: Set[int]) -> str:
+    if not target_lines:
+        return fixed_content
+        
+    orig_lines = original_content.splitlines(keepends=True)
+    fixed_lines = fixed_content.splitlines(keepends=True)
+    
+    import difflib
+    sm = difflib.SequenceMatcher(None, orig_lines, fixed_lines)
+    
+    result_lines = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            result_lines.extend(orig_lines[i1:i2])
+        elif tag == "replace":
+            should_apply = any((idx + 1) in target_lines for idx in range(i1, i2))
+            if should_apply:
+                result_lines.extend(fixed_lines[j1:j2])
+            else:
+                result_lines.extend(orig_lines[i1:i2])
+        elif tag == "delete":
+            should_apply = any((idx + 1) in target_lines for idx in range(i1, i2))
+            if should_apply:
+                pass
+            else:
+                result_lines.extend(orig_lines[i1:i2])
+        elif tag == "insert":
+            should_apply = (i1 in target_lines) or ((i1 + 1) in target_lines)
+            if should_apply:
+                result_lines.extend(fixed_lines[j1:j2])
+            else:
+                pass
+                
+    return "".join(result_lines)
+
+def expand_config_lines_for_blocks(config: Config, file_path: str, content: str, lang: str):
+    if not config.lines:
+        return
+        
+    ranges = []
+    
+    if lang == "xml":
+        try:
+            from mir.rules.xml.xml_mybatis_sql import parse_xml_elements, get_all_elements_recursively
+            from mir.rules.xml.xml_utils import tokenize_xml
+            tokens = tokenize_xml(content)
+            root_elements = parse_xml_elements(tokens)
+            elements = get_all_elements_recursively(root_elements)
+            target_tags = {"select", "insert", "update", "delete", "sql"}
+            for el in elements:
+                if el["tag"] in target_tags:
+                    if el["inner_tokens"]:
+                        start_line = content[:el["inner_tokens"][0]["start"]].count('\n') + 1
+                        end_line = content[:el["inner_tokens"][-1]["end"]].count('\n') + 1
+                        ranges.append((start_line, end_line))
+        except Exception:
+            pass
+            
+    elif lang == "sql":
+        try:
+            from mir.rules.sql.sql_utils import tokenize_sql
+            tokens = tokenize_sql(content)
+            for t in tokens:
+                if t["type"] == "STRING" and t["value"].startswith("$"):
+                    val = t["value"]
+                    dollar_idx = val.find("$", 1)
+                    if dollar_idx != -1:
+                        tag = val[:dollar_idx + 1]
+                        if val.endswith(tag):
+                            start_line = content[:t["start"]].count('\n') + 1
+                            end_line = content[:t["end"]].count('\n') + 1
+                            ranges.append((start_line, end_line))
+        except Exception:
+            pass
+            
+    new_lines = set(config.lines)
+    for start, end in ranges:
+        overlap = any(l in config.lines for l in range(start, end + 1))
+        if overlap:
+            new_lines.update(range(start, end + 1))
+            
+    config.lines = new_lines
+
 def resolve_rule_config(config: Config, rule_id: str, lang: str, detected_base_indent: str = None) -> dict:
     global_config = config.rule_configs.get(rule_id, {})
     lang_config = config.rule_configs.get(f"{lang}:{rule_id}", {})
@@ -190,6 +273,8 @@ def resolve_rule_config(config: Config, rule_id: str, lang: str, detected_base_i
     rule_config["_rules_to_disable"] = config.rules_to_disable
     rule_config["_rules_to_enable"] = config.rules_to_enable
     rule_config["_disable_all"] = config.disable_all
+    if hasattr(config, "lines") and config.lines:
+        rule_config["_lines"] = config.lines
     
     if "base_indent" not in rule_config and detected_base_indent is not None:
         rule_config["base_indent"] = detected_base_indent
@@ -316,6 +401,7 @@ def run_linter(config: Config) -> int:
             
     if content is not None:
         file_path = "<stdin>"
+        expand_config_lines_for_blocks(config, file_path, content, lang)
         detected_base_indent = detect_base_indent(content)
         rules = load_rules_for_language(lang, config.include_dirs, config.rule_mode)
         active_rules = [
@@ -354,6 +440,12 @@ def run_linter(config: Config) -> int:
                 
             rule_disabled_lines = disabled_map.get(rule.rule_id, set()) | disabled_map.get("IR-all", set())
             for v in violations:
+                if config.lines:
+                    if v.rule_id == "IR-xml-indent":
+                        if v.line_number > max(config.lines):
+                            continue
+                    elif v.line_number not in config.lines:
+                        continue
                 specific_disabled = disabled_map.get(v.rule_id, set())
                 if v.line_number not in rule_disabled_lines and v.line_number not in specific_disabled:
                     v_rule = get_rule_instance(v.rule_id, lang) or rule
@@ -384,6 +476,7 @@ def run_linter(config: Config) -> int:
                 pass_num += 1
                 has_changes = False
                 
+                expand_config_lines_for_blocks(config, file_path, current_content, lang)
                 disabled_map = get_disabled_rules_map(current_content, file_path)
                 detected_base_indent = detect_base_indent(current_content)
                 
@@ -413,6 +506,12 @@ def run_linter(config: Config) -> int:
                         
                     rule_disabled_lines = disabled_map.get(rule.rule_id, set()) | disabled_map.get("IR-all", set())
                     for v in violations:
+                        if config.lines:
+                            if v.rule_id == "IR-xml-indent":
+                                if v.line_number > max(config.lines):
+                                    continue
+                            elif v.line_number not in config.lines:
+                                    continue
                         if v.line_number not in rule_disabled_lines:
                             severity = rule.get_config_value(rule_config, "severity", "error")
                             if config.no_warnings and severity == "warning":
@@ -439,7 +538,10 @@ def run_linter(config: Config) -> int:
                         except Exception as e:
                             pass
                     if current_content != old_content:
-                        has_changes = True
+                        if config.lines:
+                            current_content = apply_filtered_fixes(old_content, current_content, config.lines)
+                        if current_content != old_content:
+                            has_changes = True
                 else:
                     break
             
@@ -466,14 +568,17 @@ def run_linter(config: Config) -> int:
                         current_content = run_rule_fix_recursively(rule, current_content, file_path, rule_config, lang)
                     except Exception as e:
                         pass
-                if current_content != content and not config.quiet:
-                    diff_lines = list(difflib.unified_diff(
-                        content.splitlines(keepends=True),
-                        current_content.splitlines(keepends=True),
-                        fromfile=f"a/{file_path}",
-                        tofile=f"b/{file_path}"
-                    ))
-                    print_diff_with_delta(diff_lines)
+                if current_content != content:
+                    if config.lines:
+                        current_content = apply_filtered_fixes(content, current_content, config.lines)
+                    if current_content != content and not config.quiet:
+                        diff_lines = list(difflib.unified_diff(
+                            content.splitlines(keepends=True),
+                            current_content.splitlines(keepends=True),
+                            fromfile=f"a/{file_path}",
+                            tofile=f"b/{file_path}"
+                        ))
+                        print_diff_with_delta(diff_lines)
                     
             has_errors = False
             for v, rule in file_violations:
@@ -531,6 +636,8 @@ def run_linter(config: Config) -> int:
             print(f"Error reading file '{file_path}': {e}")
             continue
             
+        expand_config_lines_for_blocks(config, file_path, content, lang)
+        
         # Parse comments to get disabled rules map
         disabled_map = get_disabled_rules_map(content, file_path)
         detected_base_indent = detect_base_indent(content)
@@ -572,6 +679,12 @@ def run_linter(config: Config) -> int:
             # Filter violations based on in-file disable comments
             rule_disabled_lines = disabled_map.get(rule.rule_id, set()) | disabled_map.get("IR-all", set())
             for v in violations:
+                if config.lines:
+                    if v.rule_id == "IR-xml-indent":
+                        if v.line_number > max(config.lines):
+                            continue
+                    elif v.line_number not in config.lines:
+                        continue
                 specific_disabled = disabled_map.get(v.rule_id, set())
                 if v.line_number not in rule_disabled_lines and v.line_number not in specific_disabled:
                     v_rule = get_rule_instance(v.rule_id, lang) or rule
@@ -604,6 +717,7 @@ def run_linter(config: Config) -> int:
                 pass_num += 1
                 has_changes = False
                 
+                expand_config_lines_for_blocks(config, file_path, current_content, lang)
                 disabled_map = get_disabled_rules_map(current_content, file_path)
                 detected_base_indent = detect_base_indent(current_content)
                 
@@ -633,6 +747,12 @@ def run_linter(config: Config) -> int:
                         
                     rule_disabled_lines = disabled_map.get(rule.rule_id, set()) | disabled_map.get("IR-all", set())
                     for v in violations:
+                        if config.lines:
+                            if v.rule_id == "IR-xml-indent":
+                                if v.line_number > max(config.lines):
+                                    continue
+                            elif v.line_number not in config.lines:
+                                continue
                         specific_disabled = disabled_map.get(v.rule_id, set())
                         if v.line_number not in rule_disabled_lines and v.line_number not in specific_disabled:
                             v_rule = get_rule_instance(v.rule_id, lang) or rule
@@ -661,12 +781,18 @@ def run_linter(config: Config) -> int:
                         try:
                             new_content = run_rule_fix_recursively(rule, current_content, file_path, rule_config, lang)
                             if new_content != current_content:
-                                rules_fixed.add(rule.rule_id)
-                                current_content = new_content
+                                if config.lines:
+                                    new_content = apply_filtered_fixes(current_content, new_content, config.lines)
+                                if new_content != current_content:
+                                    rules_fixed.add(rule.rule_id)
+                                    current_content = new_content
                         except Exception as e:
                             pass
                     if current_content != old_content:
-                        has_changes = True
+                        if config.lines:
+                            current_content = apply_filtered_fixes(old_content, current_content, config.lines)
+                        if current_content != old_content:
+                            has_changes = True
                 else:
                     break
             
@@ -707,15 +833,18 @@ def run_linter(config: Config) -> int:
                         pass
                 
                 if current_content != content:
-                    diff_lines = list(difflib.unified_diff(
-                        content.splitlines(keepends=True),
-                        current_content.splitlines(keepends=True),
-                        fromfile=f"a/{file_path}",
-                        tofile=f"b/{file_path}",
-                        n=2
-                    ))
-                    if not config.quiet:
-                        print_diff_with_delta(diff_lines)
+                    if config.lines:
+                        current_content = apply_filtered_fixes(content, current_content, config.lines)
+                    if current_content != content:
+                        diff_lines = list(difflib.unified_diff(
+                            content.splitlines(keepends=True),
+                            current_content.splitlines(keepends=True),
+                            fromfile=f"a/{file_path}",
+                            tofile=f"b/{file_path}",
+                            n=2
+                        ))
+                        if not config.quiet:
+                            print_diff_with_delta(diff_lines)
                     for v, rule in fixable:
                         v_rule = get_rule_instance(v.rule_id, lang) or rule
                         v_rule_config = resolve_rule_config(config, v_rule.rule_id, lang, detected_base_indent)

@@ -1,7 +1,7 @@
 import re
 from typing import List, Dict, Optional
 
-def tokenize_xml(content: str) -> List[dict]:
+def _tokenize_xml_impl(content: str) -> List[dict]:
     n = len(content)
     i = 0
     tokens = []
@@ -245,3 +245,12 @@ def tokenize_xml(content: str) -> List[dict]:
             })
 
     return tokens
+
+import functools
+
+@functools.lru_cache(maxsize=1024)
+def _tokenize_xml_cached(content: str) -> List[dict]:
+    return _tokenize_xml_impl(content)
+
+def tokenize_xml(content: str) -> List[dict]:
+    return _tokenize_xml_cached(content)

@@ -39,7 +39,9 @@ def parse_xml_elements(tokens: List[dict]) -> List[dict]:
                         "attrs": attrs,
                         "start_idx": i,
                         "end_idx": tag_end_idx,
-                        "inner_tokens": []
+                        "inner_tokens": [],
+                        "start_offset": tokens[i]["start"],
+                        "end_offset": tokens[tag_end_idx]["end"]
                     })
                     i = tag_end_idx + 1
                     continue
@@ -72,7 +74,9 @@ def parse_xml_elements(tokens: List[dict]) -> List[dict]:
                             "attrs": attrs,
                             "start_idx": i,
                             "end_idx": close_end_idx,
-                            "inner_tokens": tokens[tag_end_idx + 1 : close_idx]
+                            "inner_tokens": tokens[tag_end_idx + 1 : close_idx],
+                            "start_offset": tokens[i]["start"],
+                            "end_offset": tokens[close_end_idx]["end"]
                         })
                         i = close_end_idx + 1
                         continue
@@ -144,6 +148,23 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
             start_offset = tok["start"]
             start_line = tok["line"] - val.count('\n')
             
+            # Fast path for tokens without entities
+            if not any(ent in val for ent in ("&gt;", "&lt;", "&amp;", "&quot;", "&apos;")):
+                len_val = len(val)
+                expanded_chars.extend(val)
+                mapping.extend(range(start_offset, start_offset + len_val))
+                
+                after = False
+                if state["last_tag_type"] in ("if", "choose", "when", "otherwise", "include", "case"):
+                    after = True
+                is_after_tag.extend([after] * len_val)
+                
+                if tok["type"] == "TEXT":
+                    state["last_tag_type"] = None
+                
+                i += 1
+                continue
+
             entity_map = {
                 "&gt;": ">",
                 "&lt;": "<",
@@ -267,6 +288,24 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                         i = close_end_idx + 1
                         continue
         i += 1
+def get_element_base_indent(el: dict, tokens: List[dict], content: str, rule_config: Dict[str, Any]) -> str:
+    tag_start_offset = el.get("start_offset", 0)
+    line_start = content.rfind("\n", 0, tag_start_offset) + 1
+    tag_line_prefix = content[line_start:tag_start_offset]
+    tag_indent = ""
+    for char in tag_line_prefix:
+        if char in (" ", "\t"):
+            tag_indent += char
+        else:
+            break
+            
+    xml_indent_config = rule_config.get("_all_configs", {}).get("IR-xml-indent", {})
+    if isinstance(xml_indent_config, bool):
+        xml_indent_size = 4
+    else:
+        xml_indent_size = xml_indent_config.get("indent_size", 4)
+        
+    return tag_indent + " " * xml_indent_size
 
 class XmlMybatisSqlRule(BaseRule):
     rule_id = "IR-xml-mybatis-sql"
@@ -285,20 +324,19 @@ class XmlMybatisSqlRule(BaseRule):
         },
         {
             "violating": '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT id\n            , name\n        FROM users\n        <if test="distinct">\n            , distinct_val\n        </if>\n    </select>\n</mapper>',
-            "correct": '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT id,\n             name\n        FROM users\n        <if test="distinct">\n            , distinct_val\n        </if>\n    </select>\n</mapper>'
+            "correct": '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT id,\n            name\n        FROM users\n        <if test="distinct">\n            , distinct_val\n        </if>\n    </select>\n</mapper>'
         }
     ]
     additional_validations = [
         '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT my_column FROM my_schema.my_table t\n    </select>\n</mapper>',
-        '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT id,\n             name\n        FROM users\n        <if test="distinct">\n            , distinct_val\n        </if>\n    </select>\n</mapper>'
+        '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT id,\n            name\n        FROM users\n        <if test="distinct">\n            , distinct_val\n        </if>\n    </select>\n</mapper>'
     ]
 
     def __init__(self) -> None:
         super().__init__()
-        # Exclude structure-level and layout-level rules
+        # Exclude structural/layout rules that can modify query token-to-line boundaries, but ALLOW indentation/alignment rules
         self.excluded_rule_ids = {
-            "IR-indent", "IR-eof-newline", "IR-trailing-semicolon", 
-            "IR-statement-semicolon", "IR-clause-alignment", 
+            "IR-eof-newline", "IR-trailing-semicolon", "IR-statement-semicolon",
             "IR-blank-lines", "IR-statement-blank-lines",
             "IR-from-multi", "IR-from-single", "IR-from-paren-layout",
             "IR-where-multi", "IR-where-single", "IR-column-layout",
@@ -306,11 +344,12 @@ class XmlMybatisSqlRule(BaseRule):
             "IR-table-field-spacing", "IR-trigger-layout", "IR-create-view-indent",
             "IR-function-body-indent", "IR-function-header-layout", "IR-raise-layout",
             "IR-plpgsql-block-indent", "IR-update-layout", "IR-case-layout",
-            "IR-join-on-multi", "IR-cte-format", "IR-expression-split",
-            "IR-paren-content-indent", "IR-case", "IR-paren-multi",
+            "IR-join-on-multi", "IR-cte-format",
+            "IR-paren-content-indent", "IR-paren-multi",
             "IR-paren-single", "IR-join-parens", "IR-union-layout"
         }
         self.sql_rules = None
+        self._expansion_cache = {}
 
     def _is_mybatis_file(self, content: str) -> bool:
         lower_content = content.lower()
@@ -333,14 +372,27 @@ class XmlMybatisSqlRule(BaseRule):
                     sql_defs[sql_id.split(".")[-1]] = el["inner_tokens"]
 
         violations = []
-        target_tags = {"select", "insert", "update", "delete"}
+        target_tags = {"select", "insert", "update", "delete", "sql"}
 
+        lines_filter = rule_config.get("_lines")
         for el in elements:
             if el["tag"] in target_tags and "id" in el["attrs"]:
-                expanded_chars = []
-                mapping = []
-                is_after_tag = []
-                expand_tokens(el["inner_tokens"], sql_defs, expanded_chars, mapping, is_after_tag)
+                if lines_filter:
+                    start_line = content[:el["start_offset"]].count('\n') + 1
+                    end_tok = tokens[el["end_idx"]]
+                    end_line = content[:end_tok["end"]].count('\n') + 1
+                    if not any(l in lines_filter for l in range(start_line, end_line + 1)):
+                        continue
+
+                cache_key = (id(content), el["start_offset"])
+                if cache_key in self._expansion_cache:
+                    expanded_chars, mapping, is_after_tag = self._expansion_cache[cache_key]
+                else:
+                    expanded_chars = []
+                    mapping = []
+                    is_after_tag = []
+                    expand_tokens(el["inner_tokens"], sql_defs, expanded_chars, mapping, is_after_tag)
+                    self._expansion_cache[cache_key] = (expanded_chars, mapping, is_after_tag)
                 sql_text = "".join(expanded_chars)
                 
                 if not sql_text.strip():
@@ -351,14 +403,23 @@ class XmlMybatisSqlRule(BaseRule):
                     if char == "," and idx < len(is_after_tag) and is_after_tag[idx]:
                         ignored_comma_offsets.add(idx)
                         
+                base_indent = get_element_base_indent(el, tokens, content, rule_config)
+                
+                inner_config = dict(rule_config)
+                if "_lines" in inner_config:
+                    del inner_config["_lines"]
+
                 embedded_violations = check_embedded_content(
                     guest_language="sql",
                     guest_text=sql_text,
                     mapping=mapping,
                     file_path=file_path,
-                    rule_config=rule_config,
+                    rule_config=inner_config,
                     excluded_rule_ids=self.excluded_rule_ids,
-                    extra_check_args={"ignored_comma_offsets": ignored_comma_offsets}
+                    extra_check_args={
+                        "ignored_comma_offsets": ignored_comma_offsets,
+                        "base_indent": base_indent
+                    }
                 )
                 
                 for ev in embedded_violations:
@@ -397,9 +458,14 @@ class XmlMybatisSqlRule(BaseRule):
             return content
 
         tokens = tokenize_xml(content)
+        tag_ranges = []
+        for tok in tokens:
+            if tok["type"] not in ("TEXT", "WHITESPACE"):
+                tag_ranges.append((tok["start"], tok["end"]))
+
         root_elements = parse_xml_elements(tokens)
         elements = get_all_elements_recursively(root_elements)
-        # Build sql_defs mapping local SQL ids
+
         sql_defs = {}
         for el in elements:
             if el["tag"] == "sql" and "id" in el["attrs"]:
@@ -408,15 +474,28 @@ class XmlMybatisSqlRule(BaseRule):
                 if "." in sql_id:
                     sql_defs[sql_id.split(".")[-1]] = el["inner_tokens"]
 
-        target_tags = {"select", "insert", "update", "delete"}
+        target_tags = {"select", "insert", "update", "delete", "sql"}
         all_xml_edits = []
+        lines_filter = rule_config.get("_lines")
 
         for el in elements:
             if el["tag"] in target_tags and "id" in el["attrs"]:
-                expanded_chars = []
-                mapping = []
-                is_after_tag = []
-                expand_tokens(el["inner_tokens"], sql_defs, expanded_chars, mapping, is_after_tag)
+                if lines_filter:
+                    start_line = content[:el["start_offset"]].count('\n') + 1
+                    end_tok = tokens[el["end_idx"]]
+                    end_line = content[:end_tok["end"]].count('\n') + 1
+                    if not any(l in lines_filter for l in range(start_line, end_line + 1)):
+                        continue
+
+                cache_key = (id(content), el["start_offset"])
+                if cache_key in self._expansion_cache:
+                    expanded_chars, mapping, is_after_tag = self._expansion_cache[cache_key]
+                else:
+                    expanded_chars = []
+                    mapping = []
+                    is_after_tag = []
+                    expand_tokens(el["inner_tokens"], sql_defs, expanded_chars, mapping, is_after_tag)
+                    self._expansion_cache[cache_key] = (expanded_chars, mapping, is_after_tag)
                 sql_text = "".join(expanded_chars)
                 
                 if not sql_text.strip():
@@ -427,21 +506,31 @@ class XmlMybatisSqlRule(BaseRule):
                     if char == "," and idx < len(is_after_tag) and is_after_tag[idx]:
                         ignored_comma_offsets.add(idx)
                         
+                base_indent = get_element_base_indent(el, tokens, content, rule_config)
+                
+                inner_config = dict(rule_config)
+                if "_lines" in inner_config:
+                    del inner_config["_lines"]
+
+                from mir.engine.embedded_bridge import fix_embedded_content
                 edits = fix_embedded_content(
                     guest_language="sql",
                     guest_text=sql_text,
                     mapping=mapping,
                     file_path=file_path,
-                    rule_config=rule_config,
+                    rule_config=inner_config,
                     excluded_rule_ids=self.excluded_rule_ids,
-                    extra_fix_args={"ignored_comma_offsets": ignored_comma_offsets}
+                    extra_fix_args={
+                        "ignored_comma_offsets": ignored_comma_offsets,
+                        "base_indent": base_indent,
+                        "tag_ranges": tag_ranges
+                    }
                 )
                 all_xml_edits.extend(edits)
 
         if not all_xml_edits:
             return content
 
-        # Deduplicate identical edits
         seen_edits = set()
         unique_edits = []
         for start, end, replacement in all_xml_edits:
@@ -450,7 +539,6 @@ class XmlMybatisSqlRule(BaseRule):
                 seen_edits.add(key)
                 unique_edits.append((start, end, replacement))
 
-        # Resolve overlapping edits (including multiple insertions at the same point)
         unique_edits.sort(key=lambda x: (x[0], x[1]))
         resolved_edits = []
         last_end = -1
@@ -464,7 +552,6 @@ class XmlMybatisSqlRule(BaseRule):
                     resolved_edits.append((start, end, replacement))
                     last_end = end
 
-        # Apply edits in reverse order
         resolved_edits.sort(key=lambda x: x[0], reverse=True)
         chars = list(content)
         for start, end, new_text in resolved_edits:

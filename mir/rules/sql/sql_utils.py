@@ -668,6 +668,11 @@ def is_values_multi(tokens: List[dict], open_idx: int) -> bool:
         return True
     return False
 
+import functools
+
+@functools.lru_cache(maxsize=4096)
+def _tokenize_sql_cached(content: str) -> List[dict]:
+    return _tokenize_sql_impl(content)
+
 def tokenize_sql(content: str) -> List[dict]:
-    res = _tokenize_sql_impl(content)
-    return [d.copy() for d in res]
+    return _tokenize_sql_cached(content)

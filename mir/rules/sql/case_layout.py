@@ -157,6 +157,14 @@ class CaseLayoutRule(BaseRule):
                 needs_fix = True
             else:
                 rebuilt_parts.append("CASE")
+
+            if len(parts) > 0 and parts[0][0]["value"].upper() == "CASE":
+                case_tokens = tokens[parts[0][1]:parts[0][2]]
+                case_extra = "".join([t["value"] for t in case_tokens]).strip()
+                if case_extra:
+                    for line in case_extra.splitlines():
+                        if line.strip():
+                            rebuilt_parts.append(f"\n{case_indent}    {line.strip()}")
                 
             i_idx = 0
             while i_idx < len(parts):

@@ -108,14 +108,13 @@ class LineLengthRule(BaseRule):
         for idx, line in enumerate(lines, start=1):
             effective_len = len(line) - base_indent_spaces
             if effective_len > max_length:
-                is_comment = line.lstrip().startswith("--")
                 violations.append(
                     Violation(
                         rule_id=self.rule_id,
                         line_number=idx,
                         message=f"Line exceeds maximum length of {max_length} characters (actual effective length: {effective_len}, total length: {len(line)}).",
                         offending_lines=[line],
-                        is_fixable=is_comment
+                        is_fixable=True
                     )
                 )
                 
@@ -123,6 +122,113 @@ class LineLengthRule(BaseRule):
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
         max_length = rule_config.get("max_length", self.default_config["max_length"])
+        
+        # 1. Run function call splitting on SQL code lines
+        from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren
+        try:
+            tokens = tokenize_sql(content)
+            lines = content.splitlines()
+            
+            # Find all function calls
+            all_calls = []
+            for i, tok in enumerate(tokens):
+                if tok["type"] in ("IDENTIFIER", "KEYWORD"):
+                    next_act_idx = None
+                    for j in range(i + 1, len(tokens)):
+                        if tokens[j]["type"] not in ("WHITESPACE", "COMMENT"):
+                            next_act_idx = j
+                            break
+                    if next_act_idx is not None and tokens[next_act_idx]["type"] == "PAREN" and tokens[next_act_idx]["value"] == "(":
+                        open_idx = next_act_idx
+                        close_idx = find_matching_paren(tokens, open_idx)
+                        if close_idx is not None:
+                            all_calls.append({
+                                "start": tokens[open_idx]["start"],
+                                "end": tokens[close_idx]["end"],
+                                "open_idx": open_idx,
+                                "close_idx": close_idx,
+                                "name_token": tok
+                            })
+                            
+            # Filter out nested calls
+            outer_calls = []
+            for i, call_a in enumerate(all_calls):
+                is_nested = False
+                for j, call_b in enumerate(all_calls):
+                    if i != j:
+                        if call_b["start"] <= call_a["start"] and call_a["end"] <= call_b["end"]:
+                            is_nested = True
+                            break
+                if not is_nested:
+                    outer_calls.append(call_a)
+                    
+            # Generate edits for long lines
+            edits = []
+            indent_size = 4
+            all_configs = rule_config.get("_all_configs", {})
+            lang = rule_config.get("_lang")
+            indent_config = all_configs.get(f"{lang}:IR-indent", all_configs.get("IR-indent", {}))
+            if isinstance(indent_config, dict):
+                indent_size = indent_config.get("indent_size", 4)
+                
+            for call in outer_calls:
+                line_idx = call["name_token"]["line"] - 1
+                line = lines[line_idx] if line_idx < len(lines) else ""
+                if len(line) > max_length:
+                    # Parse arguments
+                    args = []
+                    current_arg = []
+                    depth = 0
+                    for k in range(call["open_idx"] + 1, call["close_idx"]):
+                        t = tokens[k]
+                        if t["type"] == "PAREN" and t["value"] == "(":
+                            depth += 1
+                            current_arg.append(t)
+                        elif t["type"] == "PAREN" and t["value"] == ")":
+                            depth -= 1
+                            current_arg.append(t)
+                        elif t["type"] == "COMMA" and depth == 0:
+                            args.append(current_arg)
+                            current_arg = []
+                        else:
+                            current_arg.append(t)
+                    if current_arg or not args:
+                        args.append(current_arg)
+                        
+                    arg_strings = []
+                    for a_toks in args:
+                        if a_toks:
+                            s = a_toks[0]["start"]
+                            e = a_toks[-1]["end"]
+                            arg_strings.append(content[s:e].strip())
+                    arg_strings = [s for s in arg_strings if s]
+                    
+                    if arg_strings:
+                        indent = ""
+                        for char in line:
+                            if char in (" ", "\t"):
+                                indent += char
+                            else:
+                                break
+                        arg_indent = indent + " " * indent_size
+                        
+                        replacement = "(\n"
+                        for idx, arg_str in enumerate(arg_strings):
+                            comma = "," if idx < len(arg_strings) - 1 else ""
+                            replacement += arg_indent + arg_str + comma + "\n"
+                        replacement += indent + ")"
+                        
+                        edits.append((call["start"], call["end"], replacement))
+                        
+            if edits:
+                chars = list(content)
+                for s, e, rep in sorted(edits, key=lambda x: x[0], reverse=True):
+                    chars[s:e] = list(rep)
+                content = "".join(chars)
+        except Exception:
+            pass
+            
+        # 2. Wrap comment lines (original logic)
         lines = content.splitlines()
         fixed_lines = []
         for line in lines:

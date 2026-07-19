@@ -1,7 +1,7 @@
 import os
 import argparse
 import yaml
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 
 from mir.engine.rules_help import handle_rule_help
 
@@ -25,6 +25,8 @@ class Config:
         self.quiet: bool = False
         self.warnings_only: bool = False
         self.no_warnings: bool = False
+        self.lines: Set[int] = set()
+        self.lines_spec: Optional[str] = None
 
 def load_config(args_list: Optional[List[str]] = None) -> Config:
     # 1. Parse CLI arguments first to check for config path, flags, and targets
@@ -59,6 +61,7 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     parser.add_argument("-q", "--quiet", action="store_true", default=None, help="Quiet mode (no output, just set appropriate exit code)")
     parser.add_argument("--warnings-only", action="store_true", default=None, help="Only show warnings")
     parser.add_argument("--no-warnings", action="store_true", default=None, help="Hide all warnings")
+    parser.add_argument("--lines", help="Only lint/fix specified line numbers or line ranges (e.g. '10', '10-20', '10-20,30,40-50')")
     
     parsed_args = parser.parse_args(args_list)
     
@@ -236,8 +239,37 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     else:
         config.no_warnings = file_config.get("no_warnings", False)
         
+    # -- lines --
+    if parsed_args.lines:
+        config.lines_spec = parsed_args.lines
+        config.lines = parse_line_ranges(parsed_args.lines)
+        
     # 5. Handle rule help AFTER config resolution so that include_dirs and rule_mode are resolved
     if parsed_args.help is not None:
         handle_rule_help(parsed_args.help, parser, config.include_dirs, config.rule_mode)
         
     return config
+
+def parse_line_ranges(spec: str) -> Set[int]:
+    from typing import Set
+    lines = set()
+    if not spec:
+        return lines
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            try:
+                start_s, end_s = part.split("-", 1)
+                start = int(start_s.strip())
+                end = int(end_s.strip())
+                lines.update(range(start, end + 1))
+            except ValueError:
+                pass
+        else:
+            try:
+                lines.add(int(part))
+            except ValueError:
+                pass
+    return lines

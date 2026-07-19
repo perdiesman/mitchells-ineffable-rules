@@ -42,6 +42,10 @@ class ExpressionSplitRule(BaseRule):
 
     def _get_edits(self, content: str, max_len: int) -> List[tuple]:
         tokens = tokenize_sql(content)
+        token_to_index = {id(t): idx for idx, t in enumerate(tokens)}
+        def get_index(t):
+            return token_to_index[id(t)]
+
         depths = get_token_depths(tokens)
         lines = content.splitlines()
         edits = []
@@ -56,7 +60,7 @@ class ExpressionSplitRule(BaseRule):
             is_line_val_multi = False
             for t in active_tokens:
                 if t["type"] == "PAREN" and t["value"] == "(":
-                    o_idx = tokens.index(t)
+                    o_idx = get_index(t)
                     if is_values_multi(tokens, o_idx):
                         is_line_val_multi = True
                         break
@@ -72,7 +76,7 @@ class ExpressionSplitRule(BaseRule):
             open_tok = None
             for t in active_tokens:
                 if t["type"] == "PAREN" and t["value"] == "(":
-                    idx = tokens.index(t)
+                    idx = get_index(t)
                     close_idx = find_matching_paren(tokens, idx)
                     if close_idx is not None:
                         active_between = [
@@ -89,7 +93,7 @@ class ExpressionSplitRule(BaseRule):
                                 break
                             
             if open_tok:
-                open_idx = tokens.index(open_tok)
+                open_idx = get_index(open_tok)
                 close_idx = find_matching_paren(tokens, open_idx)
                 if close_idx is not None:
                     # Detect if the parenthesis is function-like
@@ -209,7 +213,7 @@ class ExpressionSplitRule(BaseRule):
                                 targets = [(t, "operator") for t in operators]
                                 
                             for op, t_type in targets:
-                                op_idx = tokens.index(op)
+                                op_idx = get_index(op)
                                 if t_type == "keyword":
                                     ws_before = None
                                     if op_idx - 1 >= 0 and tokens[op_idx - 1]["type"] == "WHITESPACE":
@@ -237,7 +241,7 @@ class ExpressionSplitRule(BaseRule):
             # Case 2: Split on operators/keywords/commas
             # Find enclosing parenthesis active at this line
             enclosing_open = None
-            first_tok_idx = tokens.index(active_tokens[0])
+            first_tok_idx = get_index(active_tokens[0])
             for idx in range(first_tok_idx - 1, -1, -1):
                 t = tokens[idx]
                 if t["type"] == "PAREN" and t["value"] == "(":
@@ -247,7 +251,7 @@ class ExpressionSplitRule(BaseRule):
                         break
                         
             if enclosing_open:
-                eo_idx = tokens.index(enclosing_open)
+                eo_idx = get_index(enclosing_open)
                 base_depth = depths[eo_idx] + 1
                 
                 prev_tok_eo = None
@@ -280,7 +284,7 @@ class ExpressionSplitRule(BaseRule):
             commas = []
             operators = []
             for t in active_tokens[:-1]:
-                t_idx = tokens.index(t)
+                t_idx = get_index(t)
                 if depths[t_idx] == base_depth:
                     if t["type"] == "OPERATOR" and t["value"] in ("+", "-", "||", "*", "/"):
                         operators.append(t)
@@ -309,7 +313,7 @@ class ExpressionSplitRule(BaseRule):
                 
             if targets:
                 for op, t_type in targets:
-                    op_idx = tokens.index(op)
+                    op_idx = get_index(op)
                     if t_type == "keyword":
                         ws_before = None
                         if op_idx - 1 >= 0 and tokens[op_idx - 1]["type"] == "WHITESPACE":
