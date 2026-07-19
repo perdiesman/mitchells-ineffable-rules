@@ -143,19 +143,56 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
             val = tok["value"]
             start_offset = tok["start"]
             start_line = tok["line"] - val.count('\n')
-            for offset_in_val, char in enumerate(val):
-                expanded_chars.append(char)
-                mapping.append(start_offset + offset_in_val)
-                
-                after = False
-                if state["last_tag_type"] in ("if", "choose", "when", "otherwise", "include", "case"):
-                    char_line = start_line + val[:offset_in_val].count('\n')
-                    if char_line <= state["last_tag_line"] + 1:
-                        after = True
-                is_after_tag.append(after)
-                
-                if char not in " \t\r\n," and after:
-                    state["last_tag_type"] = None
+            
+            entity_map = {
+                "&gt;": ">",
+                "&lt;": "<",
+                "&amp;": "&",
+                "&quot;": '"',
+                "&apos;": "'"
+            }
+            
+            offset_in_val = 0
+            len_val = len(val)
+            while offset_in_val < len_val:
+                matched_entity = None
+                for ent, dec in entity_map.items():
+                    if val[offset_in_val:offset_in_val + len(ent)] == ent:
+                        matched_entity = (ent, dec)
+                        break
+                        
+                if matched_entity:
+                    ent_str, dec_char = matched_entity
+                    expanded_chars.append(dec_char)
+                    mapping.append(start_offset + offset_in_val)
+                    
+                    after = False
+                    if state["last_tag_type"] in ("if", "choose", "when", "otherwise", "include", "case"):
+                        char_line = start_line + val[:offset_in_val].count('\n')
+                        if char_line <= state["last_tag_line"] + 1:
+                            after = True
+                    is_after_tag.append(after)
+                    
+                    if dec_char not in " \t\r\n," and after:
+                        state["last_tag_type"] = None
+                        
+                    offset_in_val += len(ent_str)
+                else:
+                    char = val[offset_in_val]
+                    expanded_chars.append(char)
+                    mapping.append(start_offset + offset_in_val)
+                    
+                    after = False
+                    if state["last_tag_type"] in ("if", "choose", "when", "otherwise", "include", "case"):
+                        char_line = start_line + val[:offset_in_val].count('\n')
+                        if char_line <= state["last_tag_line"] + 1:
+                            after = True
+                    is_after_tag.append(after)
+                    
+                    if char not in " \t\r\n," and after:
+                        state["last_tag_type"] = None
+                        
+                    offset_in_val += 1
             i += 1
             continue
             

@@ -585,5 +585,25 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("[WARN] IR-in-exists", captured_stdout.getvalue())
 
+    def test_xml_mybatis_sql_entities(self):
+        # A select query with &gt; entity inside the XML content
+        xml_content = '<?xml version="1.0" encoding="UTF-8"?>\n<mapper namespace="MyMapper">\n    <select id="query">\n        SELECT id FROM t WHERE id &gt; 10\n    </select>\n</mapper>'
+        path = self.write_temp_file("test_entities.xml", xml_content)
+
+        config = Config()
+        config.paths = [path]
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-mybatis-sql", "IR-alias-as"]
+        config.fix = True
+
+        exit_code = run_linter(config)
+        self.assertEqual(exit_code, 0)
+
+        # The XML file must remain intact and not have "AS" inserted inside "&gt;"
+        with open(path, "r") as f:
+            content = f.read()
+            self.assertIn("id &gt; 10", content)
+            self.assertNotIn("&AS gt;", content)
+
 if __name__ == "__main__":
     unittest.main()
