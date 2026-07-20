@@ -77,20 +77,31 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
                     clean_line = clean_line.split("--", 1)[0]
                 clean_line = clean_line.strip()
                 if clean_line:
-                    last_char = clean_line[-1]
-                    last_word = ""
-                    words = clean_line.split()
-                    if words:
-                        last_word = words[-1].upper()
-                        
-                    extra_indent_keywords = {
-                        "FROM", "WHERE", "SELECT", "HAVING", "ON", "USING", "VALUES", "SET", 
-                        "AND", "OR", "JOIN", "LEFT", "RIGHT", "INNER", "CROSS", "FULL", "WITH",
-                        "CASE", "THEN", "ELSE", "BEGIN", "EXCEPTION",
-                        "(", "+", "-", "*", "/", "||", ","
-                    }
-                    if last_char in extra_indent_keywords or last_word in extra_indent_keywords:
+                    ends_with_opening_tag = False
+                    if clean_line.endswith(">"):
+                        last_open = clean_line.rfind("<")
+                        if last_open != -1:
+                            tag_str = clean_line[last_open:]
+                            if not tag_str.startswith("</") and not tag_str.endswith("/>") and not tag_str.startswith("<!--") and not tag_str.startswith("<?") and not tag_str.startswith("<!"):
+                                ends_with_opening_tag = True
+                                
+                    if ends_with_opening_tag:
                         target_indent += " " * indent_size
+                    else:
+                        last_char = clean_line[-1]
+                        last_word = ""
+                        words = clean_line.split()
+                        if words:
+                            last_word = words[-1].upper()
+                            
+                        extra_indent_keywords = {
+                            "FROM", "WHERE", "SELECT", "HAVING", "ON", "USING", "VALUES", "SET", 
+                            "AND", "OR", "JOIN", "LEFT", "RIGHT", "INNER", "CROSS", "FULL", "WITH",
+                            "CASE", "THEN", "ELSE", "BEGIN", "EXCEPTION",
+                            "(", "+", "-", "*", "/", "||", ","
+                        }
+                        if last_char in extra_indent_keywords or last_word in extra_indent_keywords:
+                            target_indent += " " * indent_size
             break
             
     if target_indent is None:
