@@ -361,9 +361,17 @@ class XmlMybatisSqlRule(BaseRule):
 
         tokens = tokenize_xml(content)
         tag_ranges = []
+        in_tag = False
+        tag_start = None
         for tok in tokens:
-            if tok["type"] in ("TAG_OPEN_START", "TAG_CLOSE_START", "TAG_OPEN_END", "TAG_CLOSE_END", "TAG_EMPTY_END"):
-                tag_ranges.append((tok["start"], tok["end"]))
+            if tok["type"] in ("TAG_OPEN_START", "TAG_CLOSE_START", "XML_DECL_START", "DOCTYPE_START", "COMMENT_START"):
+                if not in_tag:
+                    in_tag = True
+                    tag_start = tok["start"]
+            elif tok["type"] in ("TAG_END", "XML_DECL_END", "DOCTYPE_END", "COMMENT_END"):
+                if in_tag:
+                    tag_ranges.append((tag_start, tok["end"]))
+                    in_tag = False
         root_elements = parse_xml_elements(tokens)
         elements = get_all_elements_recursively(root_elements)
 
@@ -465,9 +473,17 @@ class XmlMybatisSqlRule(BaseRule):
 
         tokens = tokenize_xml(content)
         tag_ranges = []
+        in_tag = False
+        tag_start = None
         for tok in tokens:
-            if tok["type"] not in ("TEXT", "WHITESPACE"):
-                tag_ranges.append((tok["start"], tok["end"]))
+            if tok["type"] in ("TAG_OPEN_START", "TAG_CLOSE_START", "XML_DECL_START", "DOCTYPE_START", "COMMENT_START"):
+                if not in_tag:
+                    in_tag = True
+                    tag_start = tok["start"]
+            elif tok["type"] in ("TAG_END", "XML_DECL_END", "DOCTYPE_END", "COMMENT_END"):
+                if in_tag:
+                    tag_ranges.append((tag_start, tok["end"]))
+                    in_tag = False
 
         root_elements = parse_xml_elements(tokens)
         elements = get_all_elements_recursively(root_elements)

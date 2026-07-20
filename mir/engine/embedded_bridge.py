@@ -137,60 +137,92 @@ def is_fixed_text_xml_safe(original_xml: str, tag_ranges: List[Tuple[int, int]],
     sorted_edits_asc = sorted(edits, key=lambda x: x[0])
     structural_chars = {",", "(", ")", "+", "-", "*", "/", "=", "<", ">", "!", "|", "&", ";", "."}
     
-    # 1. Build original tokens
-    tag_starts = {t_start: idx for idx, (t_start, t_end) in enumerate(tag_ranges)}
-    orig_tokens = []
-    i = 0
-    n = len(original_xml)
-    while i < n:
-        if i in tag_starts:
-            tag_idx = tag_starts[i]
-            orig_tokens.append(("TAG", tag_idx))
-            i = tag_ranges[tag_idx][1]
-        else:
-            char = original_xml[i]
-            if char in structural_chars:
-                orig_tokens.append(("CHAR", char))
-            i += 1
-            
-    # 2. Apply edits to get fixed_xml
+    # 1. Apply edits to get fixed_xml
     chars = list(original_xml)
     sorted_edits_desc = sorted(edits, key=lambda x: x[0], reverse=True)
     for start, end, new_text in sorted_edits_desc:
         chars[start:end] = list(new_text)
     fixed_xml = "".join(chars)
     
-    # 3. Compute new tag offsets in fixed_xml
-    def get_new_offset(pos):
+    # 2. Compute new tag offsets in fixed_xml
+    def get_new_offset(pos, is_end=False):
         shift = 0
         for start, end, new_text in sorted_edits_asc:
-            if pos <= start:
-                break
+            if is_end:
+                if pos <= start:
+                    break
+            else:
+                if pos < start:
+                    break
             shift += len(new_text) - (end - start)
         return pos + shift
         
     fixed_tag_ranges = []
     for t_start, t_end in tag_ranges:
-        fixed_tag_ranges.append((get_new_offset(t_start), get_new_offset(t_end)))
+        fixed_tag_ranges.append((get_new_offset(t_start, False), get_new_offset(t_end, True)))
         
-    fixed_tag_starts = {f_start: idx for idx, (f_start, f_end) in enumerate(fixed_tag_ranges)}
-    
-    # 4. Build fixed tokens
-    fixed_tokens = []
-    i = 0
-    n_fixed = len(fixed_xml)
-    while i < n_fixed:
-        if i in fixed_tag_starts:
-            tag_idx = fixed_tag_starts[i]
-            fixed_tokens.append(("TAG", tag_idx))
-            i = fixed_tag_ranges[tag_idx][1]
+    def get_zone(pos, t_start, t_end):
+        if pos < t_start:
+            return 0
+        elif pos >= t_end:
+            return 2
         else:
-            char = fixed_xml[i]
-            if char in structural_chars:
-                fixed_tokens.append(("CHAR", char))
-            i += 1
+            return 1
             
-    return orig_tokens == fixed_tokens
+    # Check each structural character type for crossing migrations
+    for char_type in structural_chars:
+        orig_offsets = []
+        for idx, c in enumerate(original_xml):
+            if c == char_type:
+                orig_offsets.append(idx)
+                
+        fixed_offsets = []
+        for idx, c in enumerate(fixed_xml):
+            if c == char_type:
+                fixed_offsets.append(idx)
+                
+        for tag_idx, (t_start, t_end) in enumerate(tag_ranges):
+            t_start_new, t_end_new = fixed_tag_ranges[tag_idx]
+            
+            orig_left = sum(1 for pos in orig_offsets if pos < t_start)
+            orig_inside = sum(1 for pos in orig_offsets if t_start <= pos < t_end)
+            
+            fixed_left = sum(1 for pos in fixed_offsets if pos < t_start_new)
+            fixed_inside = sum(1 for pos in fixed_offsets if t_start_new <= pos < t_end_new)
+            
+            del_left = 0
+            ins_left = 0
+            del_inside = 0
+            ins_inside = 0
+            total_del_char = 0
+            total_ins_char = 0
+            
+            for start, end, replacement in edits:
+                del_cnt = sum(1 for c in original_xml[start:end] if c == char_type)
+                ins_cnt = sum(1 for c in replacement if c == char_type)
+                
+                total_del_char += del_cnt
+                total_ins_char += ins_cnt
+                
+                if end <= t_start:
+                    del_left += del_cnt
+                    ins_left += ins_cnt
+                elif start >= t_end:
+                    pass
+                else:
+                    del_inside += del_cnt
+                    ins_inside += ins_cnt
+                    
+            if total_del_char == total_ins_char:
+                if fixed_left != orig_left or fixed_inside != orig_inside:
+                    return False
+            else:
+                expected_left = orig_left - del_left + ins_left
+                expected_inside = orig_inside - del_inside + ins_inside
+                if fixed_left != expected_left or fixed_inside != expected_inside:
+                    return False
+                                
+    return True
 
 def fix_embedded_content(
     guest_language: str,
