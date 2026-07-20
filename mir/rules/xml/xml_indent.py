@@ -70,6 +70,27 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
                     break
             if len(line_indent) >= query_tag_indent_size:
                 target_indent = line_indent
+                
+                # Check for extra indentation triggers at the end of the line
+                clean_line = line_text
+                if "--" in clean_line:
+                    clean_line = clean_line.split("--", 1)[0]
+                clean_line = clean_line.strip()
+                if clean_line:
+                    last_char = clean_line[-1]
+                    last_word = ""
+                    words = clean_line.split()
+                    if words:
+                        last_word = words[-1].upper()
+                        
+                    extra_indent_keywords = {
+                        "FROM", "WHERE", "SELECT", "HAVING", "ON", "USING", "VALUES", "SET", 
+                        "AND", "OR", "JOIN", "LEFT", "RIGHT", "INNER", "CROSS", "FULL", "WITH",
+                        "CASE", "THEN", "ELSE", "BEGIN", "EXCEPTION",
+                        "(", "+", "-", "*", "/", "||", ","
+                    }
+                    if last_char in extra_indent_keywords or last_word in extra_indent_keywords:
+                        target_indent += " " * indent_size
             break
             
     if target_indent is None:
