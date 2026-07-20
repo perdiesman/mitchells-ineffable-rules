@@ -181,7 +181,9 @@ class TestRunnerIntegration(unittest.TestCase):
         config2.paths = [path2]
         config2.rule_configs = {
             "sql:IR-line-length": {"max_length": 20},
-            "sql:IR-column-layout": {"max_length": 100}
+            "sql:IR-column-layout": {"max_length": 100},
+            "sql:IR-expression-split": {"max_length": 100},
+            "sql:IR-clause-alignment": {"max_length": 100}
         }
         config2.fix = True
         run_linter(config2)
