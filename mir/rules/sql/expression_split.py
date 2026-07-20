@@ -1,6 +1,8 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths, find_matching_paren, is_values_multi
+from mir.rules.sql.line_length import LineLengthRule
+from mir.rules.sql.indent import IndentRule
 
 class ExpressionSplitRule(BaseRule):
     rule_id = "IR-expression-split"
@@ -15,7 +17,8 @@ class ExpressionSplitRule(BaseRule):
     config_options = {
         "max_line_length": {
             "default": 100,
-            "description": "Line length threshold above which long expressions will be split."
+            "description": "Line length threshold above which long expressions will be split.",
+            "fallback": "IR-line-length:max_length"
         }
     }
     
@@ -40,7 +43,7 @@ class ExpressionSplitRule(BaseRule):
         "INSERT INTO t (c) VALUES\n    (1),\n    (2);"
     ]
 
-    def _get_edits(self, content: str, max_len: int) -> List[tuple]:
+    def _get_edits(self, content: str, max_len: int, base_indent_spaces: int = 0) -> List[tuple]:
         tokens = tokenize_sql(content)
         token_to_index = {id(t): idx for idx, t in enumerate(tokens)}
         def get_index(t):
@@ -65,7 +68,7 @@ class ExpressionSplitRule(BaseRule):
                         is_line_val_multi = True
                         break
                         
-            if len(line) <= max_len and not is_line_val_multi:
+            if len(line) - base_indent_spaces <= max_len and not is_line_val_multi:
                 continue
                 
             # Find base indent
@@ -213,7 +216,7 @@ class ExpressionSplitRule(BaseRule):
                                 if tokens[k_before]["type"] not in ("WHITESPACE", "COMMENT")
                             ]
                             if active_between_before:
-                                if len(line) <= max_len:
+                                if len(line) - base_indent_spaces <= max_len:
                                     if is_values_multi(tokens, idx_before):
                                         prev = None
                                         for p_idx in range(idx_before - 1, -1, -1):
@@ -330,7 +333,7 @@ class ExpressionSplitRule(BaseRule):
                             # Check if we should also split operators/keywords/commas inside this parenthesis
                             base_depth_c1 = depths[open_idx] + 1
                             inner_str = "".join([tokens[idx_in]["value"] for idx_in in range(open_idx + 1, close_idx)]).strip()
-                            if len(content_indent_c1 + inner_str) > max_len:
+                            if len(content_indent_c1 + inner_str) - base_indent_spaces > max_len:
                                 keywords_c1 = []
                                 commas_c1 = []
                                 operators_c1 = []
@@ -413,10 +416,34 @@ class ExpressionSplitRule(BaseRule):
         return [e for e in edits if content[e[0]:e[1]] != e[2]]
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
-        max_len = rule_config.get("max_line_length", self.default_config["max_line_length"])
+        max_len = self.get_config_value(
+            rule_config,
+            "max_line_length",
+            default_value=100,
+            fallbacks=[(LineLengthRule, "max_length")]
+        )
+        base_indent_opt = self.get_config_value(
+            rule_config,
+            "base_indent",
+            default_value=0,
+            fallbacks=[(IndentRule, "base_indent")]
+        )
+        if isinstance(base_indent_opt, str):
+            indent_size = 4
+            all_configs = rule_config.get("_all_configs", {})
+            lang = rule_config.get("_lang")
+            indent_config = all_configs.get(f"{lang}:IR-indent", all_configs.get("IR-indent", {}))
+            if isinstance(indent_config, dict):
+                indent_size = indent_config.get("indent_size", 4)
+            base_indent_spaces = len(base_indent_opt.replace("\t", " " * indent_size))
+        elif isinstance(base_indent_opt, int):
+            base_indent_spaces = base_indent_opt
+        else:
+            base_indent_spaces = 0
+
         violations = []
         lines = content.splitlines()
-        edits = self._get_edits(content, max_len)
+        edits = self._get_edits(content, max_len, base_indent_spaces)
         
         reported_lines = set()
         for start, end, rep, line_no in edits:
@@ -432,10 +459,34 @@ class ExpressionSplitRule(BaseRule):
                     )
                 )
         return violations
-
+ 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        max_len = rule_config.get("max_line_length", self.default_config["max_line_length"])
-        edits = self._get_edits(content, max_len)
+        max_len = self.get_config_value(
+            rule_config,
+            "max_line_length",
+            default_value=100,
+            fallbacks=[(LineLengthRule, "max_length")]
+        )
+        base_indent_opt = self.get_config_value(
+            rule_config,
+            "base_indent",
+            default_value=0,
+            fallbacks=[(IndentRule, "base_indent")]
+        )
+        if isinstance(base_indent_opt, str):
+            indent_size = 4
+            all_configs = rule_config.get("_all_configs", {})
+            lang = rule_config.get("_lang")
+            indent_config = all_configs.get(f"{lang}:IR-indent", all_configs.get("IR-indent", {}))
+            if isinstance(indent_config, dict):
+                indent_size = indent_config.get("indent_size", 4)
+            base_indent_spaces = len(base_indent_opt.replace("\t", " " * indent_size))
+        elif isinstance(base_indent_opt, int):
+            base_indent_spaces = base_indent_opt
+        else:
+            base_indent_spaces = 0
+
+        edits = self._get_edits(content, max_len, base_indent_spaces)
         if not edits:
             return content
             
