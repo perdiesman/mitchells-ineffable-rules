@@ -360,6 +360,10 @@ class XmlMybatisSqlRule(BaseRule):
             return []
 
         tokens = tokenize_xml(content)
+        tag_ranges = []
+        for tok in tokens:
+            if tok["type"] in ("TAG_OPEN_START", "TAG_CLOSE_START", "TAG_OPEN_END", "TAG_CLOSE_END", "TAG_EMPTY_END"):
+                tag_ranges.append((tok["start"], tok["end"]))
         root_elements = parse_xml_elements(tokens)
         elements = get_all_elements_recursively(root_elements)
 
@@ -418,7 +422,9 @@ class XmlMybatisSqlRule(BaseRule):
                     excluded_rule_ids=self.excluded_rule_ids,
                     extra_check_args={
                         "ignored_comma_offsets": ignored_comma_offsets,
-                        "base_indent": base_indent
+                        "base_indent": base_indent,
+                        "tag_ranges": tag_ranges,
+                        "original_xml": content
                     }
                 )
                 
@@ -523,7 +529,8 @@ class XmlMybatisSqlRule(BaseRule):
                     extra_fix_args={
                         "ignored_comma_offsets": ignored_comma_offsets,
                         "base_indent": base_indent,
-                        "tag_ranges": tag_ranges
+                        "tag_ranges": tag_ranges,
+                        "original_xml": content
                     }
                 )
                 all_xml_edits.extend(edits)

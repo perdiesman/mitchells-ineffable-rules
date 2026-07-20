@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Tuple
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.engine.rules_loader import load_rules_for_language
+from mir.rules.sql.sql_utils import tokenize_sql
 import difflib
 
 def xml_encode(s: str) -> str:
@@ -88,6 +89,25 @@ def check_embedded_content(
         if extra_check_args:
             guest_rule_config.update(extra_check_args)
             
+        if rule.rule_id == "IR-comma-style":
+            ignored_comma_offsets = set()
+            tag_ranges = extra_check_args.get("tag_ranges") if extra_check_args else None
+            if tag_ranges and mapping:
+                tokens = tokenize_sql(guest_text)
+                active = [t for t in tokens if t["type"] not in ("WHITESPACE", "COMMENT")]
+                for a_idx, t in enumerate(active):
+                    if t["value"] == "," and a_idx > 0:
+                        prev_active = active[a_idx - 1]
+                        start_orig = mapping[prev_active["end"]] if prev_active["end"] < len(mapping) else mapping[-1]
+                        end_orig = mapping[t["start"]] if t["start"] < len(mapping) else mapping[-1]
+                        
+                        for t_start, t_end in tag_ranges:
+                            if max(start_orig, t_start) < min(end_orig, t_end):
+                                ignored_comma_offsets.add(t["start"])
+                                break
+            if ignored_comma_offsets:
+                guest_rule_config["ignored_comma_offsets"] = ignored_comma_offsets
+            
         try:
             sql_violations = rule.check(guest_text, file_path, guest_rule_config)
             for sv in sql_violations:
@@ -109,6 +129,68 @@ def check_embedded_content(
             pass
             
     return violations
+
+def is_fixed_text_xml_safe(original_xml: str, tag_ranges: List[Tuple[int, int]], edits: List[Tuple[int, int, str]]) -> bool:
+    if not tag_ranges:
+        return True
+        
+    sorted_edits_asc = sorted(edits, key=lambda x: x[0])
+    structural_chars = {",", "(", ")", "+", "-", "*", "/", "=", "<", ">", "!", "|", "&", ";", "."}
+    
+    # 1. Build original tokens
+    tag_starts = {t_start: idx for idx, (t_start, t_end) in enumerate(tag_ranges)}
+    orig_tokens = []
+    i = 0
+    n = len(original_xml)
+    while i < n:
+        if i in tag_starts:
+            tag_idx = tag_starts[i]
+            orig_tokens.append(("TAG", tag_idx))
+            i = tag_ranges[tag_idx][1]
+        else:
+            char = original_xml[i]
+            if char in structural_chars:
+                orig_tokens.append(("CHAR", char))
+            i += 1
+            
+    # 2. Apply edits to get fixed_xml
+    chars = list(original_xml)
+    sorted_edits_desc = sorted(edits, key=lambda x: x[0], reverse=True)
+    for start, end, new_text in sorted_edits_desc:
+        chars[start:end] = list(new_text)
+    fixed_xml = "".join(chars)
+    
+    # 3. Compute new tag offsets in fixed_xml
+    def get_new_offset(pos):
+        shift = 0
+        for start, end, new_text in sorted_edits_asc:
+            if pos <= start:
+                break
+            shift += len(new_text) - (end - start)
+        return pos + shift
+        
+    fixed_tag_ranges = []
+    for t_start, t_end in tag_ranges:
+        fixed_tag_ranges.append((get_new_offset(t_start), get_new_offset(t_end)))
+        
+    fixed_tag_starts = {f_start: idx for idx, (f_start, f_end) in enumerate(fixed_tag_ranges)}
+    
+    # 4. Build fixed tokens
+    fixed_tokens = []
+    i = 0
+    n_fixed = len(fixed_xml)
+    while i < n_fixed:
+        if i in fixed_tag_starts:
+            tag_idx = fixed_tag_starts[i]
+            fixed_tokens.append(("TAG", tag_idx))
+            i = fixed_tag_ranges[tag_idx][1]
+        else:
+            char = fixed_xml[i]
+            if char in structural_chars:
+                fixed_tokens.append(("CHAR", char))
+            i += 1
+            
+    return orig_tokens == fixed_tokens
 
 def fix_embedded_content(
     guest_language: str,
@@ -143,6 +225,25 @@ def fix_embedded_content(
             
             if extra_fix_args:
                 guest_rule_config.update(extra_fix_args)
+                
+            if rule.rule_id == "IR-comma-style":
+                ignored_comma_offsets = set()
+                tag_ranges = extra_fix_args.get("tag_ranges") if extra_fix_args else None
+                if tag_ranges and mapping:
+                    tokens = tokenize_sql(fixed_text)
+                    active = [t for t in tokens if t["type"] not in ("WHITESPACE", "COMMENT")]
+                    for a_idx, t in enumerate(active):
+                        if t["value"] == "," and a_idx > 0:
+                            prev_active = active[a_idx - 1]
+                            start_orig = mapping[prev_active["end"]] if prev_active["end"] < len(mapping) else mapping[-1]
+                            end_orig = mapping[t["start"]] if t["start"] < len(mapping) else mapping[-1]
+                            
+                            for t_start, t_end in tag_ranges:
+                                if max(start_orig, t_start) < min(end_orig, t_end):
+                                    ignored_comma_offsets.add(t["start"])
+                                    break
+                if ignored_comma_offsets:
+                    guest_rule_config["ignored_comma_offsets"] = ignored_comma_offsets
                 
             try:
                 fixed_text = rule.fix(fixed_text, file_path, guest_rule_config)
@@ -206,5 +307,11 @@ def fix_embedded_content(
 
                     if not skip:
                         edits.append((start_orig, end_orig, replacement))
+
+    if edits and extra_fix_args and "original_xml" in extra_fix_args and "tag_ranges" in extra_fix_args:
+        original_xml = extra_fix_args["original_xml"]
+        tag_ranges = extra_fix_args["tag_ranges"]
+        if not is_fixed_text_xml_safe(original_xml, tag_ranges, edits):
+            return []
 
     return edits
