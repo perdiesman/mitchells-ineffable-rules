@@ -285,7 +285,10 @@ def fix_embedded_content(
                     guest_rule_config["ignored_comma_offsets"] = ignored_comma_offsets
                 
             try:
+                prev_text = fixed_text
                 fixed_text = rule.fix(fixed_text, file_path, guest_rule_config)
+                if fixed_text != prev_text and extra_fix_args and "applied_rules" in extra_fix_args:
+                    extra_fix_args["applied_rules"].add(rule.rule_id)
             except Exception:
                 pass
                 
