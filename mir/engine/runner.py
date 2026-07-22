@@ -778,6 +778,7 @@ def run_linter(config: Config) -> int:
                     rules_to_fix = {item[1] for item in fixable}
                     for rule in rules_to_fix:
                         rule_config = resolve_rule_config(config, rule.rule_id, lang, detected_base_indent)
+                        rule_config["rules_fixed"] = rules_fixed
                         try:
                             new_content = run_rule_fix_recursively(rule, current_content, file_path, rule_config, lang)
                             if new_content != current_content:

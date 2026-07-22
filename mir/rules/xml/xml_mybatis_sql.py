@@ -534,6 +534,7 @@ class XmlMybatisSqlRule(BaseRule):
                 if "_lines" in inner_config:
                     del inner_config["_lines"]
 
+                applied_rules = set()
                 from mir.engine.embedded_bridge import fix_embedded_content
                 edits = fix_embedded_content(
                     guest_language="sql",
@@ -546,10 +547,15 @@ class XmlMybatisSqlRule(BaseRule):
                         "ignored_comma_offsets": ignored_comma_offsets,
                         "base_indent": base_indent,
                         "tag_ranges": tag_ranges,
-                        "original_xml": content
+                        "original_xml": content,
+                        "applied_rules": applied_rules
                     }
                 )
-                all_xml_edits.extend(edits)
+                if edits:
+                    all_xml_edits.extend(edits)
+                    rules_fixed_set = rule_config.get("rules_fixed")
+                    if rules_fixed_set is not None:
+                        rules_fixed_set.update(applied_rules)
 
         if not all_xml_edits:
             return content
