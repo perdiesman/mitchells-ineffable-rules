@@ -340,7 +340,7 @@ class XmlMybatisSqlRule(BaseRule):
             "IR-blank-lines", "IR-statement-blank-lines",
             "IR-from-multi", "IR-from-single", "IR-from-paren-layout",
             "IR-where-multi", "IR-where-single", "IR-column-layout",
-            "IR-subquery-indent", "IR-subquery-compact", "IR-dollar-quote-alignment",
+            "IR-subquery-compact", "IR-dollar-quote-alignment",
             "IR-table-field-spacing", "IR-trigger-layout", "IR-create-view-indent",
             "IR-function-body-indent", "IR-function-header-layout", "IR-raise-layout",
             "IR-plpgsql-block-indent", "IR-update-layout", "IR-case-layout",
@@ -438,6 +438,13 @@ class XmlMybatisSqlRule(BaseRule):
                 
                 for ev in embedded_violations:
                     abs_line = content[:ev["mapped_offset"]].count('\n') + 1
+                    if lines_filter and abs_line not in lines_filter:
+                        el_start_line = content[:el["start_offset"]].count('\n') + 1
+                        end_tok = tokens[el["end_idx"]]
+                        el_end_line = content[:end_tok["end"]].count('\n') + 1
+                        matching_lines = [l for l in lines_filter if el_start_line <= l <= el_end_line]
+                        if matching_lines:
+                            abs_line = matching_lines[0]
                     violations.append({
                         "rule_id": ev["rule_id"],
                         "line": abs_line,
