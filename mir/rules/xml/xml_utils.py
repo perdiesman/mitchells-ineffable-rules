@@ -34,13 +34,14 @@ def _tokenize_xml_impl(content: str) -> List[dict]:
             else:
                 val = content[i:idx + 3]
                 i = idx + 3
+            start_line = line_number
             line_number += val.count('\n')
             tokens.append({
                 "type": "COMMENT",
                 "value": val,
                 "start": start,
                 "end": i,
-                "line": line_number
+                "line": start_line
             })
             continue
 
@@ -54,13 +55,14 @@ def _tokenize_xml_impl(content: str) -> List[dict]:
             else:
                 val = content[i:idx + 2]
                 i = idx + 2
+            start_line = line_number
             line_number += val.count('\n')
             tokens.append({
                 "type": "DECLARATION",
                 "value": val,
                 "start": start,
                 "end": i,
-                "line": line_number
+                "line": start_line
             })
             continue
 
@@ -74,13 +76,14 @@ def _tokenize_xml_impl(content: str) -> List[dict]:
             else:
                 val = content[i:idx + 1]
                 i = idx + 1
+            start_line = line_number
             line_number += val.count('\n')
             tokens.append({
                 "type": "DECLARATION",
                 "value": val,
                 "start": start,
                 "end": i,
-                "line": line_number
+                "line": start_line
             })
             continue
 
@@ -88,6 +91,7 @@ def _tokenize_xml_impl(content: str) -> List[dict]:
             # Inside a tag, we parse whitespace, attribute names, equals, and attribute values
             if c.isspace():
                 start = i
+                start_line = line_number
                 while i < n and content[i].isspace():
                     if content[i] == '\n':
                         line_number += 1
@@ -97,7 +101,7 @@ def _tokenize_xml_impl(content: str) -> List[dict]:
                     "value": content[start:i],
                     "start": start,
                     "end": i,
-                    "line": line_number
+                    "line": start_line
                 })
                 continue
             
@@ -140,6 +144,7 @@ def _tokenize_xml_impl(content: str) -> List[dict]:
             # Attribute values (quoted string)
             if c in ("'", '"'):
                 start = i
+                start_line = line_number
                 quote = c
                 i += 1
                 while i < n and content[i] != quote:
@@ -153,7 +158,7 @@ def _tokenize_xml_impl(content: str) -> List[dict]:
                     "value": content[start:i],
                     "start": start,
                     "end": i,
-                    "line": line_number
+                    "line": start_line
                 })
                 continue
                 
@@ -217,6 +222,7 @@ def _tokenize_xml_impl(content: str) -> List[dict]:
             # Whitespace
             if c.isspace():
                 start = i
+                start_line = line_number
                 while i < n and content[i].isspace():
                     if content[i] == '\n':
                         line_number += 1
@@ -226,12 +232,13 @@ def _tokenize_xml_impl(content: str) -> List[dict]:
                     "value": content[start:i],
                     "start": start,
                     "end": i,
-                    "line": line_number
+                    "line": start_line
                 })
                 continue
                 
             # Text content
             start = i
+            start_line = line_number
             while i < n and content[i] != "<":
                 if content[i] == '\n':
                     line_number += 1
@@ -241,7 +248,7 @@ def _tokenize_xml_impl(content: str) -> List[dict]:
                 "value": content[start:i],
                 "start": start,
                 "end": i,
-                "line": line_number
+                "line": start_line
             })
 
     return tokens

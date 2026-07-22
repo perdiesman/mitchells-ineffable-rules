@@ -163,27 +163,30 @@ class XmlIndentRule(BaseRule):
 
         for i, t in enumerate(tokens):
             line = t["line"]
+            val = t.get("value", "")
+            end_line = line + val.count('\n')
             
-            # Record delta at start of line
-            if line not in line_cumulative_delta:
-                delta = 0
-                for el in reversed(tag_stack):
-                    if el.get("delta") is not None:
-                        delta = el["delta"]
-                        break
-                line_cumulative_delta[line] = delta
-                
-                min_parent_indent = 0
-                if tag_stack:
-                    for j, el in enumerate(reversed(tag_stack)):
-                        abs_j = len(tag_stack) - 1 - j
-                        if el.get("resolved_indent") is not None:
-                            min_parent_indent = len(el["resolved_indent"])
+            # Record delta at start of line and all spanned lines for multiline tokens
+            for l in range(line, end_line + 1):
+                if l not in line_cumulative_delta:
+                    delta = 0
+                    for el in reversed(tag_stack):
+                        if el.get("delta") is not None:
+                            delta = el["delta"]
                             break
-                        else:
-                            min_parent_indent = abs_j * indent_size
-                            break
-                line_min_parent_indent[line] = min_parent_indent
+                    line_cumulative_delta[l] = delta
+                    
+                    min_parent_indent = 0
+                    if tag_stack:
+                        for j, el in enumerate(reversed(tag_stack)):
+                            abs_j = len(tag_stack) - 1 - j
+                            if el.get("resolved_indent") is not None:
+                                min_parent_indent = len(el["resolved_indent"])
+                                break
+                            else:
+                                min_parent_indent = abs_j * indent_size
+                                break
+                    line_min_parent_indent[l] = min_parent_indent
 
             # Track depth transitions
             if t["type"] == "TAG_OPEN_START":
