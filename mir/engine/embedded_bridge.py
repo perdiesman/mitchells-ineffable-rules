@@ -169,6 +169,8 @@ def is_fixed_text_xml_safe(original_xml: str, tag_ranges: List[Tuple[int, int]],
         else:
             return 1
             
+    import bisect
+    
     # Check each structural character type for crossing migrations
     for char_type in structural_chars:
         orig_offsets = []
@@ -181,14 +183,22 @@ def is_fixed_text_xml_safe(original_xml: str, tag_ranges: List[Tuple[int, int]],
             if c == char_type:
                 fixed_offsets.append(idx)
                 
+        # Pre-compute character count modifications per edit using C-speed .count()
+        edit_counts = []
+        for start, end, replacement in edits:
+            del_cnt = original_xml[start:end].count(char_type)
+            ins_cnt = replacement.count(char_type)
+            edit_counts.append((start, end, del_cnt, ins_cnt))
+                
         for tag_idx, (t_start, t_end) in enumerate(tag_ranges):
             t_start_new, t_end_new = fixed_tag_ranges[tag_idx]
             
-            orig_left = sum(1 for pos in orig_offsets if pos < t_start)
-            orig_inside = sum(1 for pos in orig_offsets if t_start <= pos < t_end)
+            # O(log N) binary search instead of O(N) generator sums
+            orig_left = bisect.bisect_left(orig_offsets, t_start)
+            orig_inside = bisect.bisect_left(orig_offsets, t_end) - orig_left
             
-            fixed_left = sum(1 for pos in fixed_offsets if pos < t_start_new)
-            fixed_inside = sum(1 for pos in fixed_offsets if t_start_new <= pos < t_end_new)
+            fixed_left = bisect.bisect_left(fixed_offsets, t_start_new)
+            fixed_inside = bisect.bisect_left(fixed_offsets, t_end_new) - fixed_left
             
             del_left = 0
             ins_left = 0
@@ -197,10 +207,7 @@ def is_fixed_text_xml_safe(original_xml: str, tag_ranges: List[Tuple[int, int]],
             total_del_char = 0
             total_ins_char = 0
             
-            for start, end, replacement in edits:
-                del_cnt = sum(1 for c in original_xml[start:end] if c == char_type)
-                ins_cnt = sum(1 for c in replacement if c == char_type)
-                
+            for start, end, del_cnt, ins_cnt in edit_counts:
                 total_del_char += del_cnt
                 total_ins_char += ins_cnt
                 
