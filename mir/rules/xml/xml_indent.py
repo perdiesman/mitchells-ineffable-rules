@@ -98,7 +98,7 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
                             "FROM", "WHERE", "SELECT", "HAVING", "ON", "USING", "VALUES", "SET", 
                             "AND", "OR", "JOIN", "LEFT", "RIGHT", "INNER", "CROSS", "FULL", "WITH",
                             "CASE", "THEN", "ELSE", "BEGIN", "EXCEPTION",
-                            "(", "+", "-", "/", "||", ","
+                            "(", "+", "-", "/", "||"
                         }
                         if last_char in extra_indent_keywords or last_word in extra_indent_keywords:
                             target_indent += " " * indent_size
