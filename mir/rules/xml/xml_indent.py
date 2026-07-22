@@ -160,6 +160,7 @@ class XmlIndentRule(BaseRule):
         line_cumulative_delta = {}
         explicit_expected_indent = {}
         line_min_parent_indent = {}
+        line_is_inside_query = {}
 
         for i, t in enumerate(tokens):
             line = t["line"]
@@ -175,6 +176,13 @@ class XmlIndentRule(BaseRule):
                             delta = el["delta"]
                             break
                     line_cumulative_delta[l] = delta
+                    
+                    is_in_query = False
+                    for el in tag_stack:
+                        if el["tag"] in ("select", "insert", "update", "delete", "sql"):
+                            is_in_query = True
+                            break
+                    line_is_inside_query[l] = is_in_query
                     
                     min_parent_indent = 0
                     if tag_stack:
@@ -271,6 +279,8 @@ class XmlIndentRule(BaseRule):
                 expected_indent = explicit_expected_indent[idx]
             else:
                 delta = line_cumulative_delta.get(idx, 0)
+                if line_is_inside_query.get(idx, False):
+                    delta = 0
                 if delta != 0:
                     sign = 1 if delta > 0 else -1
                     abs_delta = abs(delta)
@@ -282,7 +292,7 @@ class XmlIndentRule(BaseRule):
                             abs_delta -= remainder
                     delta = abs_delta * sign
                 expected_indent_len = max(0, len(actual_indent) + delta)
-                if idx in line_min_parent_indent:
+                if idx in line_min_parent_indent and not line_is_inside_query.get(idx, False):
                     min_parent = line_min_parent_indent[idx]
                     expected_indent_len = max(expected_indent_len, min_parent + indent_size)
                 expected_indent = " " * expected_indent_len

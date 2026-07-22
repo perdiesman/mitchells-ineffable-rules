@@ -343,10 +343,9 @@ class XmlMybatisSqlRule(BaseRule):
             "IR-subquery-compact", "IR-dollar-quote-alignment",
             "IR-table-field-spacing", "IR-trigger-layout", "IR-create-view-indent",
             "IR-function-body-indent", "IR-function-header-layout", "IR-raise-layout",
-            "IR-plpgsql-block-indent", "IR-update-layout", "IR-case-layout",
-            "IR-join-on-multi", "IR-cte-format",
+            "IR-plpgsql-block-indent", "IR-join-on-multi",
             "IR-paren-content-indent", "IR-paren-multi",
-            "IR-paren-single", "IR-join-parens", "IR-union-layout"
+            "IR-paren-single", "IR-join-parens"
         }
         self.sql_rules = None
         self._expansion_cache = {}

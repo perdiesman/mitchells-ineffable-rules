@@ -902,7 +902,7 @@ class TestRunnerIntegration(unittest.TestCase):
         # A long SQL function call exceeding 120 characters should be wrapped
         sql_content = (
             "SELECT id,\n"
-            "    outage_data.state_outages_for_run_start_time(#{runStartTime}::TIMESTAMP WITH TIME ZONE - INTERVAL '15 minute') sofrst\n"
+            "    schema_name.some_very_long_custom_function_name(#{paramName}::TIMESTAMP WITH TIME ZONE - INTERVAL '15 minute') alias_name\n"
             "FROM users"
         )
         path = self.write_temp_file("test_func_wrap.sql", sql_content)
@@ -920,9 +920,9 @@ class TestRunnerIntegration(unittest.TestCase):
             content = f.read()
             expected = (
                 "SELECT id,\n"
-                "    outage_data.state_outages_for_run_start_time(\n"
-                "        #{runStartTime}::TIMESTAMP WITH TIME ZONE - INTERVAL '15 minute'\n"
-                "    ) sofrst\n"
+                "    schema_name.some_very_long_custom_function_name(\n"
+                "        #{paramName}::TIMESTAMP WITH TIME ZONE - INTERVAL '15 minute'\n"
+                "    ) alias_name\n"
                 "FROM users"
             )
             self.assertEqual(content, expected)

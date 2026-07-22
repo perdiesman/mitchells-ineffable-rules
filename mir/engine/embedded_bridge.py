@@ -309,46 +309,54 @@ def fix_embedded_content(
 
         for tag, i1, i2, j1, j2 in sm.get_opcodes():
             if tag in ("replace", "delete", "insert"):
-                g_start_char = guest_line_offsets[i1]
-                g_end_char = guest_line_offsets[i2]
-
-                is_contiguous = True
-                start_orig = mapping[g_start_char] if g_start_char < len(mapping) else (mapping[-1] + 1 if mapping else 0)
-                end_orig = mapping[g_end_char - 1] + 1 if g_end_char <= len(mapping) and g_end_char > 0 else start_orig
-
-                if tag_ranges is not None:
-                    if start_orig < end_orig:
-                        for t_start, t_end in tag_ranges:
-                            if max(start_orig, t_start) < min(end_orig, t_end):
-                                is_contiguous = False
-                                break
-                    else:
-                        for t_start, t_end in tag_ranges:
-                            if t_start < start_orig < t_end:
-                                is_contiguous = False
-                                break
+                sub_ops = []
+                if tag == "replace" and (i2 - i1 == j2 - j1):
+                    for k in range(i2 - i1):
+                        sub_ops.append((tag, i1 + k, i1 + k + 1, j1 + k, j1 + k + 1))
                 else:
-                    if g_start_char < g_end_char:
-                        for k in range(g_start_char + 1, g_end_char):
-                            if mapping[k] - mapping[k - 1] != 1:
-                                is_contiguous = False
-                                break
+                    sub_ops.append((tag, i1, i2, j1, j2))
+                    
+                for sub_tag, sub_i1, sub_i2, sub_j1, sub_j2 in sub_ops:
+                    g_start_char = guest_line_offsets[sub_i1]
+                    g_end_char = guest_line_offsets[sub_i2]
 
-                if is_contiguous:
-                    block_fixed_lines = fixed_text.splitlines(keepends=True)[j1:j2]
-                    replacement = "".join(block_fixed_lines)
-                    if file_path.endswith(".xml"):
-                        replacement = xml_encode(replacement)
+                    is_contiguous = True
+                    start_orig = mapping[g_start_char] if g_start_char < len(mapping) else (mapping[-1] + 1 if mapping else 0)
+                    end_orig = mapping[g_end_char - 1] + 1 if g_end_char <= len(mapping) and g_end_char > 0 else start_orig
 
-                    orig_str = guest_text[g_start_char:g_end_char]
-                    skip = False
-                    if orig_str.strip() == "" and replacement.strip() == "":
-                        if all(c in " \t\r\n" for c in orig_str) and all(c in " \t\r\n" for c in replacement):
-                            if not (extra_fix_args and "base_indent" in extra_fix_args):
-                                skip = True
+                    if tag_ranges is not None:
+                        if start_orig < end_orig:
+                            for t_start, t_end in tag_ranges:
+                                if max(start_orig, t_start) < min(end_orig, t_end):
+                                    is_contiguous = False
+                                    break
+                        else:
+                            for t_start, t_end in tag_ranges:
+                                if t_start < start_orig < t_end:
+                                    is_contiguous = False
+                                    break
+                    else:
+                        if g_start_char < g_end_char:
+                            for k in range(g_start_char + 1, g_end_char):
+                                if mapping[k] - mapping[k - 1] != 1:
+                                    is_contiguous = False
+                                    break
 
-                    if not skip:
-                        edits.append((start_orig, end_orig, replacement))
+                    if is_contiguous:
+                        block_fixed_lines = fixed_text.splitlines(keepends=True)[sub_j1:sub_j2]
+                        replacement = "".join(block_fixed_lines)
+                        if file_path.endswith(".xml"):
+                            replacement = xml_encode(replacement)
+
+                        orig_str = guest_text[g_start_char:g_end_char]
+                        skip = False
+                        if orig_str.strip() == "" and replacement.strip() == "":
+                            if all(c in " \t\r\n" for c in orig_str) and all(c in " \t\r\n" for c in replacement):
+                                if not (extra_fix_args and "base_indent" in extra_fix_args):
+                                    skip = True
+
+                        if not skip:
+                            edits.append((start_orig, end_orig, replacement))
 
     if edits and extra_fix_args and "original_xml" in extra_fix_args and "tag_ranges" in extra_fix_args:
         original_xml = extra_fix_args["original_xml"]
