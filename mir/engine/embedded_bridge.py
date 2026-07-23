@@ -316,6 +316,8 @@ def fix_embedded_content(
                 else:
                     sub_ops.append((tag, i1, i2, j1, j2))
                     
+                block_edits = []
+                block_valid = True
                 for sub_tag, sub_i1, sub_i2, sub_j1, sub_j2 in sub_ops:
                     g_start_char = guest_line_offsets[sub_i1]
                     g_end_char = guest_line_offsets[sub_i2]
@@ -342,21 +344,27 @@ def fix_embedded_content(
                                     is_contiguous = False
                                     break
 
-                    if is_contiguous:
-                        block_fixed_lines = fixed_text.splitlines(keepends=True)[sub_j1:sub_j2]
-                        replacement = "".join(block_fixed_lines)
-                        if file_path.endswith(".xml"):
-                            replacement = xml_encode(replacement)
+                    if not is_contiguous:
+                        block_valid = False
+                        break
 
-                        orig_str = guest_text[g_start_char:g_end_char]
-                        skip = False
-                        if orig_str.strip() == "" and replacement.strip() == "":
-                            if all(c in " \t\r\n" for c in orig_str) and all(c in " \t\r\n" for c in replacement):
-                                if not (extra_fix_args and "base_indent" in extra_fix_args):
-                                    skip = True
+                    block_fixed_lines = fixed_text.splitlines(keepends=True)[sub_j1:sub_j2]
+                    replacement = "".join(block_fixed_lines)
+                    if file_path.endswith(".xml"):
+                        replacement = xml_encode(replacement)
 
-                        if not skip:
-                            edits.append((start_orig, end_orig, replacement))
+                    orig_str = guest_text[g_start_char:g_end_char]
+                    skip = False
+                    if orig_str.strip() == "" and replacement.strip() == "":
+                        if all(c in " \t\r\n" for c in orig_str) and all(c in " \t\r\n" for c in replacement):
+                            if not (extra_fix_args and "base_indent" in extra_fix_args):
+                                skip = True
+
+                    if not skip:
+                        block_edits.append((start_orig, end_orig, replacement))
+
+                if block_valid:
+                    edits.extend(block_edits)
 
     if edits and extra_fix_args and "original_xml" in extra_fix_args and "tag_ranges" in extra_fix_args:
         original_xml = extra_fix_args["original_xml"]

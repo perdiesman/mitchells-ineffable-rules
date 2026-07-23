@@ -345,7 +345,8 @@ class XmlMybatisSqlRule(BaseRule):
             "IR-function-body-indent", "IR-function-header-layout", "IR-raise-layout",
             "IR-plpgsql-block-indent", "IR-join-on-multi",
             "IR-paren-content-indent", "IR-paren-multi",
-            "IR-paren-single", "IR-join-parens"
+            "IR-paren-single", "IR-join-parens",
+            "IR-subquery-indent", "IR-clause-alignment", "IR-union-layout"
         }
         self.sql_rules = None
         self._expansion_cache = {}

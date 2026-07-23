@@ -170,19 +170,23 @@ class XmlIndentRule(BaseRule):
             # Record delta at start of line and all spanned lines for multiline tokens
             for l in range(line, end_line + 1):
                 if l not in line_cumulative_delta:
-                    delta = 0
+                    query_el = None
                     for el in reversed(tag_stack):
-                        if el.get("delta") is not None:
-                            delta = el["delta"]
+                        if el["tag"] in ("select", "insert", "update", "delete", "sql"):
+                            query_el = el
                             break
+                    
+                    if query_el is not None:
+                        delta = query_el.get("delta", 0)
+                    else:
+                        delta = 0
+                        for el in reversed(tag_stack):
+                            if el.get("delta") is not None:
+                                delta = el["delta"]
+                                break
                     line_cumulative_delta[l] = delta
                     
-                    is_in_query = False
-                    for el in tag_stack:
-                        if el["tag"] in ("select", "insert", "update", "delete", "sql"):
-                            is_in_query = True
-                            break
-                    line_is_inside_query[l] = is_in_query
+                    line_is_inside_query[l] = query_el is not None
                     
                     min_parent_indent = 0
                     if tag_stack:
@@ -279,8 +283,6 @@ class XmlIndentRule(BaseRule):
                 expected_indent = explicit_expected_indent[idx]
             else:
                 delta = line_cumulative_delta.get(idx, 0)
-                if line_is_inside_query.get(idx, False):
-                    delta = 0
                 if delta != 0:
                     sign = 1 if delta > 0 else -1
                     abs_delta = abs(delta)
