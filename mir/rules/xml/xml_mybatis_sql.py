@@ -346,7 +346,7 @@ class XmlMybatisSqlRule(BaseRule):
             "IR-plpgsql-block-indent", "IR-join-on-multi",
             "IR-paren-content-indent", "IR-paren-multi",
             "IR-paren-single", "IR-join-parens",
-            "IR-subquery-indent", "IR-clause-alignment", "IR-union-layout"
+            "IR-subquery-indent"
         }
         self.sql_rules = None
         self._expansion_cache = {}
