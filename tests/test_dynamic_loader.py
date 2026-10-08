@@ -189,5 +189,17 @@ class InvalidRule
         with self.assertRaises(RuleValidationError):
             load_rules_for_language("sql", [self.temp_dir], "extend")
 
+    def test_custom_rule_template_safety_metadata_must_be_boolean(self):
+        from mir.engine.rules_loader import RuleValidationError
+
+        invalid_rule_content = SQL_EXT_RULE_CONTENT.replace(
+            'is_fixable = "no"',
+            'is_fixable = "no"\n    trellis_safe = "yes"',
+        )
+        self.create_custom_rule("sql", "invalid_safety.py", invalid_rule_content)
+
+        with self.assertRaises(RuleValidationError):
+            load_rules_for_language("sql", [self.temp_dir], "extend")
+
 if __name__ == "__main__":
     unittest.main()

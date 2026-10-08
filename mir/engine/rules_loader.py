@@ -39,6 +39,13 @@ def validate_rule_class(rule_class: Type[BaseRule]) -> None:
         raise RuleValidationError(
             f"Rule '{rule_id}' (class {rule_class.__name__}) 'is_fixable' must be 'yes', 'no', or 'sometimes'."
         )
+
+    for metadata_name in ("commit_profile", "embedded_safe", "trellis_safe"):
+        metadata_value = getattr(rule_class, metadata_name, None)
+        if not isinstance(metadata_value, bool):
+            raise RuleValidationError(
+                f"Rule '{rule_id}' (class {rule_class.__name__}) '{metadata_name}' must be a boolean."
+            )
         
     # Check if 'check' is implemented (must not be the base check)
     if not hasattr(rule_class, "check") or rule_class.check == BaseRule.check:
