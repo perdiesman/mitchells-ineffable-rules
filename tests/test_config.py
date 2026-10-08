@@ -21,6 +21,16 @@ class TestConfig(unittest.TestCase):
         self.assertTrue(config.verbose)
         self.assertEqual(config.paths, ["file1.sql", "file2.sql"])
 
+    def test_staged_uses_commit_profile_inputs(self):
+        config = load_config(["--staged", "--fix", "--profile", "commit"])
+        self.assertTrue(config.staged)
+        self.assertTrue(config.fix)
+        self.assertEqual(config.profile, "commit")
+
+    def test_lines_reject_multiple_paths(self):
+        with self.assertRaises(SystemExit):
+            load_config(["--lines", "2-3", "first.sql", "second.sql"])
+
     def test_env_overrides(self):
         os.environ["IR_FIX"] = "True"
         os.environ["IR_VERBOSE"] = "1"

@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.xml.xml_utils import tokenize_xml
 
 class XmlAttributeQuotesRule(BaseRule):
+    commit_profile = True
     rule_id = "IR-xml-attribute-quotes"
     description = "Enforce double quotes around attribute values instead of single quotes."
     category = "attributes"

@@ -308,6 +308,7 @@ def get_element_base_indent(el: dict, tokens: List[dict], content: str, rule_con
     return tag_indent + " " * xml_indent_size
 
 class XmlMybatisSqlRule(BaseRule):
+    commit_profile = True
     rule_id = "IR-xml-mybatis-sql"
     description = "Format embedded SQL inside MyBatis XML mapper files using SQL rules."
     category = "queries"
@@ -350,6 +351,15 @@ class XmlMybatisSqlRule(BaseRule):
         }
         self.sql_rules = None
         self._expansion_cache = {}
+        self._cached_content = None
+
+    def _prepare_cache(self, content: str) -> None:
+        # Rule instances are shared by the loader. Keep expansions only for the
+        # current content value; object ids can be reused after a prior string is
+        # released and previously caused fixes from another file to leak here.
+        if content != self._cached_content:
+            self._expansion_cache.clear()
+            self._cached_content = content
 
     def _is_mybatis_file(self, content: str) -> bool:
         lower_content = content.lower()
@@ -358,6 +368,8 @@ class XmlMybatisSqlRule(BaseRule):
     def _find_violations(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[dict]:
         if not self._is_mybatis_file(content):
             return []
+
+        self._prepare_cache(content)
 
         tokens = tokenize_xml(content)
         tag_ranges = []
@@ -477,6 +489,8 @@ class XmlMybatisSqlRule(BaseRule):
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
         if not self._is_mybatis_file(content):
             return content
+
+        self._prepare_cache(content)
 
         tokens = tokenize_xml(content)
         tag_ranges = []

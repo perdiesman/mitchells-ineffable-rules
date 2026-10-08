@@ -27,6 +27,8 @@ class Config:
         self.no_warnings: bool = False
         self.lines: Set[int] = set()
         self.lines_spec: Optional[str] = None
+        self.staged: bool = False
+        self.profile: Optional[str] = None
 
 def load_config(args_list: Optional[List[str]] = None) -> Config:
     # 1. Parse CLI arguments first to check for config path, flags, and targets
@@ -62,6 +64,8 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     parser.add_argument("--warnings-only", action="store_true", default=None, help="Only show warnings")
     parser.add_argument("--no-warnings", action="store_true", default=None, help="Hide all warnings")
     parser.add_argument("--lines", help="Only lint/fix specified line numbers or line ranges (e.g. '10', '10-20', '10-20,30,40-50')")
+    parser.add_argument("--staged", action="store_true", help="Lint or fix staged Git content using staged changed-line scopes")
+    parser.add_argument("--profile", choices=["commit"], help="Use a built-in rule profile (normal CLI defaults are unchanged)")
     
     parsed_args = parser.parse_args(args_list)
     
@@ -243,6 +247,16 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     if parsed_args.lines:
         config.lines_spec = parsed_args.lines
         config.lines = parse_line_ranges(parsed_args.lines)
+
+    config.staged = parsed_args.staged
+    config.profile = parsed_args.profile or os.environ.get("IR_PROFILE") or file_config.get("profile")
+
+    if config.staged and config.content is not None:
+        parser.error("--staged cannot be combined with --content")
+    if config.staged and config.lines:
+        parser.error("--staged derives per-file line ranges and cannot be combined with --lines")
+    if config.lines and len(config.paths) > 1:
+        parser.error("--lines can only be used with one file path or stdin")
         
     # 5. Handle rule help AFTER config resolution so that include_dirs and rule_mode are resolved
     if parsed_args.help is not None:

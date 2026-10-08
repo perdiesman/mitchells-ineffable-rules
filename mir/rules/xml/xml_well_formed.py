@@ -3,6 +3,7 @@ from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 
 class XmlWellFormedRule(BaseRule):
+    commit_profile = True
     rule_id = "IR-xml-well-formed"
     description = "Ensure that XML content is well-formed."
     category = "general"

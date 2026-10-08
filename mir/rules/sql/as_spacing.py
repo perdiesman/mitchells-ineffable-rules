@@ -3,6 +3,8 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class ASSpacingRule(BaseRule):
+    commit_profile = True
+    embedded_safe = True
     rule_id = "IR-as-spacing"
     description = "The AS keyword must be preceded by exactly one space."
     category = "general"

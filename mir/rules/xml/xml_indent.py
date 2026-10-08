@@ -327,9 +327,9 @@ class XmlIndentRule(BaseRule):
                     continue
                 
                 # Check if it's on multiple lines originally
-                start_token = tokens[el["start_idx"]]
-                end_token = tokens[el["end_idx"]]
-                if start_token["line"] == end_token["line"]:
+                start_line_number = content.count("\n", 0, el["start_offset"]) + 1
+                end_line_number = content.count("\n", 0, el["end_offset"]) + 1
+                if start_line_number == end_line_number:
                     continue
                     
                 start_offset = el["start_offset"]
@@ -345,8 +345,8 @@ class XmlIndentRule(BaseRule):
                 collapsed = opening_tag.strip() + inner_text.strip() + closing_tag.strip()
                 
                 # Resolve indent from start_line
-                start_line_idx = start_token["line"] - 1
-                expected_indent = explicit_expected_indent.get(start_token["line"])
+                start_line_idx = start_line_number - 1
+                expected_indent = explicit_expected_indent.get(start_line_number)
                 if expected_indent is None:
                     start_line = lines[start_line_idx] if start_line_idx < len(lines) else ""
                     indent = ""
@@ -360,7 +360,7 @@ class XmlIndentRule(BaseRule):
                 total_len = len(expected_indent) + len(collapsed)
                 if total_len < 120:
                     violations.append({
-                        "line": start_token["line"],
+                        "line": start_line_number,
                         "start_offset": start_offset,
                         "end_offset": end_offset,
                         "replacement": collapsed,

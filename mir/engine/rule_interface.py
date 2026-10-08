@@ -35,6 +35,8 @@ class BaseRule:
     config_options: Dict[str, Dict[str, Any]] = {}
     examples: List[Dict[str, str]] = []
     additional_validations: List[str] = []
+    commit_profile: bool = False
+    embedded_safe: bool = False
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         """

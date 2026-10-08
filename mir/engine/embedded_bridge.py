@@ -25,10 +25,13 @@ def get_guest_rules(guest_language: str, rule_config: Dict[str, Any], excluded_r
     rules_to_disable = rule_config.get("_rules_to_disable", set())
     rules_to_enable = rule_config.get("_rules_to_enable", set())
     disable_all = rule_config.get("_disable_all", False)
+    profile = rule_config.get("_profile")
     
     filtered = []
     for rule in all_rules:
         if excluded_rule_ids and rule.rule_id in excluded_rule_ids:
+            continue
+        if profile == "commit" and not (rule.commit_profile and rule.embedded_safe):
             continue
             
         if rule.rule_id in rules_to_disable or f"{guest_language}:{rule.rule_id}" in rules_to_disable:
@@ -85,6 +88,7 @@ def check_embedded_content(
         guest_rule_config["_rules_to_disable"] = rule_config.get("_rules_to_disable", set())
         guest_rule_config["_rules_to_enable"] = rule_config.get("_rules_to_enable", set())
         guest_rule_config["_disable_all"] = rule_config.get("_disable_all", False)
+        guest_rule_config["_profile"] = rule_config.get("_profile")
         
         if extra_check_args:
             guest_rule_config.update(extra_check_args)
