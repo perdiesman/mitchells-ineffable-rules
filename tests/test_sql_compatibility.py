@@ -4,7 +4,7 @@ from mir.rules.sql.paren_content_indent import ParenContentIndentRule
 from mir.rules.sql.function_case import FunctionCaseRule
 from mir.rules.sql.keyword_case import KeywordCaseRule
 from mir.rules.sql.operator_spacing import OperatorSpacingRule
-from mir.rules.sql.sql_utils import protected_sql_signature, tokenize_sql
+from mir.rules.sql.sql_utils import _tokenize_sql_impl, protected_sql_signature, tokenize_sql
 from mir.rules.sql.unresolved_alias import UnresolvedAliasRule
 
 
@@ -24,6 +24,13 @@ class TestSqlCompatibility(unittest.TestCase):
             ["${schemaName}", "#{item.id}", ":filter.name", ":created_on"],
         )
         self.assertIn("::", [token["value"] for token in tokens if token["type"] == "CAST"])
+
+    def test_token_cache_is_bounded_across_many_documents(self):
+        _tokenize_sql_impl.cache_clear()
+        for index in range(80):
+            tokenize_sql(f"SELECT {index} AS item_id;")
+
+        self.assertLessEqual(_tokenize_sql_impl.cache_info().currsize, 32)
 
     def test_keyword_case_preserves_mybatis_and_trellis_parameters(self):
         content = "select :end, #{limit}, ${order} from sample_table;"
@@ -65,6 +72,21 @@ class TestSqlCompatibility(unittest.TestCase):
 
     def test_set_row_assignment_is_not_a_function(self):
         content = "UPDATE sample_table SET (item_name) = ('example');"
+
+        self.assertEqual(FunctionCaseRule().fix(content, "generic.sql", {}), content)
+
+    def test_postgresql_ddl_keywords_are_not_functions(self):
+        content = (
+            "CREATE TABLE sample_table (item_id INTEGER, PRIMARY KEY (item_id), "
+            "UNIQUE (item_id), CHECK (item_id > 0)); "
+            "CREATE TYPE sample_state AS ENUM ('ready'); "
+            "CREATE INDEX sample_idx ON sample_table USING GIST (item_id) INCLUDE (item_id);"
+        )
+
+        self.assertEqual(FunctionCaseRule().fix(content, "generic.sql", {}), content)
+
+    def test_overlaps_predicate_is_not_a_function(self):
+        content = "SELECT (start_at, end_at) OVERLAPS (:start, :end);"
 
         self.assertEqual(FunctionCaseRule().fix(content, "generic.sql", {}), content)
 

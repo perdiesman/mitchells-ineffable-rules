@@ -9,6 +9,10 @@ SQL_KEYWORDS = {
     "AS", "CREATE", "VIEW", "MATERIALIZED", "TABLE", "INSERT", "INTO", "VALUES", "UPDATE",
     "SET", "DELETE", "WITH", "CASE", "WHEN", "THEN", "ELSE", "END", "COALESCE",
     "RECURSIVE", "ASC", "DESC", "DISTINCT", "FILTER", "CONFLICT",
+    "PRIMARY", "FOREIGN", "KEY", "UNIQUE", "CHECK", "DEFAULT", "REFERENCES",
+    "CONSTRAINT", "DO", "NOTHING", "RETURNING", "LATERAL", "OVERLAPS", "ENUM",
+    "OPTIONS", "INCLUDE", "WINDOW", "OVER", "PARTITION", "RANGE", "ROWS",
+    "CURRENT", "ROW", "FETCH", "NEXT", "ONLY",
     # TO must not be mistaken for a function name in constructs such as
     # IMPORT FOREIGN SCHEMA ... LIMIT TO (...).
     "TO"
@@ -41,7 +45,7 @@ def protected_sql_signature(content: str) -> tuple[tuple[str, str], ...]:
             protected.append(("QUOTED_IDENTIFIER", value))
     return tuple(protected)
 
-@lru_cache(maxsize=1024)
+@lru_cache(maxsize=32)
 def _tokenize_sql_impl(content: str) -> List[dict]:
     n = len(content)
     i = 0
@@ -735,11 +739,5 @@ def is_values_multi(tokens: List[dict], open_idx: int) -> bool:
         return True
     return False
 
-import functools
-
-@functools.lru_cache(maxsize=4096)
-def _tokenize_sql_cached(content: str) -> List[dict]:
-    return _tokenize_sql_impl(content)
-
 def tokenize_sql(content: str) -> List[dict]:
-    return _tokenize_sql_cached(content)
+    return _tokenize_sql_impl(content)

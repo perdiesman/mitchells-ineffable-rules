@@ -708,6 +708,24 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertNotIn("#{END}", result.content)
         self.assertNotIn("#{LIMIT}", result.content)
 
+    def test_xml_mybatis_formats_text_beside_inline_tags(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="from">from sample_table</sql>\n'
+            '    <select id="count">\n'
+            '        SELECT COUNT(*) <include refid="from" />\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        result = process_document(config, xml_content, "generic.xml", "xml")
+
+        self.assertIn('SELECT count(*) <include refid="from" />', result.content)
+        self.assertNotIn("IR-function-case", [item[0].rule_id for item in result.violations])
+
     def test_xml_mybatis_sql_line_mapping(self):
         # XML file with a self-comparison on line 5
         xml_content = (

@@ -269,19 +269,54 @@ def fix_embedded_content(
                 sub_ops = []
                 if tag == "replace" and (i2 - i1 == j2 - j1):
                     for k in range(i2 - i1):
-                        sub_ops.append((tag, i1 + k, i1 + k + 1, j1 + k, j1 + k + 1))
+                        guest_line = guest_text.splitlines(keepends=True)[i1 + k]
+                        fixed_line = fixed_text.splitlines(keepends=True)[j1 + k]
+                        char_matcher = difflib.SequenceMatcher(
+                            None, guest_line, fixed_line, autojunk=False
+                        )
+                        for char_tag, ci1, ci2, cj1, cj2 in char_matcher.get_opcodes():
+                            if char_tag == "equal":
+                                continue
+                            sub_ops.append((
+                                char_tag,
+                                i1 + k,
+                                i1 + k,
+                                j1 + k,
+                                j1 + k,
+                                ci1,
+                                ci2,
+                                cj1,
+                                cj2,
+                            ))
                 else:
-                    sub_ops.append((tag, i1, i2, j1, j2))
+                    sub_ops.append((tag, i1, i2, j1, j2, None, None, None, None))
                     
                 block_edits = []
                 block_valid = True
-                for sub_tag, sub_i1, sub_i2, sub_j1, sub_j2 in sub_ops:
-                    g_start_char = guest_line_offsets[sub_i1]
-                    g_end_char = guest_line_offsets[sub_i2]
+                for (
+                    sub_tag, sub_i1, sub_i2, sub_j1, sub_j2,
+                    char_i1, char_i2, char_j1, char_j2,
+                ) in sub_ops:
+                    if char_i1 is None:
+                        g_start_char = guest_line_offsets[sub_i1]
+                        g_end_char = guest_line_offsets[sub_i2]
+                        block_fixed_lines = fixed_text.splitlines(keepends=True)[sub_j1:sub_j2]
+                        replacement = "".join(block_fixed_lines)
+                    else:
+                        g_start_char = guest_line_offsets[sub_i1] + char_i1
+                        g_end_char = guest_line_offsets[sub_i1] + char_i2
+                        fixed_line = fixed_text.splitlines(keepends=True)[sub_j1]
+                        replacement = fixed_line[char_j1:char_j2]
 
                     is_contiguous = True
                     start_orig = mapping[g_start_char] if g_start_char < len(mapping) else (mapping[-1] + 1 if mapping else 0)
-                    end_orig = mapping[g_end_char - 1] + 1 if g_end_char <= len(mapping) and g_end_char > 0 else start_orig
+                    end_orig = (
+                        start_orig
+                        if g_start_char == g_end_char
+                        else mapping[g_end_char - 1] + 1
+                        if g_end_char <= len(mapping) and g_end_char > 0
+                        else start_orig
+                    )
 
                     if tag_ranges is not None:
                         if start_orig < end_orig:
@@ -305,8 +340,6 @@ def fix_embedded_content(
                         block_valid = False
                         break
 
-                    block_fixed_lines = fixed_text.splitlines(keepends=True)[sub_j1:sub_j2]
-                    replacement = "".join(block_fixed_lines)
                     if file_path.endswith(".xml"):
                         replacement = xml_encode(replacement)
 

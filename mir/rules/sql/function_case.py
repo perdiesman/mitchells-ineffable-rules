@@ -13,7 +13,8 @@ EXCLUDED_WORDS = {
     "geometry", "numeric", "varchar", "integer", "int", "bigint",
     "smallint", "text", "boolean", "bool", "decimal", "json", "jsonb",
     "uuid", "date", "timestamp", "timestamptz", "time", "timetz", "real",
-    "char", "character", "double", "varying", "filter", "conflict", "lateral"
+    "char", "character", "double", "varying", "filter", "conflict", "lateral",
+    "gist"
 }
 
 KEYWORD_FUNCTIONS = {"COALESCE", "LEFT", "RIGHT"}
