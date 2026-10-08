@@ -22,6 +22,10 @@ class FromMultiRule(BaseRule):
         {
             "violating": "SELECT * FROM t1 LEFT JOIN t2 ON t1.id = t2.id;",
             "correct": "SELECT * FROM\n    t1\n    LEFT JOIN t2 ON t1.id = t2.id;"
+        },
+        {
+            "violating": "SELECT * FROM first_table FULL\n    OUTER JOIN second_table ON first_table.item_id = second_table.item_id;",
+            "correct": "SELECT * FROM\n    first_table\n    FULL OUTER JOIN second_table ON first_table.item_id = second_table.item_id;"
         }
     ]
     additional_validations = [
@@ -125,17 +129,54 @@ class FromMultiRule(BaseRule):
                         for j_idx, (t, d) in enumerate(zip(clause_tokens, clause_depths)):
                             if d == outer_depth and t["type"] == "KEYWORD":
                                 val_upper = t["value"].upper()
-                                if val_upper in ("JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "NATURAL"):
+                                if val_upper in ("JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "FULL", "CROSS", "NATURAL"):
                                     start_ws = i + 1 + j_idx
-                                    
-                                    if val_upper == "JOIN":
-                                        prev_active = None
-                                        for prev_idx in range(start_ws - 1, -1, -1):
-                                            if tokens[prev_idx]["type"] != "WHITESPACE" and tokens[prev_idx]["type"] != "COMMENT":
-                                                prev_active = tokens[prev_idx]
-                                                break
-                                        if prev_active and prev_active["type"] == "KEYWORD" and prev_active["value"].upper() in ("LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "NATURAL"):
+
+                                    prev_active = None
+                                    prev_active_idx = None
+                                    for prev_idx in range(start_ws - 1, -1, -1):
+                                        if tokens[prev_idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                                            prev_active = tokens[prev_idx]
+                                            prev_active_idx = prev_idx
+                                            break
+                                    prev_upper = (
+                                        prev_active["value"].upper()
+                                        if prev_active and prev_active["type"] == "KEYWORD"
+                                        else None
+                                    )
+                                    # A compound join type is one relation
+                                    # entry. Only its first keyword owns the
+                                    # line break: NATURAL FULL OUTER JOIN,
+                                    # FULL OUTER JOIN, LEFT JOIN, and so on.
+                                    is_compound_continuation = val_upper == "JOIN" and prev_upper in (
+                                        "LEFT", "RIGHT", "INNER", "OUTER", "FULL", "CROSS", "NATURAL"
+                                    )
+                                    is_compound_continuation = is_compound_continuation or (
+                                        val_upper == "OUTER" and prev_upper in ("LEFT", "RIGHT", "FULL")
+                                    )
+                                    is_compound_continuation = is_compound_continuation or (
+                                        val_upper in ("LEFT", "RIGHT", "INNER", "FULL")
+                                        and prev_upper == "NATURAL"
+                                    )
+                                    if is_compound_continuation:
+                                        if any(
+                                            token["type"] == "COMMENT"
+                                            for token in tokens[prev_active_idx + 1:start_ws]
+                                        ):
                                             continue
+                                        ws_tok = (
+                                            tokens[start_ws - 1]
+                                            if tokens[start_ws - 1]["type"] == "WHITESPACE"
+                                            else None
+                                        )
+                                        if not ws_tok or ws_tok["value"] != " ":
+                                            violations.append({
+                                                "token": t,
+                                                "ws_start": ws_tok["start"] if ws_tok else t["start"],
+                                                "ws_end": t["start"],
+                                                "replacement": " ",
+                                            })
+                                        continue
                                             
                                     ws_tok = None
                                     if start_ws - 1 >= 0 and tokens[start_ws - 1]["type"] == "WHITESPACE":

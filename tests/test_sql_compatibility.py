@@ -1,6 +1,7 @@
 import unittest
 
 from mir.rules.sql.function_case import FunctionCaseRule
+from mir.rules.sql.from_multi import FromMultiRule
 from mir.rules.sql.clause_alignment import ClauseAlignmentRule
 from mir.rules.sql.column_layout import ColumnLayoutRule
 from mir.rules.sql.join_on_multi import JoinOnMultiRule
@@ -89,6 +90,34 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertIn("LEFT JOIN LATERAL (SELECT 1)", fixed)
         self.assertEqual(FunctionCaseRule().fix(fixed, "generic.sql", {}), fixed)
+
+    def test_compound_join_type_stays_on_one_line(self):
+        content = (
+            "SELECT first_table.item_id FROM first_table FULL\n"
+            "    OUTER JOIN second_table ON first_table.item_id = second_table.item_id;"
+        )
+        expected = (
+            "SELECT first_table.item_id FROM\n"
+            "    first_table\n"
+            "    FULL OUTER JOIN second_table ON first_table.item_id = second_table.item_id;"
+        )
+
+        rule = FromMultiRule()
+        fixed = rule.fix(content, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
+
+    def test_natural_compound_join_type_stays_on_one_line(self):
+        content = "SELECT * FROM first_table NATURAL FULL OUTER JOIN second_table;"
+        expected = (
+            "SELECT * FROM\n"
+            "    first_table\n"
+            "    NATURAL FULL OUTER JOIN second_table;"
+        )
+
+        self.assertEqual(FromMultiRule().fix(content, "generic.sql", {}), expected)
 
     def test_set_row_assignment_is_not_a_function(self):
         content = "UPDATE sample_table SET (item_name) = ('example');"

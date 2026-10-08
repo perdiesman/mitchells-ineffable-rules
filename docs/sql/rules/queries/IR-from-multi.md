@@ -36,6 +36,19 @@ SELECT * FROM
     LEFT JOIN t2 ON t1.id = t2.id;
 ```
 
+#### ❌ Violating Example #3
+```sql
+SELECT * FROM first_table FULL
+    OUTER JOIN second_table ON first_table.item_id = second_table.item_id;
+```
+
+####  Correct Example #3
+```sql
+SELECT * FROM
+    first_table
+    FULL OUTER JOIN second_table ON first_table.item_id = second_table.item_id;
+```
+
 #### Additional Validations
 ```sql
 SELECT * FROM t1;
