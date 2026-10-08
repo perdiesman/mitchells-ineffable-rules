@@ -135,104 +135,36 @@ def check_embedded_content(
     return violations
 
 def is_fixed_text_xml_safe(original_xml: str, tag_ranges: List[Tuple[int, int]], edits: List[Tuple[int, int, str]]) -> bool:
-    if not tag_ranges:
-        return True
-        
-    sorted_edits_asc = sorted(edits, key=lambda x: x[0])
-    structural_chars = {",", "(", ")", "+", "-", "*", "/", "=", "<", ">", "!", "|", "&", ";", "."}
-    
-    # 1. Apply edits to get fixed_xml
-    chars = list(original_xml)
-    sorted_edits_desc = sorted(edits, key=lambda x: x[0], reverse=True)
-    for start, end, new_text in sorted_edits_desc:
-        chars[start:end] = list(new_text)
-    fixed_xml = "".join(chars)
-    
-    # 2. Compute new tag offsets in fixed_xml
-    def get_new_offset(pos, is_end=False):
-        shift = 0
-        for start, end, new_text in sorted_edits_asc:
-            if is_end:
-                if pos <= start:
-                    break
-            else:
-                if pos < start:
-                    break
-            shift += len(new_text) - (end - start)
-        return pos + shift
-        
-    fixed_tag_ranges = []
-    for t_start, t_end in tag_ranges:
-        fixed_tag_ranges.append((get_new_offset(t_start, False), get_new_offset(t_end, True)))
-        
-    def get_zone(pos, t_start, t_end):
-        if pos < t_start:
-            return 0
-        elif pos >= t_end:
-            return 2
-        else:
-            return 1
-            
-    import bisect
-    
-    # Check each structural character type for crossing migrations
-    for char_type in structural_chars:
-        orig_offsets = []
-        for idx, c in enumerate(original_xml):
-            if c == char_type:
-                orig_offsets.append(idx)
-                
-        fixed_offsets = []
-        for idx, c in enumerate(fixed_xml):
-            if c == char_type:
-                fixed_offsets.append(idx)
-                
-        # Pre-compute character count modifications per edit using C-speed .count()
-        edit_counts = []
-        for start, end, replacement in edits:
-            del_cnt = original_xml[start:end].count(char_type)
-            ins_cnt = replacement.count(char_type)
-            edit_counts.append((start, end, del_cnt, ins_cnt))
-                
-        for tag_idx, (t_start, t_end) in enumerate(tag_ranges):
-            t_start_new, t_end_new = fixed_tag_ranges[tag_idx]
-            
-            # O(log N) binary search instead of O(N) generator sums
-            orig_left = bisect.bisect_left(orig_offsets, t_start)
-            orig_inside = bisect.bisect_left(orig_offsets, t_end) - orig_left
-            
-            fixed_left = bisect.bisect_left(fixed_offsets, t_start_new)
-            fixed_inside = bisect.bisect_left(fixed_offsets, t_end_new) - fixed_left
-            
-            del_left = 0
-            ins_left = 0
-            del_inside = 0
-            ins_inside = 0
-            total_del_char = 0
-            total_ins_char = 0
-            
-            for start, end, del_cnt, ins_cnt in edit_counts:
-                total_del_char += del_cnt
-                total_ins_char += ins_cnt
-                
-                if end <= t_start:
-                    del_left += del_cnt
-                    ins_left += ins_cnt
-                elif start >= t_end:
-                    pass
-                else:
-                    del_inside += del_cnt
-                    ins_inside += ins_cnt
-                    
-            if total_del_char == total_ins_char:
-                if fixed_left != orig_left or fixed_inside != orig_inside:
-                    return False
-            else:
-                expected_left = orig_left - del_left + ins_left
-                expected_inside = orig_inside - del_inside + ins_inside
-                if fixed_left != expected_left or fixed_inside != expected_inside:
-                    return False
-                                
+    """Return whether source-mapped edits leave every XML tag untouched.
+
+    SQL edits may freely change structural SQL characters in text nodes.  The
+    safety invariant is simply that no replacement intersects XML markup; an
+    edit wholly before a tag only shifts that tag and cannot change it.  The
+    previous implementation recounted every punctuation character across
+    every tag and edit, making large mapper fixes effectively cubic.
+    """
+    sorted_edits = sorted(edits, key=lambda edit: (edit[0], edit[1]))
+    previous_end = -1
+    for start, end, _ in sorted_edits:
+        if start < 0 or end < start or end > len(original_xml):
+            return False
+        if start < previous_end:
+            return False
+        previous_end = max(previous_end, end)
+
+    sorted_ranges = sorted(tag_ranges)
+    range_index = 0
+    for start, end, _ in sorted_edits:
+        while range_index < len(sorted_ranges) and sorted_ranges[range_index][1] <= start:
+            range_index += 1
+        if range_index >= len(sorted_ranges):
+            continue
+        tag_start, tag_end = sorted_ranges[range_index]
+        if start == end:
+            if tag_start < start < tag_end:
+                return False
+        elif start < tag_end and end > tag_start:
+            return False
     return True
 
 def fix_embedded_content(

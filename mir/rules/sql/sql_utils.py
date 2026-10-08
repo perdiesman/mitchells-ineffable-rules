@@ -8,7 +8,10 @@ SQL_KEYWORDS = {
     "UNION", "INTERSECT", "EXCEPT", "AND", "OR", "NOT", "IN", "EXISTS", "IS", "NULL",
     "AS", "CREATE", "VIEW", "MATERIALIZED", "TABLE", "INSERT", "INTO", "VALUES", "UPDATE",
     "SET", "DELETE", "WITH", "CASE", "WHEN", "THEN", "ELSE", "END", "COALESCE",
-    "RECURSIVE", "ASC", "DESC", "DISTINCT"
+    "RECURSIVE", "ASC", "DESC", "DISTINCT",
+    # TO must not be mistaken for a function name in constructs such as
+    # IMPORT FOREIGN SCHEMA ... LIMIT TO (...).
+    "TO"
 }
 
 OPERATORS = {
@@ -121,6 +124,27 @@ def _tokenize_sql_impl(content: str) -> List[dict]:
                 "line": line_number
             })
             continue
+
+        # Template parameters are opaque SQL values. Recognize them before
+        # dollar-quoted strings and punctuation so embedded SQL rules do not
+        # interpret names inside a MyBatis placeholder as identifiers.
+        if c in ("#", "$") and i + 1 < n and content[i + 1] == "{":
+            start = i
+            i += 2
+            while i < n and content[i] != "}":
+                if content[i] == "\n":
+                    line_number += 1
+                i += 1
+            if i < n:
+                i += 1
+            tokens.append({
+                "type": "PARAM",
+                "value": content[start:i],
+                "start": start,
+                "end": i,
+                "line": line_number
+            })
+            continue
             
         # Dollar-quoted string
         if c == '$':
@@ -155,6 +179,26 @@ def _tokenize_sql_impl(content: str) -> List[dict]:
                 "line": line_number
             })
             i += 2
+            continue
+
+        # Trellis and conventional named binds. Dotted paths are one opaque
+        # parameter, while PostgreSQL's :: cast remains a distinct token.
+        if c == ':' and i + 1 < n and (content[i + 1].isalpha() or content[i + 1] == '_'):
+            start = i
+            i += 2
+            while i < n and (content[i].isalnum() or content[i] == '_'):
+                i += 1
+            while i + 1 < n and content[i] == '.' and (content[i + 1].isalpha() or content[i + 1] == '_'):
+                i += 2
+                while i < n and (content[i].isalnum() or content[i] == '_'):
+                    i += 1
+            tokens.append({
+                "type": "PARAM",
+                "value": content[start:i],
+                "start": start,
+                "end": i,
+                "line": line_number
+            })
             continue
             
         # Paren

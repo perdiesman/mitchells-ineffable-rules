@@ -30,7 +30,9 @@ class ParenContentIndentRule(BaseRule):
         'SELECT COALESCE(a, b) FROM users;',
         'SELECT (a + b) FROM users;',
         'INSERT INTO t(c) VALUES (1);',
-        'INSERT INTO t(c) VALUES\n    (1),\n    (2);'
+        'INSERT INTO t(c) VALUES\n    (1),\n    (2);',
+        'IMPORT FOREIGN SCHEMA sample_remote LIMIT TO (sample_table) '
+        'FROM SERVER sample_server INTO sample_local;'
     ]
 
     def _get_line_expected_indents(self, content: str) -> Dict[int, str]:

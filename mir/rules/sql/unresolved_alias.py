@@ -20,7 +20,9 @@ class UnresolvedAliasRule(BaseRule):
     ]
     additional_validations = [
         "SELECT o.id FROM other_schema.other_table o;",
-        "SELECT NEW.id;"
+        "SELECT NEW.id;",
+        "INSERT INTO sample_table (item_id, item_value) VALUES (1, 'x') "
+        "ON CONFLICT (item_id) DO UPDATE SET item_value = excluded.item_value;"
     ]
 
     def _find_violations(self, content: str) -> List[dict]:
@@ -30,7 +32,7 @@ class UnresolvedAliasRule(BaseRule):
         # 1. Collect valid qualifiers
         valid = {
             "pg_catalog", "information_schema", "public", "my_schema", "other_schema",
-            "new", "old", "tg_op"
+            "new", "old", "tg_op", "excluded"
         }
         
         # Parse DECLARE block variables
