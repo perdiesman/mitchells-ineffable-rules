@@ -127,6 +127,31 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(ClauseAlignmentRule().check(content, "generic.sql", {}), [])
 
+    def test_is_distinct_from_is_not_a_from_clause(self):
+        content = (
+            "SELECT item.item_id\nFROM sample_item item\n"
+            "WHERE (item.state, item.value) IS DISTINCT FROM (:state, :value);"
+        )
+
+        self.assertEqual(ClauseAlignmentRule().check(content, "generic.sql", {}), [])
+
+    def test_clause_alignment_ignores_dollar_quoted_function_body(self):
+        content = (
+            "CREATE FUNCTION sample_function() RETURNS void AS $body$\n"
+            "select item_id from sample_item where active;\n"
+            "$body$ LANGUAGE sql;"
+        )
+
+        self.assertEqual(ClauseAlignmentRule().fix(content, "generic.sql", {}), content)
+
+    def test_clause_alignment_keeps_statements_independent(self):
+        content = (
+            "SELECT item_id\nFROM sample_item;\n"
+            "    SELECT state_id\n    FROM sample_state;"
+        )
+
+        self.assertEqual(ClauseAlignmentRule().fix(content, "generic.sql", {}), content)
+
     def test_cte_and_lateral_parentheses_are_not_function_calls(self):
         content = (
             "WITH sample_rows AS (SELECT item_id FROM sample_item)\n"
@@ -184,6 +209,25 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
 
+    def test_subquery_clauses_align_after_expanding_inline_subquery(self):
+        content = (
+            "SELECT item_id FROM sample_item WHERE state_id = (( SELECT state_id\n"
+            "           FROM sample_state\n"
+            "              WHERE state_code = :state_code));"
+        )
+        expected = (
+            "SELECT item_id FROM sample_item WHERE state_id = ((\n"
+            "    SELECT state_id\n"
+            "    FROM sample_state\n"
+            "    WHERE state_code = :state_code\n"
+            "));"
+        )
+
+        fixed = SubqueryIndentRule().fix(content, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(SubqueryIndentRule().fix(fixed, "generic.sql", {}), fixed)
+
     def test_single_statement_file_does_not_require_semicolon(self):
         content = "SELECT item_id FROM sample_item\n"
 
@@ -208,6 +252,35 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
+
+    def test_between_delimiter_is_not_a_boolean_condition_boundary(self):
+        where_source = (
+            "SELECT item_id FROM sample_item WHERE recorded_at BETWEEN :start\n"
+            "    AND :end AND organization_identifier = :organization_identifier;"
+        )
+        where_expected = (
+            "SELECT item_id FROM sample_item WHERE\n"
+            "    recorded_at BETWEEN :start AND :end\n"
+            "    AND organization_identifier = :organization_identifier;"
+        )
+        join_source = (
+            "SELECT item.item_id FROM sample_item item JOIN sample_window window "
+            "ON item.recorded_at BETWEEN window.start_at\n"
+            "    AND window.end_at AND item.organization_identifier = window.organization_identifier;"
+        )
+        join_expected = (
+            "SELECT item.item_id FROM sample_item item JOIN sample_window window\n"
+            "    ON item.recorded_at BETWEEN window.start_at AND window.end_at\n"
+            "    AND item.organization_identifier = window.organization_identifier;"
+        )
+
+        where_rule = WhereMultiRule()
+        join_rule = JoinOnMultiRule()
+        where_config = {"max_line_length": 80}
+        self.assertEqual(where_rule.fix(where_source, "generic.sql", where_config), where_expected)
+        self.assertEqual(join_rule.fix(join_source, "generic.sql", {}), join_expected)
+        self.assertEqual(where_rule.check(where_expected, "generic.sql", where_config), [])
+        self.assertEqual(join_rule.check(join_expected, "generic.sql", {}), [])
 
     def test_distinct_on_wraps_independently_from_projection_columns(self):
         rule = ColumnLayoutRule()

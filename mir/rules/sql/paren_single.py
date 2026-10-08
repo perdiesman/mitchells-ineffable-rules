@@ -1,6 +1,11 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren, get_token_depths
+from mir.rules.sql.sql_utils import (
+    find_boolean_operator_indices,
+    find_matching_paren,
+    get_token_depths,
+    tokenize_sql,
+)
 
 class ParenSingleRule(BaseRule):
     rule_id = "IR-paren-single"
@@ -33,8 +38,15 @@ class ParenSingleRule(BaseRule):
 
     def _is_simple_atom(self, tokens: List[dict]) -> bool:
         depths = get_token_depths(tokens)
-        for tok, d in zip(tokens, depths):
-            if d == 0 and tok["type"] in ("OPERATOR", "KEYWORD") and tok["value"].upper() in ("AND", "OR", "+", "-", "*", "/", "%", "=", "<>", "<=", ">=", "!=", "<", ">", "||"):
+        boolean_indices = set(find_boolean_operator_indices(tokens, depths, 0))
+        for index, (tok, d) in enumerate(zip(tokens, depths)):
+            if d == 0 and (
+                index in boolean_indices
+                or (
+                    tok["type"] == "OPERATOR"
+                    and tok["value"] in ("+", "-", "*", "/", "%", "=", "<>", "<=", ">=", "!=", "<", ">", "||")
+                )
+            ):
                 return False
         return True
 
@@ -105,10 +117,17 @@ class ParenSingleRule(BaseRule):
                     
                 # Check for comma, AND, OR, SELECT at depth 0 inside the paren
                 inner_depths = get_token_depths(inner_tokens)
+                boolean_indices = set(find_boolean_operator_indices(
+                    inner_tokens, inner_depths, 0
+                ))
                 has_multi = False
-                for t, d in zip(inner_tokens, inner_depths):
+                for inner_index, (t, d) in enumerate(zip(inner_tokens, inner_depths)):
                     if d == 0:
-                        if t["type"] in ("COMMA", "KEYWORD") and t["value"].upper() in ("AND", "OR", "SELECT", ","):
+                        if (
+                            inner_index in boolean_indices
+                            or t["type"] == "COMMA"
+                            or (t["type"] == "KEYWORD" and t["value"].upper() == "SELECT")
+                        ):
                             has_multi = True
                             break
                 if has_multi:

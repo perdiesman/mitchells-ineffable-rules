@@ -1,6 +1,6 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
+from mir.rules.sql.sql_utils import find_boolean_operator_indices, tokenize_sql, get_token_depths
 
 class WhereSingleRule(BaseRule):
     rule_id = "IR-where-single"
@@ -20,7 +20,8 @@ class WhereSingleRule(BaseRule):
     ]
     additional_validations = [
         "SELECT id FROM users WHERE active = true;",
-        "SELECT id FROM users WHERE active = true AND age > 21;" # Multi-condition is skipped here
+        "SELECT id FROM users WHERE active = true AND age > 21;", # Multi-condition is skipped here
+        "SELECT id FROM users WHERE created_at BETWEEN :start AND :end;",
     ]
 
     def _find_violations(self, content: str) -> List[dict]:
@@ -55,15 +56,14 @@ class WhereSingleRule(BaseRule):
                 clause_depths = depths[i + 1:clause_end]
                 
                 # Check for AND/OR at depth outer_depth
-                has_logical = False
+                has_logical = bool(find_boolean_operator_indices(
+                    tokens, depths, outer_depth, i + 1, clause_end
+                ))
                 first_cond_tok = None
                 
                 for idx, (t, d) in enumerate(zip(clause_tokens, clause_depths)):
                     if d == outer_depth:
-                        if t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
-                            has_logical = True
-                            break
-                        elif t["type"] != "WHITESPACE" and first_cond_tok is None:
+                        if t["type"] != "WHITESPACE" and first_cond_tok is None:
                             first_cond_tok = t
                             
                 if first_cond_tok and not has_logical:

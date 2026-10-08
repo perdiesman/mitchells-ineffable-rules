@@ -6,6 +6,7 @@ SQL_KEYWORDS = {
     "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "BY", "HAVING", "LIMIT", "OFFSET",
     "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "FULL", "CROSS", "NATURAL", "ON", "USING",
     "UNION", "INTERSECT", "EXCEPT", "AND", "OR", "NOT", "IN", "EXISTS", "IS", "NULL",
+    "BETWEEN", "SYMMETRIC",
     "AS", "CAST", "CREATE", "VIEW", "MATERIALIZED", "TABLE", "INSERT", "INTO", "VALUES", "UPDATE",
     "SET", "DELETE", "WITH", "CASE", "WHEN", "THEN", "ELSE", "END", "COALESCE",
     "RECURSIVE", "ASC", "DESC", "DISTINCT", "FILTER", "CONFLICT",
@@ -27,6 +28,72 @@ OPERATORS = {
     "@@", "<<", ">>", "=", "<", ">", "+", "-", "*", "/", "%", "~",
     "?", "&", "|", "#", "^"
 }
+
+
+def _classify_predicate_operator_indices(
+    tokens: List[dict],
+    depths: List[int],
+    target_depth: int,
+    start: int = 0,
+    end: Optional[int] = None,
+) -> tuple[List[int], List[int]]:
+    """Return boolean operators and BETWEEN delimiter AND tokens.
+
+    CASE expressions are opaque at this level because boolean operators inside
+    their WHEN clauses do not separate the surrounding predicate.
+    """
+    end = len(tokens) if end is None else end
+    boolean_operators = []
+    between_delimiters = []
+    case_depth = 0
+    between_pending = False
+    for index in range(start, end):
+        token = tokens[index]
+        if token["type"] not in {"KEYWORD", "IDENTIFIER"}:
+            continue
+        value = token["value"].upper()
+        if value == "CASE":
+            case_depth += 1
+            continue
+        if value == "END" and case_depth:
+            case_depth -= 1
+            continue
+        if case_depth or depths[index] != target_depth:
+            continue
+        if value == "BETWEEN":
+            between_pending = True
+        elif value == "AND" and between_pending:
+            between_pending = False
+            between_delimiters.append(index)
+        elif value in {"AND", "OR"}:
+            boolean_operators.append(index)
+    return boolean_operators, between_delimiters
+
+
+def find_boolean_operator_indices(
+    tokens: List[dict],
+    depths: List[int],
+    target_depth: int,
+    start: int = 0,
+    end: Optional[int] = None,
+) -> List[int]:
+    """Return boolean AND/OR tokens, excluding BETWEEN's delimiter AND."""
+    return _classify_predicate_operator_indices(
+        tokens, depths, target_depth, start, end
+    )[0]
+
+
+def find_between_delimiter_indices(
+    tokens: List[dict],
+    depths: List[int],
+    target_depth: int,
+    start: int = 0,
+    end: Optional[int] = None,
+) -> List[int]:
+    """Return AND tokens that delimit BETWEEN's lower and upper bounds."""
+    return _classify_predicate_operator_indices(
+        tokens, depths, target_depth, start, end
+    )[1]
 
 
 def protected_sql_signature(content: str) -> tuple[tuple[str, str], ...]:

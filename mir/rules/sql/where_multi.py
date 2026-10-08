@@ -1,6 +1,11 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
+from mir.rules.sql.sql_utils import (
+    find_between_delimiter_indices,
+    find_boolean_operator_indices,
+    get_token_depths,
+    tokenize_sql,
+)
 
 class WhereMultiRule(BaseRule):
     commit_profile = True
@@ -18,11 +23,16 @@ class WhereMultiRule(BaseRule):
         {
             "violating": "SELECT id FROM users WHERE some_long_column_identifier_active = true AND another_long_column_identifier_type = 'admin' OR age_greater_than_limit > 21;",
             "correct": "SELECT id FROM users WHERE\n    some_long_column_identifier_active = true\n    AND another_long_column_identifier_type = 'admin'\n    OR age_greater_than_limit > 21;"
+        },
+        {
+            "violating": "SELECT item_id FROM sample_item WHERE recorded_at BETWEEN :start\n    AND :end AND owning_organization_identifier = :owning_organization_identifier AND processing_status = :processing_status;",
+            "correct": "SELECT item_id FROM sample_item WHERE\n    recorded_at BETWEEN :start AND :end\n    AND owning_organization_identifier = :owning_organization_identifier\n    AND processing_status = :processing_status;"
         }
     ]
     additional_validations = [
         "SELECT id FROM users WHERE active = true;",
         "SELECT id FROM users WHERE active = true AND retired = false;",
+        "SELECT id FROM users WHERE created_at BETWEEN :start AND :end;",
     ]
 
     def _find_violations(self, content: str, rule_config: Dict[str, Any] = None) -> List[dict]:
@@ -68,18 +78,26 @@ class WhereMultiRule(BaseRule):
                 clause_tokens = tokens[i + 1:clause_end]
                 clause_depths = depths[i + 1:clause_end]
                 
-                has_multi = False
-                case_depth = 0
-                for t, d in zip(clause_tokens, clause_depths):
-                    if t["type"] == "KEYWORD":
-                        val_up = t["value"].upper()
-                        if val_up == "CASE":
-                            case_depth += 1
-                        elif val_up == "END" and case_depth > 0:
-                            case_depth -= 1
-                    if case_depth == 0 and d == outer_depth and t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
-                        has_multi = True
-                        break
+                boolean_indices = find_boolean_operator_indices(
+                    tokens, depths, outer_depth, i + 1, clause_end
+                )
+                for delimiter_idx in find_between_delimiter_indices(
+                    tokens, depths, outer_depth, i + 1, clause_end
+                ):
+                    delimiter = tokens[delimiter_idx]
+                    ws_before = (
+                        tokens[delimiter_idx - 1]
+                        if delimiter_idx and tokens[delimiter_idx - 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    if not ws_before or ws_before["value"] != " ":
+                        violations.append({
+                            "token": delimiter,
+                            "ws_start": ws_before["start"] if ws_before else delimiter["start"],
+                            "ws_end": delimiter["start"],
+                            "replacement": " ",
+                        })
+                has_multi = bool(boolean_indices)
                         
                 if has_multi:
                     where_clause_tokens = tokens[i : clause_end]
@@ -138,30 +156,20 @@ class WhereMultiRule(BaseRule):
                             })
                             
                     # 2. Format subsequent AND/OR keywords onto their own lines
-                    case_depth = 0
-                    for j_idx, (t, d) in enumerate(zip(clause_tokens, clause_depths)):
-                        if t["type"] == "KEYWORD":
-                            val_up = t["value"].upper()
-                            if val_up == "CASE":
-                                case_depth += 1
-                            elif val_up == "END" and case_depth > 0:
-                                case_depth -= 1
-                        if case_depth == 0 and d == outer_depth and t["type"] == "KEYWORD":
-                            val_upper = t["value"].upper()
-                            if val_upper in ("AND", "OR"):
-                                actual_idx = i + 1 + j_idx
-                                ws_tok = None
-                                if actual_idx - 1 >= 0 and tokens[actual_idx - 1]["type"] == "WHITESPACE":
-                                    ws_tok = tokens[actual_idx - 1]
-                                    
-                                expected_replacement = "\n" + expected_indent
-                                if not ws_tok or ws_tok["value"] != expected_replacement:
-                                    violations.append({
-                                        "token": t,
-                                        "ws_start": ws_tok["start"] if ws_tok else t["start"],
-                                        "ws_end": t["start"],
-                                        "replacement": expected_replacement
-                                    })
+                    for actual_idx in boolean_indices:
+                        t = tokens[actual_idx]
+                        ws_tok = None
+                        if actual_idx - 1 >= 0 and tokens[actual_idx - 1]["type"] == "WHITESPACE":
+                            ws_tok = tokens[actual_idx - 1]
+
+                        expected_replacement = "\n" + expected_indent
+                        if not ws_tok or ws_tok["value"] != expected_replacement:
+                            violations.append({
+                                "token": t,
+                                "ws_start": ws_tok["start"] if ws_tok else t["start"],
+                                "ws_end": t["start"],
+                                "replacement": expected_replacement
+                            })
                                 
         return violations
 
@@ -188,13 +196,13 @@ class WhereMultiRule(BaseRule):
         if not offending:
             return content
             
-        edits = []
+        edits = {}
         for item in offending:
-            edits.append((item["ws_start"], item["ws_end"], item["replacement"]))
+            edits[(item["ws_start"], item["ws_end"])] = item["replacement"]
             
-        edits.sort(key=lambda x: x[0], reverse=True)
+        ordered_edits = sorted(edits.items(), key=lambda item: item[0][0], reverse=True)
         chars = list(content)
-        for start, end, new_text in edits:
+        for (start, end), new_text in ordered_edits:
             chars[start:end] = list(new_text)
             
         return "".join(chars)

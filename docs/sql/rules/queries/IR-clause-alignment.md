@@ -7,7 +7,7 @@ Main query clause keywords (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIM
 - **Category**: Query Structure Rules
 - **Commit Profile**: No
 - **MyBatis Safe**: Yes
-- **Trellis Safe**: No
+- **Trellis Safe**: Yes
 - **Configuration Options**:
   - `enabled`: `true`
 

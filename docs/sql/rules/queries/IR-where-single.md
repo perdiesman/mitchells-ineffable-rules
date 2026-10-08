@@ -32,3 +32,7 @@ SELECT id FROM users WHERE active = true;
 ```sql
 SELECT id FROM users WHERE active = true AND age > 21;
 ```
+
+```sql
+SELECT id FROM users WHERE created_at BETWEEN :start AND :end;
+```

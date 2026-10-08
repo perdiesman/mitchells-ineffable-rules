@@ -1,7 +1,12 @@
 import re
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
+from mir.rules.sql.sql_utils import (
+    find_between_delimiter_indices,
+    find_boolean_operator_indices,
+    get_token_depths,
+    tokenize_sql,
+)
 
 class JoinOnMultiRule(BaseRule):
     commit_profile = True
@@ -19,11 +24,16 @@ class JoinOnMultiRule(BaseRule):
         {
             "violating": "SELECT * FROM table_one JOIN table_two ON table_one.some_long_column_identifier = table_two.some_long_column_identifier AND table_one.another_long_column_identifier = table_two.another_long_column_identifier;",
             "correct": "SELECT * FROM table_one JOIN table_two ON table_one.some_long_column_identifier = table_two.some_long_column_identifier\n    AND table_one.another_long_column_identifier = table_two.another_long_column_identifier;"
+        },
+        {
+            "violating": "SELECT item.id FROM sample_item item JOIN sample_window window ON item.created_at BETWEEN window.start_at\n    AND window.end_at AND item.organization_identifier = window.organization_identifier;",
+            "correct": "SELECT item.id FROM sample_item item JOIN sample_window window\n    ON item.created_at BETWEEN window.start_at AND window.end_at\n    AND item.organization_identifier = window.organization_identifier;"
         }
     ]
     additional_validations = [
         'SELECT * FROM t1 JOIN t2 ON t1.id = t2.id;',
-        'SELECT DISTINCT ON (item.item_id) item.item_id FROM sample_item item;'
+        'SELECT DISTINCT ON (item.item_id) item.item_id FROM sample_item item;',
+        'SELECT * FROM t1 JOIN t2 ON t1.created_at BETWEEN t2.start_at AND t2.end_at;'
     ]
 
     def _find_violations(self, content: str, rule_config: Dict[str, Any] = None) -> List[dict]:
@@ -120,6 +130,12 @@ class JoinOnMultiRule(BaseRule):
                             
                 clause_tokens = tokens[i + 1:clause_end]
                 clause_depths = depths[i + 1:clause_end]
+                boolean_indices = find_boolean_operator_indices(
+                    tokens, depths, outer_depth, i + 1, clause_end
+                )
+                between_delimiter_indices = find_between_delimiter_indices(
+                    tokens, depths, outer_depth, i + 1, clause_end
+                )
                 
                 on_clause_tokens = tokens[i : clause_end]
                 on_clause_str = "".join(t["value"] for t in on_clause_tokens)
@@ -134,8 +150,8 @@ class JoinOnMultiRule(BaseRule):
                 max_len = self.get_config_value(rule_config, "max_line_length", 100, fallbacks=[(LineLengthRule, "max_length")])
                 
                 first_cond_toks = []
-                for t, d in zip(clause_tokens, clause_depths):
-                    if d == outer_depth and t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
+                for actual_idx, t in enumerate(tokens[i + 1:clause_end], start=i + 1):
+                    if actual_idx in boolean_indices:
                         break
                     first_cond_toks.append(t)
                 
@@ -177,6 +193,21 @@ class JoinOnMultiRule(BaseRule):
                         "ws_end": ws_after_on["end"] if ws_after_on else tok["end"],
                         "replacement": expected_post_on_ws
                     })
+
+                for delimiter_idx in between_delimiter_indices:
+                    delimiter = tokens[delimiter_idx]
+                    ws_before = (
+                        tokens[delimiter_idx - 1]
+                        if delimiter_idx and tokens[delimiter_idx - 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    if not ws_before or ws_before["value"] != " ":
+                        violations.append({
+                            "token": delimiter,
+                            "ws_start": ws_before["start"] if ws_before else delimiter["start"],
+                            "ws_end": delimiter["start"],
+                            "replacement": " ",
+                        })
                 
                 # Preserve a deliberately multiline predicate and normalize its
                 # continuation indentation. Compact predicates that already fit
@@ -184,21 +215,20 @@ class JoinOnMultiRule(BaseRule):
                 if estimated_line_len <= max_len and not is_multiline:
                     continue
                     
-                for j_idx, (t, d) in enumerate(zip(clause_tokens, clause_depths)):
-                    if d == outer_depth and t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
-                        actual_idx = i + 1 + j_idx
-                        ws_before = None
-                        if actual_idx - 1 >= 0 and tokens[actual_idx - 1]["type"] == "WHITESPACE":
-                            ws_before = tokens[actual_idx - 1]
-                            
-                        expected_replacement = "\n" + expected_indent
-                        if not ws_before or ws_before["value"] != expected_replacement:
-                            violations.append({
-                                "token": t,
-                                "ws_start": ws_before["start"] if ws_before else t["start"],
-                                "ws_end": t["start"],
-                                "replacement": expected_replacement
-                            })
+                for actual_idx in boolean_indices:
+                    t = tokens[actual_idx]
+                    ws_before = None
+                    if actual_idx - 1 >= 0 and tokens[actual_idx - 1]["type"] == "WHITESPACE":
+                        ws_before = tokens[actual_idx - 1]
+
+                    expected_replacement = "\n" + expected_indent
+                    if not ws_before or ws_before["value"] != expected_replacement:
+                        violations.append({
+                            "token": t,
+                            "ws_start": ws_before["start"] if ws_before else t["start"],
+                            "ws_end": t["start"],
+                            "replacement": expected_replacement
+                        })
                             
         return violations
 

@@ -117,6 +117,34 @@ class TestGitStaged(unittest.TestCase):
             "select legacy_id from legacy_table;\nSELECT item_name FROM sample_table;\n",
         )
 
+    def test_staged_statement_formats_between_without_splitting_its_delimiter(self):
+        path = self.root / "queries.sql"
+        path.write_text(
+            "SELECT item_id FROM sample_item WHERE recorded_at BETWEEN :start\n"
+            "    AND :end AND owning_organization_identifier_for_processed_sample_record = :old_organization;\n",
+            encoding="utf-8",
+        )
+        self.git("add", "queries.sql")
+        self.git("commit", "-qm", "initial")
+        path.write_text(
+            "SELECT item_id FROM sample_item WHERE recorded_at BETWEEN :start\n"
+            "    AND :end AND owning_organization_identifier_for_processed_sample_record = :new_organization;\n",
+            encoding="utf-8",
+        )
+        self.git("add", "queries.sql")
+
+        document = read_staged_documents(self.root, {".sql"})[0]
+        selection = expand_selection(document.content, "sql", document.changed_lines)
+        result = process_document(self.config(), document.content, document.path, "sql", selection)
+        update_staged_documents(self.root, [(document, result.content)])
+
+        self.assertEqual(
+            self.git("show", ":queries.sql"),
+            "SELECT item_id FROM sample_item WHERE\n"
+            "    recorded_at BETWEEN :start AND :end\n"
+            "    AND owning_organization_identifier_for_processed_sample_record = :new_organization;\n",
+        )
+
     def test_staged_mybatis_sql_fix_preserves_parameters_and_xml(self):
         path = self.root / "SampleMapper.xml"
         path.write_text(

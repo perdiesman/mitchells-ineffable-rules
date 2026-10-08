@@ -1,6 +1,6 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
+from mir.rules.sql.sql_utils import find_boolean_operator_indices, tokenize_sql, get_token_depths
 from mir.rules.sql.indent import IndentRule
 from mir.rules.sql.line_length import LineLengthRule
 
@@ -184,18 +184,17 @@ class CaseLayoutRule(BaseRule):
                         res_tokens = tokens[then_part[1]:then_part[2]]
                         res_text = "".join([t["value"] for t in res_tokens]).strip()
                         
-                        # Split condition tokens on AND/OR at depth 0
+                        # Split condition tokens on boolean AND/OR at depth 0;
+                        # BETWEEN's delimiter AND belongs to the same condition.
                         import re
                         cond_parts = []
                         current_part = []
-                        depth = 0
-                        for t_c in cond_tokens:
-                            if t_c["type"] == "PAREN" and t_c["value"] == "(":
-                                depth += 1
-                            elif t_c["type"] == "PAREN" and t_c["value"] == ")":
-                                depth -= 1
-                                
-                            if depth == 0 and t_c["type"] == "KEYWORD" and t_c["value"].upper() in ("AND", "OR"):
+                        cond_depths = get_token_depths(cond_tokens)
+                        boolean_indices = set(find_boolean_operator_indices(
+                            cond_tokens, cond_depths, 0
+                        ))
+                        for cond_index, t_c in enumerate(cond_tokens):
+                            if cond_index in boolean_indices:
                                 if current_part:
                                     cond_parts.append(current_part)
                                 current_part = [t_c]

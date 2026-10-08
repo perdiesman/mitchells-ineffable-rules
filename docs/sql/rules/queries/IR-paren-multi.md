@@ -28,3 +28,7 @@ SELECT * FROM users WHERE active AND (
 ```sql
 SELECT item_id FROM sample_item WHERE NOT EXISTS (SELECT 1 FROM sample_child);
 ```
+
+```sql
+SELECT item_id FROM sample_item WHERE (created_at BETWEEN :start AND :end);
+```

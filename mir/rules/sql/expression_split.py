@@ -1,6 +1,12 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths, find_matching_paren, is_values_multi
+from mir.rules.sql.sql_utils import (
+    find_boolean_operator_indices,
+    find_matching_paren,
+    get_token_depths,
+    is_values_multi,
+    tokenize_sql,
+)
 from mir.rules.sql.line_length import LineLengthRule
 from mir.rules.sql.indent import IndentRule
 
@@ -121,12 +127,18 @@ class ExpressionSplitRule(BaseRule):
             keywords = []
             commas = []
             operators = []
+            boolean_indices = set(find_boolean_operator_indices(
+                tokens, depths, base_depth
+            ))
             for t in active_tokens[:-1]:
                 t_idx = get_index(t)
                 if depths[t_idx] == base_depth:
                     if t["type"] == "OPERATOR" and t["value"] in ("+", "-", "||", "*", "/"):
                         operators.append(t)
-                    elif t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR", "ORDER", "PARTITION", "BY"):
+                    elif (
+                        t_idx in boolean_indices
+                        or (t["type"] == "KEYWORD" and t["value"].upper() in ("ORDER", "PARTITION", "BY"))
+                    ):
                         if t["value"].upper() == "BY":
                             prev_active = None
                             for prev_idx in range(t_idx - 1, -1, -1):
@@ -338,12 +350,18 @@ class ExpressionSplitRule(BaseRule):
                                 keywords_c1 = []
                                 commas_c1 = []
                                 operators_c1 = []
+                                boolean_indices_c1 = set(find_boolean_operator_indices(
+                                    tokens, depths, base_depth_c1, open_idx + 1, close_idx
+                                ))
                                 for idx_in in range(open_idx + 1, close_idx):
                                     t_in = tokens[idx_in]
                                     if depths[idx_in] == base_depth_c1:
                                         if t_in["type"] == "OPERATOR" and t_in["value"] in ("+", "-", "||", "*", "/"):
                                             operators_c1.append(t_in)
-                                        elif t_in["type"] == "KEYWORD" and t_in["value"].upper() in ("AND", "OR", "ORDER", "PARTITION", "BY"):
+                                        elif (
+                                            idx_in in boolean_indices_c1
+                                            or (t_in["type"] == "KEYWORD" and t_in["value"].upper() in ("ORDER", "PARTITION", "BY"))
+                                        ):
                                             if t_in["value"].upper() == "BY":
                                                 prev_active = None
                                                 for p_idx in range(idx_in - 1, open_idx, -1):

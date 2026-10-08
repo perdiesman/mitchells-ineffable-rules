@@ -1,6 +1,11 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren, get_token_depths
+from mir.rules.sql.sql_utils import (
+    find_boolean_operator_indices,
+    find_matching_paren,
+    get_token_depths,
+    tokenize_sql,
+)
 
 class ParenSameOpRule(BaseRule):
     embedded_safe = True
@@ -83,11 +88,14 @@ class ParenSameOpRule(BaseRule):
                 base_depth = depths[i] + 1
                 
                 # Check logical operators at depth 0
+                boolean_indices = set(find_boolean_operator_indices(
+                    tokens, depths, base_depth, i + 1, close_idx
+                ))
                 ops_seen = set()
                 has_sub_select_or_comma = False
-                for t, d in zip(inner_tokens, inner_depths):
+                for inner_index, (t, d) in enumerate(zip(inner_tokens, inner_depths), start=i + 1):
                     if d == base_depth:
-                        if t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
+                        if inner_index in boolean_indices:
                             ops_seen.add(t["value"].upper())
                         elif t["type"] in ("COMMA", "KEYWORD") and t["value"].upper() in ("SELECT", ","):
                             has_sub_select_or_comma = True

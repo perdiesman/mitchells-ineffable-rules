@@ -1,6 +1,11 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths, find_matching_paren
+from mir.rules.sql.sql_utils import (
+    find_boolean_operator_indices,
+    find_matching_paren,
+    get_token_depths,
+    tokenize_sql,
+)
 
 class ParenMultiRule(BaseRule):
     rule_id = "IR-paren-multi"
@@ -19,7 +24,8 @@ class ParenMultiRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT item_id FROM sample_item WHERE NOT EXISTS (SELECT 1 FROM sample_child);"
+        "SELECT item_id FROM sample_item WHERE NOT EXISTS (SELECT 1 FROM sample_child);",
+        "SELECT item_id FROM sample_item WHERE (created_at BETWEEN :start AND :end);",
     ]
 
     def _find_violations(self, content: str) -> List[dict]:
@@ -63,16 +69,11 @@ class ParenMultiRule(BaseRule):
                 ):
                     continue
                     
-                has_logical_check = False
-                inner_keywords = []
-                for idx in range(i + 1, close_idx):
-                    t = tokens[idx]
-                    d = depths[idx]
-                    if d == depths[i] + 1 and t["type"] == "KEYWORD":
-                        val_upper = t["value"].upper()
-                        if val_upper in ("AND", "OR"):
-                            has_logical_check = True
-                            inner_keywords.append((t, idx))
+                boolean_indices = find_boolean_operator_indices(
+                    tokens, depths, depths[i] + 1, i + 1, close_idx
+                )
+                has_logical_check = bool(boolean_indices)
+                inner_keywords = [(tokens[index], index) for index in boolean_indices]
                             
                 if not has_logical_check:
                     continue

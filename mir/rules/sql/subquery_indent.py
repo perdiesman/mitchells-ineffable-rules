@@ -34,6 +34,7 @@ class SubqueryIndentRule(BaseRule):
 
     def _find_violations(self, content: str) -> List[dict]:
         tokens = tokenize_sql(content)
+        depths = get_token_depths(tokens)
         violations = []
         n = len(tokens)
         
@@ -124,6 +125,21 @@ class SubqueryIndentRule(BaseRule):
                     else:
                         expected_close_indent = open_indent
                     expected_content_indent = expected_close_indent + "    "
+                    subquery_depth = depths[next_active_idx]
+                    clause_lines = {
+                        tokens[token_idx]["line"]
+                        for token_idx in range(next_active_idx, close_idx)
+                        if depths[token_idx] == subquery_depth
+                        and tokens[token_idx]["type"] == "KEYWORD"
+                        and tokens[token_idx]["value"].upper() in {
+                            "SELECT", "FROM", "WHERE", "GROUP", "ORDER",
+                            "HAVING", "LIMIT", "UNION", "INTERSECT", "EXCEPT",
+                        }
+                        and content[
+                            content.rfind("\n", 0, tokens[token_idx]["start"]) + 1
+                            : tokens[token_idx]["start"]
+                        ].strip() == ""
+                    }
                     
                     lines = content.splitlines()
                     start_line = tok["line"] + 1
@@ -165,7 +181,13 @@ class SubqueryIndentRule(BaseRule):
                         if line_text.strip() != "":
                             stripped = line_text.lstrip()
                             actual_indent = line_text[:len(line_text) - len(stripped)]
-                            if not actual_indent.startswith(expected_content_indent):
+                            if (
+                                line_no in clause_lines
+                                and actual_indent != expected_content_indent
+                            ) or (
+                                line_no not in clause_lines
+                                and not actual_indent.startswith(expected_content_indent)
+                            ):
                                 needs_fix = True
                                 break
                                 
@@ -177,7 +199,8 @@ class SubqueryIndentRule(BaseRule):
                             "open_line": tok["line"],
                             "close_line": tokens[close_idx]["line"],
                             "content_indent": expected_content_indent,
-                            "close_indent": expected_close_indent
+                            "close_indent": expected_close_indent,
+                            "clause_lines": clause_lines,
                         })
                         
         return violations
@@ -215,6 +238,7 @@ class SubqueryIndentRule(BaseRule):
         end_line = item["close_line"]
         expected_content_indent = item["content_indent"]
         expected_close_indent = item["close_indent"]
+        clause_lines = item["clause_lines"]
         close_tok = item["close_tok"]
         
         for line_no in range(start_line, end_line):
@@ -222,7 +246,13 @@ class SubqueryIndentRule(BaseRule):
             if line_text.strip() != "":
                 stripped = line_text.lstrip()
                 actual_indent = line_text[:len(line_text) - len(stripped)]
-                if not actual_indent.startswith(expected_content_indent):
+                if (
+                    line_no in clause_lines
+                    and actual_indent != expected_content_indent
+                ) or (
+                    line_no not in clause_lines
+                    and not actual_indent.startswith(expected_content_indent)
+                ):
                     lines[line_no - 1] = expected_content_indent + stripped
                 
         close_line_text = lines[end_line - 1]
