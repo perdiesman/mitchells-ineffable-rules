@@ -25,7 +25,10 @@ class ParenSingleRule(BaseRule):
     additional_validations = [
         "SELECT (a + b)::integer FROM users;",
         "SELECT COALESCE(id, 0) FROM users;",
-        "SELECT id FROM users WHERE (active = true AND type = 'admin');"
+        "SELECT id FROM users WHERE (active = true AND type = 'admin');",
+        "SELECT max(value) FILTER (WHERE active), ANY(:item_ids) FROM sample_item;",
+        "SELECT item_id FROM sample_item WHERE EXISTS (SELECT 1 FROM sample_child);",
+        "SELECT item_id FROM sample_item ORDER BY (rank <= :maximum_rank) DESC;",
     ]
 
     def _is_simple_atom(self, tokens: List[dict]) -> bool:
@@ -80,7 +83,7 @@ class ParenSingleRule(BaseRule):
                         is_special = True
                     elif prev_active["type"] == "IDENTIFIER":
                         is_special = True
-                    elif prev_active["type"] == "KEYWORD" and val_upper in ("COUNT", "COALESCE", "SUM", "AVG", "MIN", "MAX", "CONCAT", "SUBSTR", "DATE_PART", "NOW", "STRING_AGG", "DATE"):
+                    elif prev_active["type"] == "KEYWORD" and val_upper in ("COUNT", "COALESCE", "SUM", "AVG", "MIN", "MAX", "CONCAT", "SUBSTR", "DATE_PART", "NOW", "STRING_AGG", "DATE", "FILTER", "ANY", "SOME", "EXISTS", "LATERAL"):
                         is_special = True
                         
                 if is_special:
@@ -90,6 +93,14 @@ class ParenSingleRule(BaseRule):
                 inner_tokens = tokens[i + 1:close_idx]
                 inner_active = [t for t in inner_tokens if t["type"] != "WHITESPACE"]
                 if not inner_active:
+                    continue
+
+                next_after_close = None
+                for idx in range(close_idx + 1, n):
+                    if tokens[idx]["type"] != "WHITESPACE":
+                        next_after_close = tokens[idx]
+                        break
+                if next_after_close and next_after_close["value"].upper() in ("ASC", "DESC"):
                     continue
                     
                 # Check for comma, AND, OR, SELECT at depth 0 inside the paren
@@ -104,11 +115,6 @@ class ParenSingleRule(BaseRule):
                     continue
                     
                 # Check next token for CAST
-                next_after_close = None
-                for idx in range(close_idx + 1, n):
-                    if tokens[idx]["type"] != "WHITESPACE":
-                        next_after_close = tokens[idx]
-                        break
                 if next_after_close and next_after_close["type"] == "CAST":
                     if not self._is_simple_atom(inner_tokens):
                         continue

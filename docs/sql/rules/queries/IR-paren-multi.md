@@ -23,3 +23,8 @@ SELECT * FROM users WHERE active AND (
     OR not blocked
 );
 ```
+
+#### Additional Validations
+```sql
+SELECT item_id FROM sample_item WHERE NOT EXISTS (SELECT 1 FROM sample_child);
+```

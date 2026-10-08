@@ -18,7 +18,9 @@ class ParenMultiRule(BaseRule):
             "correct": "SELECT * FROM users WHERE active AND (\n    enabled\n    OR not blocked\n);"
         }
     ]
-    additional_validations = []
+    additional_validations = [
+        "SELECT item_id FROM sample_item WHERE NOT EXISTS (SELECT 1 FROM sample_child);"
+    ]
 
     def _find_violations(self, content: str) -> List[dict]:
         tokens = tokenize_sql(content)
@@ -51,6 +53,14 @@ class ParenMultiRule(BaseRule):
                     
                 close_idx = find_matching_paren(tokens, i)
                 if close_idx is None:
+                    continue
+
+                first_inner_idx = next_active(i + 1)
+                if (
+                    first_inner_idx < close_idx
+                    and tokens[first_inner_idx]["type"] == "KEYWORD"
+                    and tokens[first_inner_idx]["value"].upper() == "SELECT"
+                ):
                     continue
                     
                 has_logical_check = False

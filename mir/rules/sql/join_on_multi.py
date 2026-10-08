@@ -4,6 +4,8 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 
 class JoinOnMultiRule(BaseRule):
+    commit_profile = True
+    trellis_safe = True
     rule_id = "IR-join-on-multi"
     description = "Split AND or OR conditions in JOIN ON clauses to separate lines, indented 4 spaces."
     category = "queries"
@@ -20,7 +22,8 @@ class JoinOnMultiRule(BaseRule):
         }
     ]
     additional_validations = [
-        'SELECT * FROM t1 JOIN t2 ON t1.id = t2.id;'
+        'SELECT * FROM t1 JOIN t2 ON t1.id = t2.id;',
+        'SELECT DISTINCT ON (item.item_id) item.item_id FROM sample_item item;'
     ]
 
     def _find_violations(self, content: str, rule_config: Dict[str, Any] = None) -> List[dict]:
@@ -34,17 +37,36 @@ class JoinOnMultiRule(BaseRule):
         for i, tok in enumerate(tokens):
             if tok["type"] == "KEYWORD" and tok["value"].upper() == "ON":
                 outer_depth = depths[i]
+
+                prev_active = next(
+                    (
+                        tokens[index]
+                        for index in range(i - 1, -1, -1)
+                        if tokens[index]["type"] not in ("WHITESPACE", "COMMENT")
+                    ),
+                    None,
+                )
+                if prev_active and prev_active["value"].upper() == "DISTINCT":
+                    continue
                 
                 # Find the preceding JOIN token at the same depth to reconstruct join prefix
                 join_tok = None
                 for idx in range(i - 1, -1, -1):
                     t = tokens[idx]
                     d = depths[idx]
-                    if d == outer_depth and t["type"] == "KEYWORD" and t["value"].upper() in (
-                        "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "NATURAL"
-                    ):
-                        join_tok = t
-                        break
+                    if d == outer_depth and t["type"] == "KEYWORD":
+                        value = t["value"].upper()
+                        if value in ("JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "NATURAL"):
+                            join_tok = t
+                            break
+                        if value in (
+                            "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "HAVING",
+                            "LIMIT", "UNION", "INTERSECT", "EXCEPT",
+                        ):
+                            break
+
+                if join_tok is None:
+                    continue
                 
                 if join_tok:
                     join_line_start = content.rfind("\n", 0, join_tok["start"]) + 1
@@ -101,7 +123,11 @@ class JoinOnMultiRule(BaseRule):
                 
                 on_clause_tokens = tokens[i : clause_end]
                 on_clause_str = "".join(t["value"] for t in on_clause_tokens)
-                on_clause_single = re.sub(r'\s+', ' ', on_clause_str)
+                is_multiline = "\n" in on_clause_str
+                on_clause_single = "".join(
+                    " " if t["type"] == "WHITESPACE" else t["value"]
+                    for t in on_clause_tokens
+                )
                 estimated_line_len = len(on_indent) + len("JOIN ") + len(on_clause_single)
                 
                 from mir.rules.sql.line_length import LineLengthRule
@@ -117,7 +143,10 @@ class JoinOnMultiRule(BaseRule):
                     first_cond_toks.pop(0)
                     
                 first_cond_str = "".join(t["value"] for t in first_cond_toks).strip()
-                first_cond_str_normalized = re.sub(r'\s+', ' ', first_cond_str)
+                first_cond_str_normalized = "".join(
+                    " " if t["type"] == "WHITESPACE" else t["value"]
+                    for t in first_cond_toks
+                ).strip()
                 
                 estimated_first_line_len = len(join_prefix_for_on) + len("ON ") + len(first_cond_str_normalized)
                 expected_pre_on_ws = "\n" + expected_indent if estimated_first_line_len > max_len else " "
@@ -149,7 +178,10 @@ class JoinOnMultiRule(BaseRule):
                         "replacement": expected_post_on_ws
                     })
                 
-                if estimated_line_len <= max_len:
+                # Preserve a deliberately multiline predicate and normalize its
+                # continuation indentation. Compact predicates that already fit
+                # remain on one line.
+                if estimated_line_len <= max_len and not is_multiline:
                     continue
                     
                 for j_idx, (t, d) in enumerate(zip(clause_tokens, clause_depths)):

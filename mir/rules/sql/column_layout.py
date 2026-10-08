@@ -3,8 +3,22 @@ from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.line_length import LineLengthRule
 from mir.rules.sql.indent import IndentRule
+from mir.rules.sql.sql_utils import tokenize_sql
+
+
+def _normalize_inline_expression(expression: str) -> str:
+    """Collapse SQL whitespace without touching literal or quoted contents."""
+    tokens = tokenize_sql(expression.strip())
+    if any(token["type"] == "COMMENT" for token in tokens):
+        return expression.strip()
+    return "".join(
+        " " if token["type"] == "WHITESPACE" else token["value"]
+        for token in tokens
+    ).strip()
 
 class ColumnLayoutRule(BaseRule):
+    commit_profile = True
+    trellis_safe = True
     rule_id = "IR-column-layout"
     description = "On select, order by, group by, if all the columns fit on one line then put them on one line, otherwise wrap one per line."
     category = "queries"
@@ -41,8 +55,68 @@ class ColumnLayoutRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT id, name FROM users;"
+        "SELECT id, name FROM users;",
+        "SELECT DISTINCT ON (item_id, created_at) item_id, created_at FROM sample_item;"
     ]
+
+    @staticmethod
+    def _split_top_level_csv(text: str) -> List[str]:
+        expressions = []
+        start = 0
+        depth = 0
+        quote = None
+        index = 0
+        while index < len(text):
+            char = text[index]
+            if quote:
+                if char == quote:
+                    if index + 1 < len(text) and text[index + 1] == quote:
+                        index += 2
+                        continue
+                    quote = None
+                index += 1
+                continue
+            if char in ("'", '"'):
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif char == "," and depth == 0:
+                expression = _normalize_inline_expression(text[start:index])
+                if expression:
+                    expressions.append(expression)
+                start = index + 1
+            index += 1
+        expression = _normalize_inline_expression(text[start:])
+        if expression:
+            expressions.append(expression)
+        return expressions
+
+    def _format_prefix(
+        self,
+        clause: dict,
+        max_length: int,
+        indent_size: int,
+        base_indent_spaces: int,
+    ) -> str:
+        keyword = clause["keyword"]
+        distinct_on = clause.get("distinct_on_expressions", [])
+        if not distinct_on:
+            return keyword
+
+        indentation = clause["indentation"]
+        inline = f"SELECT DISTINCT ON ({', '.join(distinct_on)})"
+        effective_indent_len = max(0, len(indentation) - base_indent_spaces)
+        if effective_indent_len + len(inline) <= max_length:
+            return inline
+
+        inner_indent = indentation + (" " * indent_size)
+        return (
+            "SELECT DISTINCT ON (\n"
+            + ",\n".join(f"{inner_indent}{expression}" for expression in distinct_on)
+            + f"\n{indentation})"
+        )
 
     def _parse_clauses(self, content: str) -> List[dict]:
         """
@@ -167,6 +241,7 @@ class ColumnLayoutRule(BaseRule):
                             
                     # Parse the list of expressions starting immediately after the keyword
                     list_start = keyword_end
+                    distinct_on_expressions = []
                     
                     # Check for DISTINCT or ALL modifier right after SELECT
                     if keyword == "SELECT":
@@ -192,7 +267,39 @@ class ColumnLayoutRule(BaseRule):
                                 word_on = content[w_on_start:next_on_idx].lower()
                                 if word_on == "on":
                                     keyword = "SELECT DISTINCT ON"
-                                    list_start = next_on_idx
+                                    open_idx = next_on_idx
+                                    while open_idx < n and content[open_idx].isspace():
+                                        open_idx += 1
+                                    if open_idx < n and content[open_idx] == "(":
+                                        depth = 0
+                                        quote = None
+                                        close_idx = open_idx
+                                        while close_idx < n:
+                                            char = content[close_idx]
+                                            if quote:
+                                                if char == quote:
+                                                    if close_idx + 1 < n and content[close_idx + 1] == quote:
+                                                        close_idx += 2
+                                                        continue
+                                                    quote = None
+                                            elif char in ("'", '"'):
+                                                quote = char
+                                            elif char == "(":
+                                                depth += 1
+                                            elif char == ")":
+                                                depth -= 1
+                                                if depth == 0:
+                                                    break
+                                            close_idx += 1
+                                        if close_idx < n:
+                                            distinct_on_expressions = self._split_top_level_csv(
+                                                content[open_idx + 1 : close_idx]
+                                            )
+                                            list_start = close_idx + 1
+                                        else:
+                                            list_start = next_on_idx
+                                    else:
+                                        list_start = next_on_idx
                                     
                     expressions = []
                     expression_indents = []
@@ -290,7 +397,7 @@ class ColumnLayoutRule(BaseRule):
                         if list_paren == 0 and jc == ',':
                             expr = content[current_expr_start:j].strip()
                             if "\n" not in expr:
-                                expr = re.sub(r"\s+", " ", expr)
+                                expr = _normalize_inline_expression(expr)
                             if expr:
                                 expressions.append(expr)
                                 # Find original base indentation of this expression
@@ -319,7 +426,7 @@ class ColumnLayoutRule(BaseRule):
                     list_end = last_non_space_idx
                     expr = content[current_expr_start:list_end].strip()
                     if "\n" not in expr:
-                        expr = re.sub(r"\s+", " ", expr)
+                        expr = _normalize_inline_expression(expr)
                     if expr:
                         # DISTINCT/ALL has been parsed at the start of SELECT
                         if expr:
@@ -362,7 +469,8 @@ class ColumnLayoutRule(BaseRule):
                         "expression_indents": expression_indents,
                         "expression_ranges": expression_ranges,
                         "line_number": w_line,
-                        "indentation": indentation
+                        "indentation": indentation,
+                        "distinct_on_expressions": distinct_on_expressions,
                     })
                     i = list_end
                     continue
@@ -446,7 +554,10 @@ class ColumnLayoutRule(BaseRule):
                 continue
                 
             # 1. Determine if it fits on a single line
-            single_line_clause = f"{keyword} {', '.join(expressions)}"
+            prefix = self._format_prefix(
+                cl, max_length, indent_size, base_indent_spaces
+            )
+            single_line_clause = f"{prefix} {', '.join(expressions)}"
             effective_indent_len = max(0, len(indentation) - base_indent_spaces)
             total_len = effective_indent_len + len(single_line_clause)
             
@@ -476,7 +587,7 @@ class ColumnLayoutRule(BaseRule):
                     else:
                         formatted_exprs.append(f"{inner_indent}{expr}")
                         
-                expected = f"{keyword}\n" + ",\n".join(formatted_exprs)
+                expected = f"{prefix}\n" + ",\n".join(formatted_exprs)
                 
                 # Normalize line endings for comparison
                 current_normalized = current_clause_text.replace("\r\n", "\n")
@@ -551,7 +662,10 @@ class ColumnLayoutRule(BaseRule):
                     recursively_formatted_expressions.append(expr)
             expressions = recursively_formatted_expressions
             
-            single_line_clause = f"{keyword} {', '.join(expressions)}"
+            prefix = self._format_prefix(
+                cl, max_length, indent_size, base_indent_spaces
+            )
+            single_line_clause = f"{prefix} {', '.join(expressions)}"
             effective_indent_len = max(0, len(indentation) - base_indent_spaces)
             total_len = effective_indent_len + len(single_line_clause)
             
@@ -566,7 +680,7 @@ class ColumnLayoutRule(BaseRule):
                         formatted_exprs.append(self._reindent_multiline(expr, inner_indent, effective_orig_indent))
                     else:
                         formatted_exprs.append(f"{inner_indent}{expr}")
-                formatted = f"{keyword}{ending}" + f",{ending}".join(formatted_exprs)
+                formatted = f"{prefix}{ending}" + f",{ending}".join(formatted_exprs)
                 
             fixed_chunks.append(content[last_idx:cl["keyword_start"]])
             fixed_chunks.append(formatted)

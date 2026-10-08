@@ -63,12 +63,12 @@ where retired_at is null
 
         result = process_document(config, content, "generic.sql", "sql")
 
-        self.assertIn("SELECT item_id", result.content)
+        self.assertIn("SELECT item_id, item_name", result.content)
         self.assertIn("FROM sample_table", result.content)
-        self.assertIn("    ,item_name", result.content)
+        self.assertIn("IR-column-layout", result.rules_fixed)
         self.assertNotIn("IR-comma-style", result.rules_fixed)
 
-    def test_commit_profile_preserves_postgresql_cast_targets(self):
+    def test_commit_profile_standardizes_postgresql_cast_target_case(self):
         content = (
             "select generate_series(:start::timestamp with time zone, :end::timestamp) as outage_hour,\n"
             "hourly.customers_out::bigint from hourly;\n"
@@ -81,13 +81,11 @@ where retired_at is null
 
         self.assertEqual(
             result.content,
-            "SELECT generate_series(:start::timestamp with time zone, :end::timestamp) AS outage_hour,\n"
-            "hourly.customers_out::bigint FROM hourly;\n",
+            "SELECT generate_series(:start::TIMESTAMP WITH TIME ZONE, :end::TIMESTAMP) AS outage_hour, "
+            "hourly.customers_out::BIGINT FROM hourly;\n",
         )
         self.assertEqual(result.diagnostics, [])
-        self.assertNotIn(
-            "IR-datatype-case", [violation.rule_id for violation, _, _ in result.violations]
-        )
+        self.assertIn("IR-datatype-case", result.rules_fixed)
 
     def test_changed_directive_expands_through_its_block(self):
         content = """SELECT item_id

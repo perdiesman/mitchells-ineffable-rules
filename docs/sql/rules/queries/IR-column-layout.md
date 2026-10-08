@@ -5,9 +5,9 @@ On select, order by, group by, if all the columns fit on one line then put them 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
-- **Commit Profile**: No
+- **Commit Profile**: Yes
 - **MyBatis Safe**: No
-- **Trellis Safe**: No
+- **Trellis Safe**: Yes
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `max_length` (Default: `120`): Maximum line length limit used to determine if columns fit on a single line. *Note: Value dynamically inherited from rule [`IR-line-length`](../general/IR-line-length.md) -> `max_length` if not configured.*
@@ -50,4 +50,8 @@ SELECT
 #### Additional Validations
 ```sql
 SELECT id, name FROM users;
+```
+
+```sql
+SELECT DISTINCT ON (item_id, created_at) item_id, created_at FROM sample_item;
 ```

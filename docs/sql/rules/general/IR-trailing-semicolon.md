@@ -1,6 +1,6 @@
 # IR-trailing-semicolon
 
-Enforce that the last SQL statement ends with a trailing semicolon, placed immediately after the statement text.
+Place semicolons immediately after statement text and require a final semicolon only in multi-statement files.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
@@ -11,23 +11,13 @@ Enforce that the last SQL statement ends with a trailing semicolon, placed immed
 - **Configuration Options**:
   - `enabled`: `true`
 
-#### ❌ Violating Example #1
-```sql
-SELECT * FROM users
-```
-
-####  Correct Example #1
-```sql
-SELECT * FROM users;
-```
-
-#### ❌ Violating Example #2
+#### ❌ Violating Example
 ```sql
 SELECT * FROM users
     ;
 ```
 
-####  Correct Example #2
+####  Correct Example
 ```sql
 SELECT * FROM users;
 ```
@@ -35,4 +25,8 @@ SELECT * FROM users;
 #### Additional Validations
 ```sql
 SELECT * FROM users; -- comment at end
+```
+
+```sql
+SELECT * FROM users
 ```

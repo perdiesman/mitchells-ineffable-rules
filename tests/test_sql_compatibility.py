@@ -1,11 +1,21 @@
 import unittest
 
-from mir.rules.sql.paren_content_indent import ParenContentIndentRule
 from mir.rules.sql.function_case import FunctionCaseRule
+from mir.rules.sql.clause_alignment import ClauseAlignmentRule
+from mir.rules.sql.column_layout import ColumnLayoutRule
+from mir.rules.sql.join_on_multi import JoinOnMultiRule
 from mir.rules.sql.keyword_case import KeywordCaseRule
+from mir.rules.sql.named_parameters import NamedParametersRule
 from mir.rules.sql.operator_spacing import OperatorSpacingRule
+from mir.rules.sql.paren_content_indent import ParenContentIndentRule
+from mir.rules.sql.paren_multi import ParenMultiRule
+from mir.rules.sql.paren_single import ParenSingleRule
 from mir.rules.sql.sql_utils import _tokenize_sql_impl, protected_sql_signature, tokenize_sql
+from mir.rules.sql.statement_semicolon import StatementSemicolonRule
+from mir.rules.sql.subquery_indent import SubqueryIndentRule
+from mir.rules.sql.trailing_semicolon import TrailingSemicolonRule
 from mir.rules.sql.unresolved_alias import UnresolvedAliasRule
+from mir.rules.sql.where_multi import WhereMultiRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
@@ -90,6 +100,149 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(FunctionCaseRule().fix(content, "generic.sql", {}), content)
 
+    def test_distinct_on_is_not_a_join_condition(self):
+        content = (
+            "SELECT DISTINCT ON (record.item_id) record.item_id\n"
+            "FROM sample_record record\n"
+            "JOIN sample_state state ON state.id = record.state_id;"
+        )
+
+        self.assertEqual(JoinOnMultiRule().check(content, "generic.sql", {}), [])
+
+    def test_is_not_distinct_from_is_not_a_from_clause(self):
+        content = (
+            "SELECT item.item_id\nFROM sample_item item\n"
+            "WHERE item.parent_id IS NOT DISTINCT FROM :parent_id;"
+        )
+
+        self.assertEqual(ClauseAlignmentRule().check(content, "generic.sql", {}), [])
+
+    def test_cte_and_lateral_parentheses_are_not_function_calls(self):
+        content = (
+            "WITH sample_rows AS (SELECT item_id FROM sample_item)\n"
+            "SELECT lateral_rows.item_id\nFROM sample_rows\n"
+            "LEFT JOIN LATERAL (SELECT item_id FROM sample_item) lateral_rows ON true;"
+        )
+
+        self.assertEqual(NamedParametersRule().check(content, "generic.sql", {}), [])
+        self.assertEqual(UnresolvedAliasRule().check(content, "generic.sql", {}), [])
+
+    def test_postgresql_predicate_parentheses_are_preserved(self):
+        content = (
+            "SELECT max(item.value) FILTER (WHERE item.enabled), ANY(:item_ids)\n"
+            "FROM sample_item item\nWHERE NOT EXISTS (\n"
+            "    SELECT 1 FROM sample_child child\n"
+            "    WHERE child.item_id = item.item_id AND child.enabled\n"
+            ")\nORDER BY (item.rank <= :maximum_rank) DESC;"
+        )
+
+        self.assertEqual(ParenContentIndentRule().check(content, "generic.sql", {}), [])
+        self.assertEqual(ParenMultiRule().check(content, "generic.sql", {}), [])
+        self.assertEqual(ParenSingleRule().check(content, "generic.sql", {}), [])
+
+    def test_multiline_lateral_and_exists_subqueries_are_indented(self):
+        source = (
+            "SELECT item.item_id\n"
+            "FROM sample_item item\n"
+            "LEFT JOIN LATERAL (\n"
+            "SELECT child.value\n"
+            "FROM sample_child child\n"
+            "WHERE NOT EXISTS (\n"
+            "  SELECT 1\n"
+            "  FROM sample_exclusion exclusion\n"
+            "  WHERE exclusion.child_id = child.child_id\n"
+            ")\n"
+            ") details ON true"
+        )
+        expected = (
+            "SELECT item.item_id\n"
+            "FROM sample_item item\n"
+            "LEFT JOIN LATERAL (\n"
+            "    SELECT child.value\n"
+            "    FROM sample_child child\n"
+            "    WHERE NOT EXISTS (\n"
+            "        SELECT 1\n"
+            "        FROM sample_exclusion exclusion\n"
+            "        WHERE exclusion.child_id = child.child_id\n"
+            "    )\n"
+            ") details ON true"
+        )
+
+        rule = SubqueryIndentRule()
+        fixed = rule.fix(source, "generic.sql", {})
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
+
+    def test_single_statement_file_does_not_require_semicolon(self):
+        content = "SELECT item_id FROM sample_item\n"
+
+        self.assertEqual(StatementSemicolonRule().check(content, "generic.sql", {}), [])
+        self.assertEqual(TrailingSemicolonRule().check(content, "generic.sql", {}), [])
+
+    def test_short_multiline_where_is_compacted_when_it_fits(self):
+        source = (
+            "SELECT item_id FROM sample_item\n"
+            "WHERE created_at >= :start\n"
+            "    AND created_at < :end\n"
+            "GROUP BY item_id"
+        )
+        expected = (
+            "SELECT item_id FROM sample_item\n"
+            "WHERE created_at >= :start AND created_at < :end\n"
+            "GROUP BY item_id"
+        )
+
+        rule = WhereMultiRule()
+        fixed = rule.fix(source, "generic.sql", {})
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
+
+    def test_distinct_on_wraps_independently_from_projection_columns(self):
+        rule = ColumnLayoutRule()
+        compact = (
+            "SELECT DISTINCT ON (item_id, created_at)\n"
+            "    item_id,\n"
+            "    created_at\n"
+            "FROM sample_item;"
+        )
+        self.assertEqual(
+            rule.fix(compact, "generic.sql", {}),
+            "SELECT DISTINCT ON (item_id, created_at) item_id, created_at\n"
+            "FROM sample_item;",
+        )
+
+        expanded = (
+            "SELECT DISTINCT ON (organization_identifier, effective_timestamp, secondary_identifier) "
+            "item_id, item_name FROM sample_item;"
+        )
+        self.assertEqual(
+            rule.fix(expanded, "generic.sql", {"max_length": 60}),
+            "SELECT DISTINCT ON (\n"
+            "    organization_identifier,\n"
+            "    effective_timestamp,\n"
+            "    secondary_identifier\n"
+            ")\n"
+            "    item_id,\n"
+            "    item_name FROM sample_item;",
+        )
+
+    def test_column_layout_preserves_whitespace_inside_literals(self):
+        source = (
+            "SELECT DISTINCT ON (item.category, 'keep  spaces')\n"
+            "    item.category,\n"
+            "    'also  keep' AS label\n"
+            "FROM sample_item item;"
+        )
+        expected = (
+            "SELECT DISTINCT ON (item.category, 'keep  spaces') "
+            "item.category, 'also  keep' AS label\n"
+            "FROM sample_item item;"
+        )
+
+        self.assertEqual(ColumnLayoutRule().fix(source, "generic.sql", {}), expected)
+
     def test_postgresql_operators_remain_atomic_when_spaced(self):
         content = (
             "SELECT row_data->>'key', row_data#>>'{path}', sample_table.* "
@@ -110,11 +263,11 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(protected_sql_signature(original), protected_sql_signature(formatted))
 
-    def test_protected_signature_includes_cast_targets(self):
+    def test_protected_signature_normalizes_cast_case_but_preserves_identity(self):
         original = "SELECT :county_fips::text[];"
         changed = "SELECT :county_fips::TEXT[];"
 
-        self.assertNotEqual(
+        self.assertEqual(
             protected_sql_signature(original), protected_sql_signature(changed)
         )
 
@@ -127,7 +280,7 @@ class TestSqlCompatibility(unittest.TestCase):
 
         standard_original = "SELECT CAST(:start AS timestamp with time zone);"
         standard_changed = "SELECT CAST(:start AS TIMESTAMP WITH TIME ZONE);"
-        self.assertNotEqual(
+        self.assertEqual(
             protected_sql_signature(standard_original),
             protected_sql_signature(standard_changed),
         )

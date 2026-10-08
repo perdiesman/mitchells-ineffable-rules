@@ -20,7 +20,8 @@ class StatementSemicolonRule(BaseRule):
         }
     ]
     additional_validations = [
-        "ALTER FUNCTION my_func OWNER TO eiadmin;\nCREATE TRIGGER trig1 BEFORE INSERT ON t1 FOR EACH ROW EXECUTE FUNCTION f1();"
+        "ALTER FUNCTION my_func OWNER TO eiadmin;\nCREATE TRIGGER trig1 BEFORE INSERT ON t1 FOR EACH ROW EXECUTE FUNCTION f1();",
+        "SELECT item_id FROM sample_table"
     ]
 
     def _find_violations(self, content: str) -> List[dict]:
@@ -44,6 +45,7 @@ class StatementSemicolonRule(BaseRule):
                 
         # Traverse active tokens and check statement boundaries
         m = len(active_tokens_info)
+        statement_starts = 0
         for i in range(m):
             info = active_tokens_info[i]
             t = info["token"]
@@ -59,6 +61,7 @@ class StatementSemicolonRule(BaseRule):
                         is_starter = True
                         
                 if is_starter:
+                    statement_starts += 1
                     if i > 0:
                         prev_info = active_tokens_info[i - 1]
                         prev_tok = prev_info["token"]
@@ -72,7 +75,7 @@ class StatementSemicolonRule(BaseRule):
                             })
                         
         # Also check the very last active token in the file
-        if m > 0:
+        if m > 0 and statement_starts > 1:
             last_info = active_tokens_info[-1]
             last_tok = last_info["token"]
             if last_tok["value"] != ";":

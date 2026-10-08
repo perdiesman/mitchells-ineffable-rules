@@ -34,3 +34,7 @@ SELECT NEW.id;
 ```sql
 INSERT INTO sample_table (item_id, item_value) VALUES (1, 'x') ON CONFLICT (item_id) DO UPDATE SET item_value = excluded.item_value;
 ```
+
+```sql
+SELECT lateral_rows.item_id FROM sample_item item LEFT JOIN LATERAL (SELECT item_id FROM sample_child) lateral_rows ON true;
+```

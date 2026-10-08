@@ -3,8 +3,10 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 
 class WhereMultiRule(BaseRule):
+    commit_profile = True
+    trellis_safe = True
     rule_id = "IR-where-multi"
-    description = "Each AND/OR clause in a multi-condition WHERE clause should start on its own line, indented at 4 spaces."
+    description = "Keep a multi-condition WHERE clause inline when it fits; otherwise put each condition on its own indented line."
     category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
@@ -19,7 +21,8 @@ class WhereMultiRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT id FROM users WHERE active = true;"
+        "SELECT id FROM users WHERE active = true;",
+        "SELECT id FROM users WHERE active = true AND retired = false;",
     ]
 
     def _find_violations(self, content: str, rule_config: Dict[str, Any] = None) -> List[dict]:
@@ -80,15 +83,37 @@ class WhereMultiRule(BaseRule):
                         
                 if has_multi:
                     where_clause_tokens = tokens[i : clause_end]
-                    where_clause_str = "".join(t["value"] for t in where_clause_tokens)
-                    import re
-                    where_clause_single = re.sub(r'\s+', ' ', where_clause_str)
+                    where_clause_single = "".join(
+                        " " if t["type"] == "WHITESPACE" else t["value"]
+                        for t in where_clause_tokens
+                    )
                     estimated_line_len = len(where_indent) + len(where_clause_single)
                     
                     from mir.rules.sql.line_length import LineLengthRule
                     max_len = self.get_config_value(rule_config, "max_line_length", 100, fallbacks=[(LineLengthRule, "max_length")])
                     
                     if estimated_line_len <= max_len:
+                        # A short predicate has one canonical compact form. Only
+                        # edit whitespace tokens so strings and parameters stay
+                        # byte-for-byte intact, and leave the separator before
+                        # the following clause alone.
+                        if any(t["type"] == "COMMENT" for t in clause_tokens):
+                            continue
+                        last_active_idx = None
+                        for idx in range(clause_end - 1, i, -1):
+                            if tokens[idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                                last_active_idx = idx
+                                break
+                        if last_active_idx is not None:
+                            for idx in range(i + 1, last_active_idx):
+                                t = tokens[idx]
+                                if t["type"] == "WHITESPACE" and t["value"] != " ":
+                                    violations.append({
+                                        "token": t,
+                                        "ws_start": t["start"],
+                                        "ws_end": t["end"],
+                                        "replacement": " ",
+                                    })
                         continue
                     # 1. Format the first condition after WHERE onto its own line
                     first_cond_idx = None

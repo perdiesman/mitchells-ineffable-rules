@@ -1,13 +1,13 @@
 # IR-where-multi
 
-Each AND/OR clause in a multi-condition WHERE clause should start on its own line, indented at 4 spaces.
+Keep a multi-condition WHERE clause inline when it fits; otherwise put each condition on its own indented line.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
-- **Commit Profile**: No
+- **Commit Profile**: Yes
 - **MyBatis Safe**: No
-- **Trellis Safe**: No
+- **Trellis Safe**: Yes
 - **Configuration Options**:
   - `enabled`: `true`
 
@@ -27,4 +27,8 @@ SELECT id FROM users WHERE
 #### Additional Validations
 ```sql
 SELECT id FROM users WHERE active = true;
+```
+
+```sql
+SELECT id FROM users WHERE active = true AND retired = false;
 ```

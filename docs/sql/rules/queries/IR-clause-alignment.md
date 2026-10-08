@@ -50,3 +50,9 @@ WHERE id IN (
 ```sql
 SELECT id, name FROM users WHERE active = true;
 ```
+
+```sql
+SELECT item_id
+FROM sample_item
+WHERE parent_id IS NOT DISTINCT FROM :parent_id;
+```

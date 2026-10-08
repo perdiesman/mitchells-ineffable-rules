@@ -3,6 +3,8 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren, get_token_depths
 
 class SubqueryIndentRule(BaseRule):
+    commit_profile = True
+    trellis_safe = True
     rule_id = "IR-subquery-indent"
     description = "Subqueries should be indented 4 spaces relative to their opening parenthesis."
     category = "queries"

@@ -43,3 +43,15 @@ SELECT COALESCE(id, 0) FROM users;
 ```sql
 SELECT id FROM users WHERE (active = true AND type = 'admin');
 ```
+
+```sql
+SELECT max(value) FILTER (WHERE active), ANY(:item_ids) FROM sample_item;
+```
+
+```sql
+SELECT item_id FROM sample_item WHERE EXISTS (SELECT 1 FROM sample_child);
+```
+
+```sql
+SELECT item_id FROM sample_item ORDER BY (rank <= :maximum_rank) DESC;
+```

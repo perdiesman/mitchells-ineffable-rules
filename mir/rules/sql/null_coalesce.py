@@ -72,7 +72,7 @@ class NullCoalesceRule(BaseRule):
                             op1_check, next_check = parse_operand(check_idx)
                             if op1_check and op1_check.lower() == op1_str.lower() and next_check < num_active:
                                 t_is = active[next_check]
-                                if t_is["type"] == "KEYWORD" and t_is["value"].upper() == "IS":
+                                if t_is["type"] == "KEYWORD" and t_is["value"].upper() == "IS" and next_check + 2 < num_active:
                                     t_null = active[next_check + 1]
                                     if t_null["type"] == "KEYWORD" and t_null["value"].upper() == "NULL":
                                         t_and = active[next_check + 2]
@@ -80,7 +80,7 @@ class NullCoalesceRule(BaseRule):
                                             op2_check, next_check2 = parse_operand(next_check + 3)
                                             if op2_check and op2_check.lower() == op2_str.lower() and next_check2 < num_active:
                                                 t_is2 = active[next_check2]
-                                                if t_is2["type"] == "KEYWORD" and t_is2["value"].upper() == "IS":
+                                                if t_is2["type"] == "KEYWORD" and t_is2["value"].upper() == "IS" and next_check2 + 1 < num_active:
                                                     t_null2 = active[next_check2 + 1]
                                                     if t_null2["type"] == "KEYWORD" and t_null2["value"].upper() == "NULL":
                                                         end_idx = next_check2 + 2
@@ -110,7 +110,7 @@ class NullCoalesceRule(BaseRule):
             op1_str, next_idx = parse_operand(check_idx)
             if op1_str and next_idx < num_active:
                 t_is = active[next_idx]
-                if t_is["type"] == "KEYWORD" and t_is["value"].upper() == "IS":
+                if t_is["type"] == "KEYWORD" and t_is["value"].upper() == "IS" and next_idx + 2 < num_active:
                     t_null = active[next_idx + 1]
                     if t_null["type"] == "KEYWORD" and t_null["value"].upper() == "NULL":
                         t_and = active[next_idx + 2]
@@ -118,7 +118,7 @@ class NullCoalesceRule(BaseRule):
                             op2_str, next_idx2 = parse_operand(next_idx + 3)
                             if op2_str and next_idx2 < num_active:
                                 t_is2 = active[next_idx2]
-                                if t_is2["type"] == "KEYWORD" and t_is2["value"].upper() == "IS":
+                                if t_is2["type"] == "KEYWORD" and t_is2["value"].upper() == "IS" and next_idx2 + 1 < num_active:
                                     t_null2 = active[next_idx2 + 1]
                                     if t_null2["type"] == "KEYWORD" and t_null2["value"].upper() == "NULL":
                                         end_idx = next_idx2 + 2
@@ -158,7 +158,7 @@ class NullCoalesceRule(BaseRule):
                             op1_check, next_check = parse_operand(next_idx2 + 1)
                             if op1_check and op1_check.lower() == op1_str.lower() and next_check < num_active:
                                 t_is = active[next_check]
-                                if t_is["type"] == "KEYWORD" and t_is["value"].upper() == "IS":
+                                if t_is["type"] == "KEYWORD" and t_is["value"].upper() == "IS" and next_check + 1 < num_active:
                                     t_null = active[next_check + 1]
                                     if t_null["type"] == "KEYWORD" and t_null["value"].upper() == "NULL":
                                         violations.append({
@@ -174,7 +174,7 @@ class NullCoalesceRule(BaseRule):
             op1_str, next_idx = parse_operand(i)
             if op1_str and next_idx < num_active:
                 t_is = active[next_idx]
-                if t_is["type"] == "KEYWORD" and t_is["value"].upper() == "IS":
+                if t_is["type"] == "KEYWORD" and t_is["value"].upper() == "IS" and next_idx + 2 < num_active:
                     t_null = active[next_idx + 1]
                     if t_null["type"] == "KEYWORD" and t_null["value"].upper() == "NULL":
                         t_or = active[next_idx + 2]

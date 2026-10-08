@@ -149,7 +149,7 @@ class ParenContentIndentRule(BaseRule):
                                 )
                             )
                     else:
-                        is_keyword_op = val_up in ("VALUES", "TABLE", "IN", "ANY", "SOME")
+                        is_keyword_op = val_up in ("VALUES", "TABLE", "IN")
                         is_func_like = (prev_tok["type"] == "IDENTIFIER") or (val_up in ("COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST")) or is_keyword_op
                         if is_func_like:
                             if prev_tok["line"] < tok["line"]:
@@ -225,7 +225,7 @@ class ParenContentIndentRule(BaseRule):
                         if content[start_ws:end_ws] != expected_replacement:
                             edits.append((start_ws, end_ws, expected_replacement))
                     else:
-                        is_keyword_op = val_up in ("VALUES", "TABLE", "IN", "ANY", "SOME")
+                        is_keyword_op = val_up in ("VALUES", "TABLE", "IN")
                         is_func_like = (prev_tok["type"] == "IDENTIFIER") or (val_up in ("COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST")) or is_keyword_op
                         if is_func_like:
                             start_ws = prev_tok["end"]

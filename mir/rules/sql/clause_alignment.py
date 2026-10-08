@@ -1,3 +1,4 @@
+import re
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 
@@ -23,7 +24,8 @@ class ClauseAlignmentRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT id, name FROM users WHERE active = true;"
+        "SELECT id, name FROM users WHERE active = true;",
+        "SELECT item_id\nFROM sample_item\nWHERE parent_id IS NOT DISTINCT FROM :parent_id;",
     ]
 
     def _parse_clauses(self, content: str) -> List[dict]:
@@ -113,6 +115,12 @@ class ClauseAlignmentRule(BaseRule):
                 keyword = None
                 keyword_end = i
                 
+                if word_lower == "from" and re.search(
+                    r"\bIS\s+NOT\s+DISTINCT\s*$",
+                    content[line_start_idx:w_start],
+                    re.IGNORECASE,
+                ):
+                    continue
                 if word_lower in ("select", "from", "where", "having", "limit"):
                     keyword = word_lower.upper()
                 elif word_lower in ("group", "order"):

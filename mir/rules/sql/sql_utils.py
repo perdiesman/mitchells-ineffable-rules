@@ -45,8 +45,14 @@ def protected_sql_signature(content: str) -> tuple[tuple[str, str], ...]:
         elif token_type == "IDENTIFIER" and value.startswith('"'):
             protected.append(("QUOTED_IDENTIFIER", value))
     for group in find_cast_target_token_groups(tokens, content):
+        normalized_target = "".join(
+            token["value"].lower()
+            if token["type"] in {"IDENTIFIER", "KEYWORD"}
+            else token["value"]
+            for token in group
+        )
         protected.append(
-            ("CAST_TARGET", content[group[0]["start"] : group[-1]["end"]])
+            ("CAST_TARGET", normalized_target)
         )
     return tuple(protected)
 

@@ -27,7 +27,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-redundant-keywords`](rules/general/IR-redundant-keywords.md) | Remove redundant implied keywords like INNER, OUTER, and ASC. | Yes | [View Details](rules/general/IR-redundant-keywords.md) |
 | [`IR-statement-blank-lines`](rules/general/IR-statement-blank-lines.md) | Ensure at least one blank line between consecutive SQL statements. | Yes | [View Details](rules/general/IR-statement-blank-lines.md) |
 | [`IR-statement-semicolon`](rules/general/IR-statement-semicolon.md) | Enforce that all top-level statements end with a trailing semicolon. | Yes | [View Details](rules/general/IR-statement-semicolon.md) |
-| [`IR-trailing-semicolon`](rules/general/IR-trailing-semicolon.md) | Enforce that the last SQL statement ends with a trailing semicolon, placed immediately after the statement text. | Yes | [View Details](rules/general/IR-trailing-semicolon.md) |
+| [`IR-trailing-semicolon`](rules/general/IR-trailing-semicolon.md) | Place semicolons immediately after statement text and require a final semicolon only in multi-statement files. | Yes | [View Details](rules/general/IR-trailing-semicolon.md) |
 | [`IR-unresolved-alias`](rules/general/IR-unresolved-alias.md) | Detect references to table aliases or qualifiers that are not declared in the query context. | No | [View Details](rules/general/IR-unresolved-alias.md) |
 
 ## Query Structure Rules
@@ -71,7 +71,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-subquery-indent`](rules/queries/IR-subquery-indent.md) | Subqueries should be indented 4 spaces relative to their opening parenthesis. | Yes | [View Details](rules/queries/IR-subquery-indent.md) |
 | [`IR-table-alias-as`](rules/queries/IR-table-alias-as.md) | Table and subquery aliases should not use the AS keyword. | Yes | [View Details](rules/queries/IR-table-alias-as.md) |
 | [`IR-union-layout`](rules/queries/IR-union-layout.md) | Enforce that set operators (UNION, UNION ALL, INTERSECT, EXCEPT) are on their own line, aligned with the query block. | Yes | [View Details](rules/queries/IR-union-layout.md) |
-| [`IR-where-multi`](rules/queries/IR-where-multi.md) | Each AND/OR clause in a multi-condition WHERE clause should start on its own line, indented at 4 spaces. | Yes | [View Details](rules/queries/IR-where-multi.md) |
+| [`IR-where-multi`](rules/queries/IR-where-multi.md) | Keep a multi-condition WHERE clause inline when it fits; otherwise put each condition on its own indented line. | Yes | [View Details](rules/queries/IR-where-multi.md) |
 | [`IR-where-single`](rules/queries/IR-where-single.md) | Single WHERE condition should be on the same line as the WHERE keyword. | Yes | [View Details](rules/queries/IR-where-single.md) |
 
 ## Schema Definition Rules
