@@ -96,23 +96,23 @@ ORDER BY item_id
         content = (
             "WHERE\n"
             "    TRUE\n"
-            "-- trellis: if item_ids\n"
+            "    -- trellis: if item_ids\n"
             "    AND item_id IN (\n"
             "-- trellis: for item in item_ids separator=\",\"\n"
             "      :item\n"
             "-- trellis: endfor\n"
             "  )\n"
-            "-- trellis: endif\n"
+            "    -- trellis: endif\n"
         )
         expected = (
             "WHERE\n"
             "    TRUE\n"
             "    -- trellis: if item_ids\n"
-            "    AND item_id IN (\n"
-            "        -- trellis: for item in item_ids separator=\",\"\n"
-            "        :item\n"
-            "        -- trellis: endfor\n"
-            "    )\n"
+            "        AND item_id IN (\n"
+            "            -- trellis: for item in item_ids separator=\",\"\n"
+            "                :item\n"
+            "            -- trellis: endfor\n"
+            "        )\n"
             "    -- trellis: endif\n"
         )
         rule = TrellisIndentRule()
@@ -229,6 +229,58 @@ SELECT audit_id FROM audit_table;
         self.assertIn("-- trellis: if item_ids\n", result.content)
         self.assertIn("        -- trellis: for item in item_ids separator=\",\"\n", result.content)
         self.assertEqual(trellis_directive_signature(content), trellis_directive_signature(result.content))
+
+    def test_programming_style_nested_blocks_converge(self):
+        content = (
+            "SELECT item_id, item_name\n"
+            "FROM sample_item\n"
+            "WHERE\n"
+            "    TRUE\n"
+            "    -- trellis: if item_ids\n"
+            "    AND item_id IN (\n"
+            "        -- trellis: for item in item_ids separator=\",\"\n"
+            "        :item\n"
+            "        -- trellis: endfor\n"
+            "    )\n"
+            "    -- trellis: endif\n"
+            "-- trellis: choose order\n"
+            "-- trellis: when \"name\"\n"
+            "ORDER BY item_name\n"
+            "-- trellis: otherwise\n"
+            "ORDER BY item_id\n"
+            "-- trellis: endchoose\n"
+        )
+        expected = (
+            "SELECT item_id, item_name\n"
+            "FROM sample_item\n"
+            "WHERE\n"
+            "    TRUE\n"
+            "    -- trellis: if item_ids\n"
+            "        AND item_id IN (\n"
+            "            -- trellis: for item in item_ids separator=\",\"\n"
+            "                :item\n"
+            "            -- trellis: endfor\n"
+            "        )\n"
+            "    -- trellis: endif\n"
+            "-- trellis: choose order\n"
+            "    -- trellis: when \"name\"\n"
+            "        ORDER BY item_name\n"
+            "    -- trellis: otherwise\n"
+            "        ORDER BY item_id\n"
+            "-- trellis: endchoose\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        result = process_document(config, content, "generic.sql", "sql")
+
+        self.assertEqual(result.content, expected)
+        self.assertEqual(result.diagnostics, [])
+        self.assertEqual(result.errors, 0)
+        second = process_document(config, result.content, "generic.sql", "sql")
+        self.assertEqual(second.content, expected)
+        self.assertEqual(second.diagnostics, [])
 
 
 if __name__ == "__main__":

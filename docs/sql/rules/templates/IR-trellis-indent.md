@@ -1,6 +1,6 @@
 # IR-trellis-indent
 
-Align Trellis directives with the SQL they control and indent SQL inside multiline parentheses one level.
+Indent Trellis blocks like programming-language control flow and align multiline parentheses within those blocks.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
@@ -28,7 +28,7 @@ Expected fixed output:
 WHERE
     item_id IN (
         -- trellis: for item in item_ids separator=","
-        :item
+            :item
         -- trellis: endfor
     )
 ```
@@ -46,7 +46,27 @@ Expected fixed output:
 ```sql
 VALUES (
     -- trellis: if optional_value
-    :optional_value
+        :optional_value
     -- trellis: endif
 )
+```
+
+##### choose branches — Fixed
+```sql
+-- trellis: choose order
+-- trellis: when "name"
+ORDER BY item_name
+-- trellis: otherwise
+ORDER BY item_id
+-- trellis: endchoose
+```
+
+Expected fixed output:
+```sql
+-- trellis: choose order
+    -- trellis: when "name"
+        ORDER BY item_name
+    -- trellis: otherwise
+        ORDER BY item_id
+-- trellis: endchoose
 ```

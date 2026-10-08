@@ -189,7 +189,7 @@ where item_id=:filters.item_id
             self.git("show", ":find_items.sql"),
             "SELECT item_id FROM sample_table\n"
             "-- trellis: if active_only\n"
-            "WHERE item_id = :filters.item_id\n"
+            "    WHERE item_id = :filters.item_id\n"
             "-- trellis: endif\n",
         )
 

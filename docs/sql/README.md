@@ -108,4 +108,4 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
 | [`IR-trellis-directives`](rules/templates/IR-trellis-directives.md) | Validate Trellis template blocks and use canonical directive comment layout. | Sometimes | [View Details](rules/templates/IR-trellis-directives.md) |
-| [`IR-trellis-indent`](rules/templates/IR-trellis-indent.md) | Align Trellis directives with the SQL they control and indent SQL inside multiline parentheses one level. | Yes | [View Details](rules/templates/IR-trellis-indent.md) |
+| [`IR-trellis-indent`](rules/templates/IR-trellis-indent.md) | Indent Trellis blocks like programming-language control flow and align multiline parentheses within those blocks. | Yes | [View Details](rules/templates/IR-trellis-indent.md) |

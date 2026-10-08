@@ -199,7 +199,7 @@ Consumer repositories only need the pre-commit formatter hook; the time-tracking
 
 MyBatis mapper elements (`select`, `insert`, `update`, `delete`, and reusable `sql` fragments) are expanded into source-mapped SQL. Safe edits map back into text nodes without touching XML tags, including SQL text beside inline MyBatis tags. MyBatis `#{value}` and `${identifier}` placeholders are opaque SQL parameters.
 
-Trellis templates are detected from `-- trellis:` directives or named binds. MIR validates `if`/`elif`/`else`/`endif`, `choose`/`when`/`otherwise`/`endchoose`, and `for item in items separator=","`/`endfor`. Directive comments align with the SQL body they control, including nested loops inside parentheses. Named binds such as `:item_id` and `:model.item_id` are opaque parameters. A Trellis template runs only rules whose metadata declares `trellis_safe = True`; external rules can opt in through the same `BaseRule` interface. PyGarden's generated SQL follows the same default layout and passes through the commit profile unchanged.
+Trellis templates are detected from `-- trellis:` directives or named binds. MIR validates `if`/`elif`/`else`/`endif`, `choose`/`when`/`otherwise`/`endchoose`, and `for item in items separator=","`/`endfor`. Blocks are indented like programming-language control flow: conditional and loop bodies are one level deeper, while `when`/`otherwise` branches and their SQL nest beneath `choose`. Named binds such as `:item_id` and `:model.item_id` are opaque parameters. A Trellis template runs only rules whose metadata declares `trellis_safe = True`; external rules can opt in through the same `BaseRule` interface. PyGarden's generated SQL follows the same default layout and passes through the commit profile unchanged.
 
 The commit profile rejects a proposed fix if it changes protected SQL syntax: template parameters, string literals, quoted identifiers, PostgreSQL cast target identity, or the operator sequence. For Trellis templates it also rejects removal, insertion, reordering, or expression changes in directive comments while permitting layout-only normalization. Cast target casing may be standardized by the datatype rule. The same SQL invariant is checked after staged-line filtering and after MyBatis edits are mapped back into XML.
 
@@ -323,6 +323,6 @@ For instructions on building distribution archives, TestPyPI validation, and pub
 
 *This package has been developed with **Antigravity** and **OpenAI Codex**.*
 
-*Total Cumulative Development Time: ~32.0 hours*
+*Total Cumulative Development Time: ~32.1 hours*
 
-*Last Developer Session: 2026-10-08T20:21:20Z*
+*Last Developer Session: 2026-10-08T20:30:04Z*

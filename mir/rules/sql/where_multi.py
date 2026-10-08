@@ -42,6 +42,14 @@ class WhereMultiRule(BaseRule):
         depths = get_token_depths(tokens)
         violations = []
         n = len(tokens)
+        trellis_ranges = []
+        if rule_config.get("_template_dialect") == "trellis":
+            from mir.rules.sql.trellis_utils import analyze_trellis
+
+            _, _, trellis_ranges = analyze_trellis(content)
+
+        def is_trellis_controlled(token: dict) -> bool:
+            return any(start < token["line"] < end for start, end in trellis_ranges)
         
         for i, tok in enumerate(tokens):
             if tok["type"] == "KEYWORD" and tok["value"].upper() == "WHERE":
@@ -82,10 +90,15 @@ class WhereMultiRule(BaseRule):
                 boolean_indices = find_boolean_operator_indices(
                     tokens, depths, outer_depth, i + 1, clause_end
                 )
+                boolean_indices = [
+                    index for index in boolean_indices if not is_trellis_controlled(tokens[index])
+                ]
                 for delimiter_idx in find_between_delimiter_indices(
                     tokens, depths, outer_depth, i + 1, clause_end
                 ):
                     delimiter = tokens[delimiter_idx]
+                    if is_trellis_controlled(delimiter):
+                        continue
                     ws_before = (
                         tokens[delimiter_idx - 1]
                         if delimiter_idx and tokens[delimiter_idx - 1]["type"] == "WHITESPACE"
