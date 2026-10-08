@@ -396,6 +396,15 @@ def process_document(
                             "protected SQL syntax changed"
                         )
                         continue
+                    if template_dialect == "trellis":
+                        from mir.rules.sql.trellis_utils import trellis_directive_signature
+
+                        if trellis_directive_signature(fixed) != trellis_directive_signature(current):
+                            result.diagnostics.append(
+                                f"Unsafe fix rejected for {rule.rule_id} on {path}: "
+                                "Trellis directive semantics changed"
+                            )
+                            continue
                 if fixed != current:
                     result.rules_fixed.add(rule.rule_id)
                     current = fixed

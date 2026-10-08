@@ -33,13 +33,24 @@ def parse_directive(line: str, line_number: int) -> Optional[TrellisDirective]:
     if not match:
         return None
     body = match.group("body").strip()
-    keyword, _, argument = body.partition(" ")
+    parts = body.split(maxsplit=1)
+    keyword = parts[0] if parts else ""
+    argument = parts[1] if len(parts) == 2 else ""
     return TrellisDirective(
         line_number,
         match.group("indent"),
         keyword.lower(),
         argument.strip(),
         line.rstrip("\r\n"),
+    )
+
+
+def trellis_directive_signature(content: str) -> tuple[tuple[str, str], ...]:
+    """Return the executable directive sequence, ignoring layout-only changes."""
+    return tuple(
+        (directive.keyword, directive.argument)
+        for line_number, line in enumerate(content.splitlines(), 1)
+        if (directive := parse_directive(line, line_number)) is not None
     )
 
 

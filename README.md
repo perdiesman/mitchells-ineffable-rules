@@ -201,16 +201,17 @@ MyBatis mapper elements (`select`, `insert`, `update`, `delete`, and reusable `s
 
 Trellis templates are detected from `-- trellis:` directives or named binds. MIR validates `if`/`elif`/`else`/`endif`, `choose`/`when`/`otherwise`/`endchoose`, and `for item in items separator=","`/`endfor`. Named binds such as `:item_id` and `:model.item_id` are opaque parameters. A Trellis template runs only rules whose metadata declares `trellis_safe = True`; external rules can opt in through the same `BaseRule` interface.
 
-The commit profile rejects a proposed fix if it changes protected SQL syntax: template parameters, string literals, quoted identifiers, PostgreSQL cast target identity, or the operator sequence. Cast target casing may be standardized by the datatype rule. The same invariant is checked after staged-line filtering and after MyBatis edits are mapped back into XML.
+The commit profile rejects a proposed fix if it changes protected SQL syntax: template parameters, string literals, quoted identifiers, PostgreSQL cast target identity, or the operator sequence. For Trellis templates it also rejects removal, insertion, reordering, or expression changes in directive comments while permitting layout-only normalization. Cast target casing may be standardized by the datatype rule. The same SQL invariant is checked after staged-line filtering and after MyBatis edits are mapped back into XML.
 
 Compatibility outputs that have completed manual review can be recorded in the ignored local report and checked for later formatter drift:
 
 ```bash
+python scripts/prepare_compat.py
 python scripts/compat_report.py record eagle_ai --include 'backend/src/eagle_ai/sql/**/*.sql'
 python scripts/compat_report.py verify eagle_ai
 ```
 
-The report stores the source and formatter commits, individual SHA-256 values, and a path-sensitive aggregate SHA-256. Verification reports changed, added, and missing files within the recorded scope.
+The preparation script maintains ignored clones of Web, AERIE, EAGLE-AI, PyGarden's Trellis branch, and the Trellis FastAPI example under `local/compat/`; pass `--refresh` only when every clone is clean. The report stores the source and formatter commits, individual SHA-256 values, and a path-sensitive aggregate SHA-256. Verification reports changed, added, and missing files within the recorded scope.
 
 ---
 
@@ -322,6 +323,6 @@ For instructions on building distribution archives, TestPyPI validation, and pub
 
 *This package has been developed with **Antigravity** and **OpenAI Codex**.*
 
-*Total Cumulative Development Time: ~31.5 hours*
+*Total Cumulative Development Time: ~31.6 hours*
 
-*Last Developer Session: 2026-10-08T19:51:01Z*
+*Last Developer Session: 2026-10-08T19:59:25Z*

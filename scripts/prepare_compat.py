@@ -22,6 +22,11 @@ REPOSITORIES = (
     Repository("aerie", "git@code.ornl.gov:eagle-i/aerie.git", "develop"),
     Repository("eagle_ai", "git@code.ornl.gov:eagle-i/eagle-ai.git", "develop"),
     Repository("pygarden", "https://github.com/ORNL/pygarden.git", "feature/trellis"),
+    Repository(
+        "trellis_fastapi_example",
+        "https://github.com/perdiesman/trellis-fastapi-example.git",
+        "main",
+    ),
 )
 
 
