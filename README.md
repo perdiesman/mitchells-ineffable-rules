@@ -203,6 +203,15 @@ Trellis templates are detected from `-- trellis:` directives or named binds. MIR
 
 The commit profile rejects a proposed fix if it changes protected SQL syntax: template parameters, string literals, quoted identifiers, PostgreSQL cast target identity, or the operator sequence. Cast target casing may be standardized by the datatype rule. The same invariant is checked after staged-line filtering and after MyBatis edits are mapped back into XML.
 
+Compatibility outputs that have completed manual review can be recorded in the ignored local report and checked for later formatter drift:
+
+```bash
+python scripts/compat_report.py record eagle_ai --include 'backend/src/eagle_ai/sql/**/*.sql'
+python scripts/compat_report.py verify eagle_ai
+```
+
+The report stores the source and formatter commits, individual SHA-256 values, and a path-sensitive aggregate SHA-256. Verification reports changed, added, and missing files within the recorded scope.
+
 ---
 
 ## Configuration
@@ -313,6 +322,6 @@ For instructions on building distribution archives, TestPyPI validation, and pub
 
 *This package has been developed with **Antigravity** and **OpenAI Codex**.*
 
-*Total Cumulative Development Time: ~31.2 hours*
+*Total Cumulative Development Time: ~31.5 hours*
 
-*Last Developer Session: 2026-10-08T19:36:37Z*
+*Last Developer Session: 2026-10-08T19:51:01Z*
