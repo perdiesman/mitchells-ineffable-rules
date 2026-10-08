@@ -5,6 +5,9 @@ Enforce trailing commas in multiline listings and forbid leading commas.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: General Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 

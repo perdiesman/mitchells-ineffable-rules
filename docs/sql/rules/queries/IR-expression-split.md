@@ -5,9 +5,12 @@ Long lines should split on function/expression parentheses, and optionally on ad
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
-  - `max_line_length` (Default: `100`): Line length threshold above which long expressions will be split.
+  - `max_line_length` (Default: `100`): Line length threshold above which long expressions will be split. *Note: Value dynamically inherited from rule [`IR-line-length`](../general/IR-line-length.md) -> `max_length` if not configured.*
 
 #### ❌ Violating Example #1
 ```sql

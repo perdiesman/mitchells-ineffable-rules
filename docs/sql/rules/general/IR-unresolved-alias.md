@@ -5,6 +5,9 @@ Detect references to table aliases or qualifiers that are not declared in the qu
 - **Auto-Fixable**: No
 - **Enabled by Default**: Yes
 - **Category**: General Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 
@@ -26,4 +29,8 @@ SELECT o.id FROM other_schema.other_table o;
 
 ```sql
 SELECT NEW.id;
+```
+
+```sql
+INSERT INTO sample_table (item_id, item_value) VALUES (1, 'x') ON CONFLICT (item_id) DO UPDATE SET item_value = excluded.item_value;
 ```

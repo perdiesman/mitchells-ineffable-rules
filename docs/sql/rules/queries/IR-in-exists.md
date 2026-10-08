@@ -5,6 +5,9 @@ EXISTS is preferred over IN with a subquery.
 - **Auto-Fixable**: No
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
   - `severity`: `warning`

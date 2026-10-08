@@ -1,6 +1,6 @@
 # Mitchell's Ineffable Rules (IR) Linter
 
-A highly modular, extensible linting and auto-fixing utility for **SQL, Java, and XML** codebase assets. The linter can be run locally via `uv` / `python`, inside a containerized **Docker** execution loop, or integrated into your lifecycle as a **Git Pre-commit Hook**.
+A modular, configurable linter and formatter for **SQL, XML, MyBatis, and Trellis** assets, with an existing Java ruleset. MIR can run on files, standard input, or the exact snapshots staged in Git.
 
 ---
 
@@ -24,6 +24,9 @@ A highly modular, extensible linting and auto-fixing utility for **SQL, Java, an
   - `fix`: Applies automatic corrections to fixable rules directly to files.
   - `dry-run`: Runs checks and generates unified diffs showing proposed fixes without modifying the source.
   - `verbose`: Prints rule descriptions and the offending lines along with errors.
+- **Index-Safe Commit Formatting**: `--staged --fix` reads changed blobs from the Git index, expands changed lines to their enclosing SQL/MyBatis/Trellis construct, updates only the index, and preserves unrelated or partially staged working-tree edits.
+- **Template-Aware SQL**: MyBatis placeholders, Trellis named/dotted binds, XML entities, and Trellis control directives are preserved. Template contexts run only rules that explicitly declare themselves safe.
+- **Conservative Commit Profile**: `--profile commit` opts into fast, local, syntax-preserving rules; ordinary CLI defaults remain backward compatible.
 
 ---
 
@@ -38,8 +41,8 @@ A highly modular, extensible linting and auto-fixing utility for **SQL, Java, an
 ├── Dockerfile                  # Containerization
 ├── README.md                   # This instruction manual
 ├── requirements.txt            # Python dependencies (PyYAML)
-├── pre-commit-hook.sh          # Shell hook executing linter via Docker
-├── pre-push-hook.sh            # Shell hook ensuring README time is updated on push
+├── pre-commit-hook.sh          # Portable staged-snapshot formatter hook
+├── pre-push-hook.sh            # Read-only development-time verification
 ├── scripts/
 │   └── update_readme.py        # Automation script to update README timestamp
 ├── mir/
@@ -103,6 +106,12 @@ uv run mir/main.py --fix path/to/file.sql
 
 # Show dry-run diffs
 uv run mir/main.py --dry-run path/to/file.sql
+
+# Check only changed lines, expanded to safe enclosing constructs
+uv run mir/main.py --lines 12-18 path/to/file.sql
+
+# Format the exact staged snapshots with the conservative commit profile
+uv run mir/main.py --staged --fix
 ```
 
 ### 3. Rules CLI Documentation & Help
@@ -149,24 +158,29 @@ docker run --rm -v "$(pwd):/workspace" mitchells-ineffable-rules:latest --dry-ru
 
 ## Git Pre-commit Hook Integration
 
-Integrate the linter to block bad code from being committed:
+The included hook runs `mir --staged --fix`. Fixes are written to the Git index; an unrelated unstaged edit remains unstaged. If an unstaged edit overlaps a formatter edit, MIR leaves the working tree alone and reports that the index-only fix must be reviewed.
 
-1. Copy the hook script into your repository's hook directory:
-   ```bash
-   cp pre-commit-hook.sh .git/hooks/pre-commit
-   ```
-2. Make sure it is executable:
-   ```bash
-   chmod +x .git/hooks/pre-commit
-   ```
+For this repository, use the tracked hooks:
 
-When committing files, the hook automatically detects staged SQL, Java, and XML changes, running them through the Docker container before allowing the commit to succeed.
+```bash
+git config core.hooksPath .githooks
+```
+
+For Web, AERIE, EAGLE-AI, or another consumer repository, install MIR in the active Python environment and copy the portable hook. See the [consumer hook guide](docs/commit-hook.md) for ready-to-run commands and configuration examples.
+
+```bash
+python3 -m pip install -e /path/to/mitchells-ineffable-rules
+cp /path/to/mitchells-ineffable-rules/pre-commit-hook.sh .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+The hook selects supported staged files itself; do not pass the output of `git diff` as filenames.
 
 ---
 
 ## Git Pre-push Hook Integration
 
-Ensure the `README.md` Last Developer Session timestamp is always up-to-date before pushing changes:
+MIR’s own tracked pre-commit hook updates and stages the development-time lines below. Its pre-push hook only verifies them and never mutates the worktree:
 
 1. Copy the hook script into your repository's hook directory:
    ```bash
@@ -177,7 +191,15 @@ Ensure the `README.md` Last Developer Session timestamp is always up-to-date bef
    chmod +x .git/hooks/pre-push
    ```
 
-When pushing to a remote branch, the hook runs `scripts/update_readme.py`. If the timestamp is out of date, it updates the `README.md` and aborts the push, instructing you to commit the updated `README.md` first.
+Consumer repositories only need the pre-commit formatter hook; the time-tracking behavior activates only in this MIR repository.
+
+---
+
+## MyBatis and Trellis
+
+MyBatis mapper elements (`select`, `insert`, `update`, `delete`, and reusable `sql` fragments) are expanded into source-mapped SQL. Safe edits map back into text nodes without touching XML tags. MyBatis `#{value}` and `${identifier}` placeholders are opaque SQL parameters.
+
+Trellis templates are detected from `-- trellis:` directives. MIR validates `if`/`elif`/`else`/`endif`, `choose`/`when`/`otherwise`/`endchoose`, and `for item in items separator=","`/`endfor`. Named binds such as `:item_id` and `:model.item_id` are opaque parameters. A Trellis template runs only rules whose metadata declares `trellis_safe = True`; external rules can opt in through the same `BaseRule` interface.
 
 ---
 
@@ -287,8 +309,8 @@ For instructions on building distribution archives, TestPyPI validation, and pub
 
 ---
 
-*This entire package was built using **Antigravity**, a powerful agentic AI coding assistant designed by the Google DeepMind team.*
+*This package has been developed with **Antigravity** and **OpenAI Codex**.*
 
-*Total Cumulative Development Time: ~24.6 hours*
+*Total Cumulative Development Time: ~25.8 hours*
 
-*Last Developer Session: 2026-07-23T22:52:34Z*
+*Last Developer Session: 2026-10-08T14:09:58Z*

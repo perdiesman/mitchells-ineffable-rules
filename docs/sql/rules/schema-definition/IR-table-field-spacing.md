@@ -5,6 +5,9 @@ Enforce exactly one space between column/field name and its data type.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Schema Definition Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 

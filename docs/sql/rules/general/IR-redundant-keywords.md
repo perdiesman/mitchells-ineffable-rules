@@ -5,6 +5,9 @@ Remove redundant implied keywords like INNER, OUTER, and ASC.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: General Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 

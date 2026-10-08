@@ -5,6 +5,9 @@ Indent should be equal amounts of spaces (default 4).
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: General Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `indent_size` (Default: `4`): Indentation size in spaces.

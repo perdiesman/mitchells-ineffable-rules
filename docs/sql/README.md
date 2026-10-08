@@ -9,11 +9,13 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 - [Schema Definition Rules](#schema-definition-rules)
 - [Data Modification Rules](#data-modification-rules)
 - [Routine & Procedure Rules](#routine-procedure-rules)
+- [Template Rules](#template-rules)
 
 ## General Rules
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
+| [`IR-as-spacing`](rules/general/IR-as-spacing.md) | The AS keyword must be preceded by exactly one space. | Yes | [View Details](rules/general/IR-as-spacing.md) |
 | [`IR-blank-lines`](rules/general/IR-blank-lines.md) | Limit consecutive blank lines to a configurable maximum. | Yes | [View Details](rules/general/IR-blank-lines.md) |
 | [`IR-comma-style`](rules/general/IR-comma-style.md) | Enforce trailing commas in multiline listings and forbid leading commas. | Yes | [View Details](rules/general/IR-comma-style.md) |
 | [`IR-comment-spacing`](rules/general/IR-comment-spacing.md) | Enforce a single space after the double-dash comment prefix. | Yes | [View Details](rules/general/IR-comment-spacing.md) |
@@ -100,3 +102,9 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-plpgsql-block-indent`](rules/routines/IR-plpgsql-block-indent.md) | Enforce block structure indentation inside PL/pgSQL procedural code blocks. | Yes | [View Details](rules/routines/IR-plpgsql-block-indent.md) |
 | [`IR-plpgsql-keyword-case`](rules/routines/IR-plpgsql-keyword-case.md) | Procedural PL/pgSQL keywords and trigger variables must be in uppercase. | Yes | [View Details](rules/routines/IR-plpgsql-keyword-case.md) |
 | [`IR-raise-layout`](rules/routines/IR-raise-layout.md) | Format and wrap long RAISE statements onto multiple lines. | Yes | [View Details](rules/routines/IR-raise-layout.md) |
+
+## Template Rules
+
+| Rule Name | Short Description | Fixable | Details |
+| :--- | :--- | :---: | :---: |
+| [`IR-trellis-directives`](rules/templates/IR-trellis-directives.md) | Validate Trellis template blocks and use canonical directive comment layout. | Sometimes | [View Details](rules/templates/IR-trellis-directives.md) |

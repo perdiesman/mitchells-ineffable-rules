@@ -18,6 +18,7 @@ Categories:
 - [Schema Definition Rules](sql/README.md#schema-definition-rules)
 - [Data Modification Rules](sql/README.md#data-modification-rules)
 - [Routine & Procedure Rules](sql/README.md#routine-procedure-rules)
+- [Template Rules](sql/README.md#template-rules)
 
 ### [XML](xml/README.md)
 Categories:
@@ -28,5 +29,6 @@ Categories:
 - [Queries Rules](xml/README.md#queries-rules)
 
 ## Additional Guides
+- [Staged Commit Hook](commit-hook.md)
 - [Custom Rules Guide](custom_rules.md)
 - [PyPI Publishing Guide](publishing.md)

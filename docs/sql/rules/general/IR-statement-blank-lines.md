@@ -5,6 +5,9 @@ Ensure at least one blank line between consecutive SQL statements.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: General Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `min_blank_lines` (Default: `1`): Minimum number of blank lines between consecutive SQL statements.

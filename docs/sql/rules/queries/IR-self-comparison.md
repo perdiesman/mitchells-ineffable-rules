@@ -5,6 +5,9 @@ Detect redundant self-comparisons where a column/identifier is compared to itsel
 - **Auto-Fixable**: No
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 

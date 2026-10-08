@@ -5,6 +5,7 @@ Enforce double quotes around attribute values instead of single quotes.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Attributes
+- **Commit Profile**: Yes
 - **Configuration Options**:
   - `enabled`: `true`
 

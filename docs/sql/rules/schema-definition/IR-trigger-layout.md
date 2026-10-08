@@ -5,6 +5,9 @@ Format and wrap long CREATE TRIGGER statements to standard multiline layout.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Schema Definition Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `max_length` (Default: `120`): Maximum line length before wrapping trigger statements.

@@ -57,6 +57,10 @@ All rule classes must subclass `BaseRule` (imported from `mir.engine.rule_interf
 - **`config_options`** (dictionary, default: `{}`): Declares detailed parameter options, descriptions, default values, and fallback instructions.
 - **`examples`** (list of dictionaries): Paired violating/correct code snippets demonstrating formatting violations and corrections.
 - **`additional_validations`** (list of strings): Compliant code statements that must always pass check verification and remain unchanged.
+- **`cases`** (list of `RuleCase`): Typed executable documentation. Expectations are `accepted`, `reported`, `fixed`, and `not_fixed`; fixed cases also provide exact fixed output.
+- **`commit_profile`** (boolean, default: `False`): Opts the rule into the conservative staged-commit profile.
+- **`embedded_safe`** (boolean, default: `False`): Declares that a SQL rule is safe when SQL is source-mapped from MyBatis XML.
+- **`trellis_safe`** (boolean, default: `False`): Declares that a SQL rule preserves Trellis directives and remains valid across conditional template branches.
 - **`fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str`**:
   - Implements the correction logic.
   - Required if `is_fixable` is `"yes"` or `"sometimes"`.
@@ -70,7 +74,7 @@ Here is a full template for implementing a custom SQL rule:
 
 ```python
 from typing import List, Dict, Any
-from mir.engine.rule_interface import BaseRule, Violation
+from mir.engine.rule_interface import BaseRule, RuleCase, Violation
 from mir.rules.sql.line_length import LineLengthRule
 
 class MyCustomSqlRule(BaseRule):
@@ -97,6 +101,13 @@ class MyCustomSqlRule(BaseRule):
     ]
     additional_validations = [
         "SELECT id, name FROM users;"
+    ]
+    cases = [
+        RuleCase(
+            name="accepted projection",
+            source="SELECT id, name FROM sample_table;",
+            expectation="accepted",
+        )
     ]
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
@@ -182,5 +193,6 @@ If you include your custom rule directory during testing (e.g. by configuring it
 - It runs `check()` on each snippet in `examples`' `violating` key and verifies it produces at least one violation.
 - If `is_fixable` is `"yes"` or `"sometimes"`, it runs `fix()` on each violating snippet and asserts that the corrected output matches the paired `correct` snippet exactly and produces zero violations.
 - It runs `check()` on each statement in `additional_validations` and verifies it produces zero violations and remains unchanged.
+- It executes every typed `RuleCase` according to its declared expectation, including exact fixes, clean-after-fix behavior, idempotency, and explicitly non-fixed violations.
 
 This ensures you can test your rule implementations immediately without having to write separate test scripts.

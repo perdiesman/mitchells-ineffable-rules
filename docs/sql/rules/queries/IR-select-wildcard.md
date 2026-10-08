@@ -5,8 +5,12 @@ Avoid wildcard SELECT * in query headers and subqueries; explicitly list columns
 - **Auto-Fixable**: No
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
+  - `severity`: `warning`
 
 #### ❌ Violating Example #1
 ```sql

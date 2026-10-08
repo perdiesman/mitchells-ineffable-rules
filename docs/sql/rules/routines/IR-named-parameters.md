@@ -5,14 +5,11 @@ Enforce named parameter notation (:= or =>) in function calls with 3 or more arg
 - **Auto-Fixable**: No
 - **Enabled by Default**: No
 - **Category**: Routine & Procedure Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `false`
-
-#### Default `EXCLUDED_FUNCTIONS`
-`ABS`, `AGE`, `ARRAY`, `ARRAY_APPEND`, `ARRAY_CAT`, `ARRAY_PREPEND`, `ARRAY_TO_STRING`, `AVG`, `CAST`, `CEIL`, `CLOCK_TIMESTAMP`, `COALESCE`, `CONCAT`, `COUNT`, `DATE_PART`, `DATE_TRUNC`, `DECODE`, `EXISTS`, `FLOOR`, `GETDATE`, `GREATEST`, `IFNULL`, `JSONB_BUILD_OBJECT`, `JSON_BUILD_OBJECT`, `LEAST`, `LOWER`, `MAX`, `MIN`, `NOW`, `NULLIF`, `NVL`, `REGEXP_MATCH`, `REGEXP_REPLACE`, `REGEXP_SPLIT_TO_ARRAY`, `REGEXP_SPLIT_TO_TABLE`, `REPLACE`, `ROUND`, `ROW_TO_JSON`, `SPLIT_PART`, `STATEMENT_TIMESTAMP`, `STRING_TO_ARRAY`, `SUBSTR`, `SUBSTRING`, `SUM`, `TO_JSON`, `TO_JSONB`, `TRANSACTION_TIMESTAMP`, `TRIM`, `UNNEST`, `UPPER`, `VALUES`
-
-#### Default `RESERVED_WORDS`
-`ALTER`, `AND`, `BEGIN`, `CASE`, `CREATE`, `DECLARE`, `DELETE`, `DROP`, `ELSE`, `END`, `FOR`, `FROM`, `IF`, `IN`, `INSERT`, `LOOP`, `NOT`, `ON`, `OR`, `RAISE`, `RETURN`, `SELECT`, `THEN`, `UPDATE`, `WHEN`, `WHERE`, `WHILE`, `WITH`
 
 #### ❌ Violating Example
 ```sql

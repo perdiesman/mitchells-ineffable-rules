@@ -5,6 +5,9 @@ Format and wrap long RAISE statements onto multiple lines.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Routine & Procedure Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `max_length` (Default: `120`): Maximum line length before wrapping RAISE statements.

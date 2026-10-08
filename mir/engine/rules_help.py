@@ -121,6 +121,7 @@ def generate_docs_to_path(
         root_md.append("")
         
     root_md.append("## Additional Guides")
+    root_md.append("- [Staged Commit Hook](commit-hook.md)")
     root_md.append("- [Custom Rules Guide](custom_rules.md)")
     root_md.append("- [PyPI Publishing Guide](publishing.md)\n")
     
@@ -220,6 +221,10 @@ def generate_docs_to_path(
                 rule_md.append(f"- **Auto-Fixable**: {fixable_str}")
                 rule_md.append(f"- **Enabled by Default**: {enabled_str}")
                 rule_md.append(f"- **Category**: {get_category_title(r.category, lang, include_dirs)}")
+                rule_md.append(f"- **Commit Profile**: {'Yes' if r.commit_profile else 'No'}")
+                if lang == "sql":
+                    rule_md.append(f"- **MyBatis Safe**: {'Yes' if r.embedded_safe else 'No'}")
+                    rule_md.append(f"- **Trellis Safe**: {'Yes' if r.trellis_safe else 'No'}")
                 
                 # Configuration parameters
                 rule_md.append("- **Configuration Options**:")
@@ -300,6 +305,21 @@ def generate_docs_to_path(
                         rule_md.append(f"```{lang}")
                         rule_md.append(val)
                         rule_md.append("```\n")
+
+                cases = getattr(r, "cases", [])
+                if cases:
+                    rule_md.append("#### Executable Cases")
+                    for case in cases:
+                        label = case.expectation.replace("_", " ").title()
+                        rule_md.append(f"##### {case.name} — {label}")
+                        rule_md.append(f"```{lang}")
+                        rule_md.append(case.source)
+                        rule_md.append("```\n")
+                        if case.fixed is not None:
+                            rule_md.append("Expected fixed output:")
+                            rule_md.append(f"```{lang}")
+                            rule_md.append(case.fixed)
+                            rule_md.append("```\n")
                             
                 if has_categories:
                     dest_dir = os.path.join(rules_dir, r.category.lower())
@@ -434,6 +454,10 @@ def print_rule_details(lang: str, rule, include_dirs: Optional[List[str]] = None
     print(f"Category:     {get_category_title(rule.category, lang, include_dirs)}")
     print(f"Fixable:      {fixable_str}")
     print(f"Enabled:      {enabled_str} (by default)")
+    print(f"Commit:       {'Yes' if rule.commit_profile else 'No'}")
+    if lang == "sql":
+        print(f"MyBatis safe: {'Yes' if rule.embedded_safe else 'No'}")
+        print(f"Trellis safe: {'Yes' if rule.trellis_safe else 'No'}")
     print(f"Description:  {rule.description}")
     
     # Print configuration parameters
@@ -508,3 +532,15 @@ def print_rule_details(lang: str, rule, include_dirs: Optional[List[str]] = None
         for val in additional_vals:
             print(val)
         print()
+
+    cases = getattr(rule, "cases", [])
+    if cases:
+        print("Executable Cases:")
+        print("-----------------")
+        for case in cases:
+            print(f"{case.name} [{case.expectation}]")
+            print(case.source)
+            if case.fixed is not None:
+                print("Expected fixed output:")
+                print(case.fixed)
+            print()
