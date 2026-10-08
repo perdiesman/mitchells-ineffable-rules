@@ -286,9 +286,9 @@ def _collect(
     base_indent = detect_base_indent(content)
     template_dialect = None
     if lang == "sql":
-        from mir.rules.sql.trellis_utils import has_trellis_directives
+        from mir.rules.sql.trellis_utils import has_trellis_syntax
 
-        if has_trellis_directives(content):
+        if has_trellis_syntax(content):
             template_dialect = "trellis"
     collected: list[tuple[Violation, BaseRule, str]] = []
     diagnostics: list[str] = []
@@ -361,9 +361,9 @@ def process_document(
             before_pass = current
             template_dialect = None
             if lang == "sql":
-                from mir.rules.sql.trellis_utils import has_trellis_directives
+                from mir.rules.sql.trellis_utils import has_trellis_syntax
 
-                if has_trellis_directives(current):
+                if has_trellis_syntax(current):
                     template_dialect = "trellis"
             for rule in fix_rules:
                 rule_config = resolve_rule_config(
@@ -380,6 +380,15 @@ def process_document(
                 except Exception as error:
                     result.diagnostics.append(f"Error fixing rule {rule.rule_id} on {path}: {error}")
                     continue
+                if config.profile == "commit" and lang == "sql" and fixed != current:
+                    from mir.rules.sql.sql_utils import protected_sql_signature
+
+                    if protected_sql_signature(fixed) != protected_sql_signature(current):
+                        result.diagnostics.append(
+                            f"Unsafe fix rejected for {rule.rule_id} on {path}: "
+                            "protected SQL syntax changed"
+                        )
+                        continue
                 if selection.restricted:
                     fixed = apply_filtered_fixes(current, fixed, set(selection.allowed))
                 if fixed != current:

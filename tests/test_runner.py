@@ -7,7 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from mir.engine.config import Config
-from mir.engine.runner import run_linter
+from mir.engine.runner import process_document, run_linter
 
 class TestRunnerIntegration(unittest.TestCase):
     def setUp(self):
@@ -684,6 +684,29 @@ class TestRunnerIntegration(unittest.TestCase):
             content = f.read()
             self.assertIn("id &gt; 10", content)
             self.assertNotIn("&AS gt;", content)
+
+    def test_xml_mybatis_commit_profile_preserves_protected_sql_syntax(self):
+        xml_content = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="query">\n'
+            '        select payload-&gt;&gt;\'key\' from sample_table\n'
+            '        where created_at between #{start} and #{end}\n'
+            '          and make_interval(days =&gt; #{limit}) &gt; interval \'1 day\'\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        result = process_document(config, xml_content, "generic.xml", "xml")
+
+        self.assertIn("payload -&gt;&gt; 'key'", result.content)
+        self.assertIn("between #{start} AND #{end}", result.content)
+        self.assertIn("days =&gt; #{limit}", result.content)
+        self.assertNotIn("#{END}", result.content)
+        self.assertNotIn("#{LIMIT}", result.content)
 
     def test_xml_mybatis_sql_line_mapping(self):
         # XML file with a self-comparison on line 5

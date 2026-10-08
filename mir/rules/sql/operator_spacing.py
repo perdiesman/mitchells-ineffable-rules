@@ -54,6 +54,8 @@ class OperatorSpacingRule(BaseRule):
                         is_unary_or_special = True
                     elif prev_active["type"] == "PAREN" and prev_active["value"] == "(":
                         is_unary_or_special = True
+                    elif val == "*" and prev_active["type"] == "DOT":
+                        is_unary_or_special = True
                     elif prev_active["type"] == "KEYWORD" and prev_active["value"].upper() in (
                         "SELECT", "WHERE", "AND", "OR", "ON", "HAVING", "LIMIT", "BY", "RETURNING"
                     ):

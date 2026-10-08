@@ -1,6 +1,6 @@
-import re
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
+from mir.rules.sql.sql_utils import tokenize_sql
 
 KEYWORDS = [
     "select", "from", "where", "join", "on", "and", "or", "limit",
@@ -66,33 +66,34 @@ class KeywordCaseRule(BaseRule):
                 result.append(k_lower)
         return result
 
-    def _find_violations_in_text(self, text: str, line_offset: int, keywords: List[str]) -> List[Tuple[int, str]]:
-        violations = []
-        lines = text.splitlines()
-        
-        # Compile patterns dynamically
-        patterns = [
-            (kw, re.compile(rf"\b({re.escape(kw)})\b", re.IGNORECASE))
-            for kw in keywords
+    def _find_keyword_tokens(self, content: str, keywords: List[str]) -> List[dict]:
+        tokens = tokenize_sql(content)
+        active = [
+            token for token in tokens
+            if token["type"] not in {"WHITESPACE", "COMMENT", "STRING", "PARAM"}
         ]
-        
-        for idx, line in enumerate(lines):
-            for kw, pattern in patterns:
-                matches = pattern.finditer(line)
-                for m in matches:
-                    matched_val = m.group(1)
-                    if matched_val != matched_val.upper():
-                        violations.append((line_offset + idx + 1, matched_val))
-        return violations
+        found = {}
+        for keyword in keywords:
+            words = keyword.split()
+            for index in range(len(active) - len(words) + 1):
+                candidates = active[index:index + len(words)]
+                if all(
+                    token["type"] in {"KEYWORD", "IDENTIFIER"}
+                    and token["value"].lower() == word
+                    for token, word in zip(candidates, words)
+                ):
+                    for token in candidates:
+                        if token["value"] != token["value"].upper():
+                            found[token["start"]] = token
+        return [found[start] for start in sorted(found)]
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
-        clean_content = self._mask_comments_and_strings(content)
         keywords = self._get_keywords(rule_config)
-        violations_found = self._find_violations_in_text(clean_content, 0, keywords)
+        violations_found = self._find_keyword_tokens(content, keywords)
         
         by_line: Dict[int, List[str]] = {}
-        for line_num, kw in violations_found:
-            by_line.setdefault(line_num, []).append(kw)
+        for token in violations_found:
+            by_line.setdefault(token["line"], []).append(token["value"])
             
         lines = content.splitlines()
         violations = []
@@ -110,148 +111,10 @@ class KeywordCaseRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        keywords = set(self._get_keywords(rule_config))
-        n = len(content)
-        i = 0
-        in_string = False
-        string_char = None
-        in_single_comment = False
-        in_multi_comment = False
-        
-        fixed_chunks = []
-        chunk_start = 0
-        
-        while i < n:
-            c = content[i]
-            
-            if in_string:
-                if c == string_char:
-                    if i + 1 < n and content[i + 1] == "'":
-                        i += 2
-                        continue
-                    in_string = False
-                i += 1
-                continue
-                
-            if in_single_comment:
-                if c == '\n':
-                    in_single_comment = False
-                i += 1
-                continue
-                
-            if in_multi_comment:
-                if c == '*' and i + 1 < n and content[i + 1] == '/':
-                    in_multi_comment = False
-                    i += 2
-                    break
-                i += 1
-                continue
-                
-            if c in ("'", '"'):
-                in_string = True
-                string_char = c
-                i += 1
-                continue
-                
-            if c == '-' and i + 1 < n and content[i + 1] == '-':
-                in_single_comment = True
-                i += 2
-                continue
-                
-            if c == '/' and i + 1 < n and content[i + 1] == '*':
-                in_multi_comment = True
-                i += 2
-                continue
-                
-            if c.isalpha() or c == '_':
-                w_start = i
-                while i < n and (content[i].isalnum() or content[i] == '_'):
-                    i += 1
-                word = content[w_start:i]
-                
-                peek_word = word.lower()
-                next_i = i
-                if peek_word in ("group", "order"):
-                    while next_i < n and content[next_i].isspace():
-                        next_i += 1
-                    w2_start = next_i
-                    while next_i < n and (content[next_i].isalnum() or content[next_i] == '_'):
-                        next_i += 1
-                    word2 = content[w2_start:next_i]
-                    if word2.lower() == "by":
-                        word = content[w_start:next_i]
-                        peek_word = f"{peek_word} by"
-                        i = next_i
-                
-                if peek_word in keywords:
-                    if word != word.upper():
-                        fixed_chunks.append(content[chunk_start:w_start])
-                        fixed_chunks.append(word.upper())
-                        chunk_start = i
-                continue
-                
-            i += 1
-            
-        fixed_chunks.append(content[chunk_start:])
-        return "".join(fixed_chunks)
-
-    def _mask_comments_and_strings(self, content: str) -> str:
-        n = len(content)
-        masked = list(content)
-        i = 0
-        in_string = False
-        string_char = None
-        in_single_comment = False
-        in_multi_comment = False
-        
-        while i < n:
-            c = content[i]
-            
-            if in_string:
-                if c == string_char:
-                    if i + 1 < n and content[i + 1] == "'":
-                        i += 2
-                        continue
-                    in_string = False
-                elif c != '\n':
-                    masked[i] = ' '
-                i += 1
-                continue
-                
-            if in_single_comment:
-                if c == '\n':
-                    in_single_comment = False
-                else:
-                    masked[i] = ' '
-                i += 1
-                continue
-                
-            if in_multi_comment:
-                if c == '*' and i + 1 < n and content[i + 1] == '/':
-                    in_multi_comment = False
-                    i += 2
-                    continue
-                elif c != '\n':
-                    masked[i] = ' '
-                i += 1
-                continue
-                
-            if c in ("'", '"'):
-                in_string = True
-                string_char = c
-                i += 1
-                continue
-                
-            if c == '-' and i + 1 < n and content[i + 1] == '-':
-                in_single_comment = True
-                i += 2
-                continue
-                
-            if c == '/' and i + 1 < n and content[i + 1] == '*':
-                in_multi_comment = True
-                i += 2
-                continue
-                
-            i += 1
-            
-        return "".join(masked)
+        tokens = self._find_keyword_tokens(content, self._get_keywords(rule_config))
+        if not tokens:
+            return content
+        chars = list(content)
+        for token in reversed(tokens):
+            chars[token["start"]:token["end"]] = token["value"].upper()
+        return "".join(chars)

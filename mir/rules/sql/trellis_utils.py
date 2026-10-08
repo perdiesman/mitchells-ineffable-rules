@@ -47,6 +47,19 @@ def has_trellis_directives(content: str) -> bool:
     return any(parse_directive(line, number) for number, line in enumerate(content.splitlines(), 1))
 
 
+def has_trellis_syntax(content: str) -> bool:
+    """Recognize directive templates and external SQL with named binds."""
+    if has_trellis_directives(content):
+        return True
+    # Import lazily to avoid making the tokenizer depend on Trellis parsing.
+    from mir.rules.sql.sql_utils import tokenize_sql
+
+    return any(
+        token["type"] == "PARAM" and token["value"].startswith(":")
+        for token in tokenize_sql(content)
+    )
+
+
 def analyze_trellis(content: str) -> tuple[list[TrellisDirective], list[TrellisIssue], list[tuple[int, int]]]:
     directives: list[TrellisDirective] = []
     issues: list[TrellisIssue] = []

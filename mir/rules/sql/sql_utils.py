@@ -8,15 +8,34 @@ SQL_KEYWORDS = {
     "UNION", "INTERSECT", "EXCEPT", "AND", "OR", "NOT", "IN", "EXISTS", "IS", "NULL",
     "AS", "CREATE", "VIEW", "MATERIALIZED", "TABLE", "INSERT", "INTO", "VALUES", "UPDATE",
     "SET", "DELETE", "WITH", "CASE", "WHEN", "THEN", "ELSE", "END", "COALESCE",
-    "RECURSIVE", "ASC", "DESC", "DISTINCT",
+    "RECURSIVE", "ASC", "DESC", "DISTINCT", "FILTER", "CONFLICT",
     # TO must not be mistaken for a function name in constructs such as
     # IMPORT FOREIGN SCHEMA ... LIMIT TO (...).
     "TO"
 }
 
 OPERATORS = {
-    "=", "<>", "<=", ">=", "!=", "<", ">", "+", "-", "*", "/", "%", "||", "~*"
+    # Keep PostgreSQL's multi-character operators atomic. Splitting these into
+    # overlapping one-character tokens lets spacing edits overwrite operator
+    # characters (especially after XML entities have been decoded).
+    "->>", "#>>", "!~*", "?|", "?&", "#>", "#-", "->", "@>", "<@",
+    "=>", ":=", "<=", ">=", "!=", "<>", "||", "&&", "!~", "~*", "@?",
+    "@@", "<<", ">>", "=", "<", ">", "+", "-", "*", "/", "%", "~",
+    "?", "&", "|", "#", "^"
 }
+
+
+def protected_sql_signature(content: str) -> tuple[tuple[str, str], ...]:
+    """Return syntax that conservative fixes must preserve byte-for-byte."""
+    protected = []
+    for token in tokenize_sql(content):
+        token_type = token["type"]
+        value = token["value"]
+        if token_type in {"PARAM", "STRING", "OPERATOR", "CAST"}:
+            protected.append((token_type, value))
+        elif token_type == "IDENTIFIER" and value.startswith('"'):
+            protected.append(("QUOTED_IDENTIFIER", value))
+    return tuple(protected)
 
 @lru_cache(maxsize=1024)
 def _tokenize_sql_impl(content: str) -> List[dict]:

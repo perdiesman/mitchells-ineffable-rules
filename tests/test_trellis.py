@@ -4,9 +4,15 @@ from mir.engine.config import Config
 from mir.engine.runner import process_document
 from mir.engine.selection import expand_selection
 from mir.rules.sql.trellis_directives import TrellisDirectivesRule
+from mir.rules.sql.trellis_utils import has_trellis_syntax
 
 
 class TestTrellisSupport(unittest.TestCase):
+    def test_named_bind_external_sql_is_detected_as_trellis(self):
+        self.assertTrue(has_trellis_syntax("SELECT item_id FROM sample_table WHERE item_id = :item_id"))
+        self.assertTrue(has_trellis_syntax("SELECT :start::timestamp"))
+        self.assertFalse(has_trellis_syntax("SELECT 1::integer"))
+
     def test_all_supported_directive_families_are_accepted(self):
         content = """SELECT item_id
 FROM sample_table

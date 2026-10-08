@@ -213,6 +213,7 @@ def fix_embedded_content(
             guest_rule_config["_rules_to_disable"] = rule_config.get("_rules_to_disable", set())
             guest_rule_config["_rules_to_enable"] = rule_config.get("_rules_to_enable", set())
             guest_rule_config["_disable_all"] = rule_config.get("_disable_all", False)
+            guest_rule_config["_profile"] = rule_config.get("_profile")
             
             if extra_fix_args:
                 guest_rule_config.update(extra_fix_args)
@@ -238,6 +239,13 @@ def fix_embedded_content(
                 
             prev_text = fixed_text
             fixed_text = rule.fix(fixed_text, file_path, guest_rule_config)
+            if rule_config.get("_profile") == "commit" and fixed_text != prev_text:
+                from mir.rules.sql.sql_utils import protected_sql_signature
+
+                if protected_sql_signature(fixed_text) != protected_sql_signature(prev_text):
+                    raise ValueError(
+                        f"unsafe embedded fix from {rule.rule_id}: protected SQL syntax changed"
+                    )
             if fixed_text != prev_text and extra_fix_args and "applied_rules" in extra_fix_args:
                 extra_fix_args["applied_rules"].add(rule.rule_id)
                 

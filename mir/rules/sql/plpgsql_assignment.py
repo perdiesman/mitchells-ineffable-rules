@@ -77,21 +77,25 @@ class PlpgsqlAssignmentRule(BaseRule):
             if first_tok["type"] in ("KEYWORD", "IDENTIFIER") and first_tok["value"].upper() in EXCLUDED_STARTERS:
                 continue
                 
-            # Find the first '=' operator (or ':=' combination)
+            # Find the first assignment operator. The shared tokenizer keeps
+            # PostgreSQL's := atomic, but retain compatibility with separately
+            # tokenized ':' and '=' from external/custom token streams.
             for idx, t in enumerate(stmt):
-                if t["type"] == "OPERATOR" and t["value"] == "=":
+                if t["type"] == "OPERATOR" and t["value"] in ("=", ":="):
                     # Check if preceded by ':'
                     prev_idx = idx - 1
                     while prev_idx >= 0 and stmt[prev_idx]["type"] in ("WHITESPACE", "COMMENT"):
                         prev_idx -= 1
                         
-                    is_colon_equals = (prev_idx >= 0 and stmt[prev_idx]["value"] == ":")
+                    is_colon_equals = t["value"] == ":=" or (
+                        prev_idx >= 0 and stmt[prev_idx]["value"] == ":"
+                    )
                     
                     if is_colon_equals:
                         # It is ':=' operator!
                         # In the body (or outside declare), we want '=' instead of ':='!
                         if in_body or not in_declare:
-                            colon_tok = stmt[prev_idx]
+                            colon_tok = t if t["value"] == ":=" else stmt[prev_idx]
                             violations.append({
                                 "token": t,
                                 "start_offset": colon_tok["start"] + offset_delta,

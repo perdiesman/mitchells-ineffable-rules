@@ -1,7 +1,10 @@
 import unittest
 
 from mir.rules.sql.paren_content_indent import ParenContentIndentRule
-from mir.rules.sql.sql_utils import tokenize_sql
+from mir.rules.sql.function_case import FunctionCaseRule
+from mir.rules.sql.keyword_case import KeywordCaseRule
+from mir.rules.sql.operator_spacing import OperatorSpacingRule
+from mir.rules.sql.sql_utils import protected_sql_signature, tokenize_sql
 from mir.rules.sql.unresolved_alias import UnresolvedAliasRule
 
 
@@ -21,6 +24,39 @@ class TestSqlCompatibility(unittest.TestCase):
             ["${schemaName}", "#{item.id}", ":filter.name", ":created_on"],
         )
         self.assertIn("::", [token["value"] for token in tokens if token["type"] == "CAST"])
+
+    def test_keyword_case_preserves_mybatis_and_trellis_parameters(self):
+        content = "select :end, #{limit}, ${order} from sample_table;"
+        fixed = KeywordCaseRule().fix(content, "generic.sql", {})
+
+        self.assertEqual(fixed, "SELECT :end, #{limit}, ${order} FROM sample_table;")
+
+    def test_postgresql_contextual_keywords_are_not_functions(self):
+        content = (
+            "SELECT COUNT(*) FILTER (WHERE enabled) FROM sample_table "
+            "ON CONFLICT (item_id) DO UPDATE SET value = excluded.value;"
+        )
+        fixed = FunctionCaseRule().fix(content, "generic.sql", {})
+
+        self.assertEqual(
+            fixed,
+            "SELECT count(*) FILTER (WHERE enabled) FROM sample_table "
+            "ON CONFLICT (item_id) DO UPDATE SET value = excluded.value;",
+        )
+
+    def test_postgresql_operators_remain_atomic_when_spaced(self):
+        content = (
+            "SELECT row_data->>'key', row_data#>>'{path}', sample_table.* "
+            "FROM sample_table WHERE days=>:days;"
+        )
+        fixed = OperatorSpacingRule().fix(content, "generic.sql", {})
+
+        self.assertEqual(
+            fixed,
+            "SELECT row_data ->> 'key', row_data #>> '{path}', sample_table.* "
+            "FROM sample_table WHERE days => :days;",
+        )
+        self.assertEqual(protected_sql_signature(fixed), protected_sql_signature(content))
 
     def test_foreign_schema_limit_list_is_not_a_function_call(self):
         content = (
