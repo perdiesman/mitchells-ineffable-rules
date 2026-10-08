@@ -1,12 +1,22 @@
 import os
 import sys
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from mir.engine.config import load_config
 
 class TestConfig(unittest.TestCase):
+    def test_version_matches_package_metadata(self):
+        output = StringIO()
+        with self.assertRaises(SystemExit) as raised:
+            with redirect_stdout(output):
+                load_config(["--version"])
+        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(output.getvalue().strip(), "mir-linter 0.2.0")
+
     def test_default_config(self):
         config = load_config([])
         self.assertFalse(config.fix)

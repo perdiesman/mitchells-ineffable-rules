@@ -4,6 +4,7 @@ import yaml
 from typing import List, Dict, Any, Optional, Set
 
 from mir.engine.rules_help import handle_rule_help
+from mir import __version__
 
 DEFAULT_CONFIG_FILES = [".ir-config.yaml", ".ir-config.yml"]
 
@@ -45,7 +46,7 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     parser.add_argument(
         "--version",
         action="version",
-        version="mir-linter 0.1.0a3",
+        version=f"mir-linter {__version__}",
         help="Show version information"
     )
     parser.add_argument("paths", nargs="*", help="Files or directories to lint")

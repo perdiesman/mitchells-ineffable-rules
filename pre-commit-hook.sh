@@ -8,13 +8,13 @@ cd "$REPO_ROOT" || exit 1
 
 # MIR itself tracks development time in README. This block is skipped when
 # the portable hook is copied into a consumer repository.
-if [[ -f scripts/update_readme.py ]] && grep -q "Mitchell's Ineffable Rules" README.md 2>/dev/null; then
+if [[ -f scripts/update_readme.py ]] && grep -q '^name = "mir-linter"' pyproject.toml 2>/dev/null; then
     python3 scripts/update_readme.py || exit 1
     git add README.md || exit 1
 fi
 
 echo "Formatting staged SQL and XML changes with MIR..."
-if [[ -f mir/main.py ]]; then
+if [[ -f mir/main.py ]] && grep -q '^name = "mir-linter"' pyproject.toml 2>/dev/null; then
     python3 -m mir.main --staged --fix
 elif command -v mir >/dev/null 2>&1; then
     mir --staged --fix
