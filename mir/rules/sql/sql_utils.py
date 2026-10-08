@@ -32,7 +32,8 @@ OPERATORS = {
 def protected_sql_signature(content: str) -> tuple[tuple[str, str], ...]:
     """Return syntax that conservative fixes must preserve byte-for-byte."""
     protected = []
-    for token in tokenize_sql(content):
+    tokens = tokenize_sql(content)
+    for token in tokens:
         token_type = token["type"]
         value = token["value"]
         if token_type == "STRING" and value.startswith("$"):
@@ -43,6 +44,10 @@ def protected_sql_signature(content: str) -> tuple[tuple[str, str], ...]:
             protected.append((token_type, value))
         elif token_type == "IDENTIFIER" and value.startswith('"'):
             protected.append(("QUOTED_IDENTIFIER", value))
+    for group in find_cast_target_token_groups(tokens, content):
+        protected.append(
+            ("CAST_TARGET", content[group[0]["start"] : group[-1]["end"]])
+        )
     return tuple(protected)
 
 @lru_cache(maxsize=32)
@@ -713,6 +718,86 @@ def find_datatype_token_groups(tokens: List[dict], content: str) -> List[List[di
                                         type_groups.append(group)
                             
     return type_groups
+
+
+def find_cast_target_token_groups(tokens: List[dict], content: str) -> List[List[dict]]:
+    """Return token groups that are targets of SQL cast syntax."""
+    active_tokens = [
+        token for token in tokens if token["type"] not in ("WHITESPACE", "COMMENT")
+    ]
+    active_index_by_id = {id(token): index for index, token in enumerate(active_tokens)}
+    groups_by_start = {
+        id(group[0]): group for group in find_datatype_token_groups(tokens, content)
+    }
+    cast_groups: list[list[dict]] = []
+
+    def postgres_target(start_index: int) -> list[dict]:
+        recognized = groups_by_start.get(id(active_tokens[start_index]))
+        if recognized is not None:
+            target = list(recognized)
+            end_index = active_index_by_id[id(recognized[-1])] + 1
+        else:
+            target = [active_tokens[start_index]]
+            end_index = start_index + 1
+            while (
+                end_index + 1 < len(active_tokens)
+                and active_tokens[end_index]["type"] == "DOT"
+                and active_tokens[end_index + 1]["type"] in {"IDENTIFIER", "KEYWORD"}
+            ):
+                target.extend(active_tokens[end_index : end_index + 2])
+                end_index += 2
+        while (
+            end_index + 1 < len(active_tokens)
+            and active_tokens[end_index]["value"] == "["
+            and active_tokens[end_index + 1]["value"] == "]"
+        ):
+            target.extend(active_tokens[end_index : end_index + 2])
+            end_index += 2
+        return target
+
+    for index, token in enumerate(active_tokens):
+        if token["type"] == "CAST" and index + 1 < len(active_tokens):
+            cast_groups.append(postgres_target(index + 1))
+            continue
+
+        if token["type"] != "KEYWORD" or token["value"].upper() != "CAST":
+            continue
+        if index + 1 >= len(active_tokens) or active_tokens[index + 1]["value"] != "(":
+            continue
+
+        depth = 0
+        for cast_index in range(index + 1, len(active_tokens)):
+            cast_token = active_tokens[cast_index]
+            if cast_token["type"] == "PAREN":
+                if cast_token["value"] == "(":
+                    depth += 1
+                else:
+                    depth -= 1
+                    if depth == 0:
+                        break
+            elif (
+                depth == 1
+                and cast_token["type"] == "KEYWORD"
+                and cast_token["value"].upper() == "AS"
+                and cast_index + 1 < len(active_tokens)
+            ):
+                target_end = cast_index + 1
+                target_depth = depth
+                while target_end < len(active_tokens):
+                    target_token = active_tokens[target_end]
+                    if target_token["type"] == "PAREN":
+                        if target_token["value"] == "(":
+                            target_depth += 1
+                        else:
+                            target_depth -= 1
+                            if target_depth == 0:
+                                break
+                    target_end += 1
+                if target_end > cast_index + 1:
+                    cast_groups.append(active_tokens[cast_index + 1 : target_end])
+                break
+
+    return cast_groups
 
 
 def is_values_multi(tokens: List[dict], open_idx: int) -> bool:

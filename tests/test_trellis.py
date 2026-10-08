@@ -68,6 +68,27 @@ where retired_at is null
         self.assertIn("    ,item_name", result.content)
         self.assertNotIn("IR-comma-style", result.rules_fixed)
 
+    def test_commit_profile_preserves_postgresql_cast_targets(self):
+        content = (
+            "select generate_series(:start::timestamp, :end::timestamp) as outage_hour,\n"
+            "hourly.customers_out::bigint from hourly;\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        result = process_document(config, content, "audit_county_hours.sql", "sql")
+
+        self.assertEqual(
+            result.content,
+            "SELECT generate_series(:start::timestamp, :end::timestamp) AS outage_hour,\n"
+            "hourly.customers_out::bigint FROM hourly;\n",
+        )
+        self.assertEqual(result.diagnostics, [])
+        self.assertNotIn(
+            "IR-datatype-case", [violation.rule_id for violation, _, _ in result.violations]
+        )
+
     def test_changed_directive_expands_through_its_block(self):
         content = """SELECT item_id
 FROM sample_table

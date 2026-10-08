@@ -1,6 +1,10 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, find_datatype_token_groups
+from mir.rules.sql.sql_utils import (
+    find_cast_target_token_groups,
+    find_datatype_token_groups,
+    tokenize_sql,
+)
 
 class DataTypeCaseRule(BaseRule):
     commit_profile = True
@@ -25,12 +29,23 @@ class DataTypeCaseRule(BaseRule):
         "SELECT 1::INTEGER;"
     ]
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _find_violations(self, content: str, preserve_casts: bool = False) -> List[dict]:
         tokens = tokenize_sql(content)
         groups = find_datatype_token_groups(tokens, content)
+        cast_token_ids = (
+            {
+                id(token)
+                for group in find_cast_target_token_groups(tokens, content)
+                for token in group
+            }
+            if preserve_casts
+            else set()
+        )
         violations = []
         
         for g in groups:
+            if any(id(token) in cast_token_ids for token in g):
+                continue
             # We want to check all alphabetic identifiers or keywords in the type group
             # and verify if they are uppercase
             non_uppercase = []
@@ -49,7 +64,9 @@ class DataTypeCaseRule(BaseRule):
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content)
+        offending = self._find_violations(
+            content, preserve_casts=rule_config.get("_profile") == "commit"
+        )
         for item in offending:
             g = item["tokens"]
             type_str = "".join(t["value"] for t in g)
@@ -65,7 +82,9 @@ class DataTypeCaseRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        offending = self._find_violations(content)
+        offending = self._find_violations(
+            content, preserve_casts=rule_config.get("_profile") == "commit"
+        )
         if not offending:
             return content
             

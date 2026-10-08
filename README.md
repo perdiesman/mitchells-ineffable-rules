@@ -201,7 +201,7 @@ MyBatis mapper elements (`select`, `insert`, `update`, `delete`, and reusable `s
 
 Trellis templates are detected from `-- trellis:` directives or named binds. MIR validates `if`/`elif`/`else`/`endif`, `choose`/`when`/`otherwise`/`endchoose`, and `for item in items separator=","`/`endfor`. Named binds such as `:item_id` and `:model.item_id` are opaque parameters. A Trellis template runs only rules whose metadata declares `trellis_safe = True`; external rules can opt in through the same `BaseRule` interface.
 
-The commit profile rejects a proposed fix if it changes protected SQL syntax: template parameters, string literals, quoted identifiers, PostgreSQL casts, or the operator sequence. The same invariant is checked after staged-line filtering and after MyBatis edits are mapped back into XML.
+The commit profile rejects a proposed fix if it changes protected SQL syntax: template parameters, string literals, quoted identifiers, PostgreSQL cast targets, or the operator sequence. Cast target casing is therefore preserved even though the unrestricted datatype rule normally standardizes it. The same invariant is checked after staged-line filtering and after MyBatis edits are mapped back into XML.
 
 ---
 

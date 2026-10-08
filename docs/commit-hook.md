@@ -8,7 +8,7 @@ mir --staged --fix
 
 `--staged` automatically enables the conservative `commit` profile. Changed lines are expanded to the enclosing SQL statement, Trellis block, or MyBatis statement element. MIR writes successful fixes back to the index and does not stage unrelated working-tree changes.
 
-The profile treats MyBatis placeholders and Trellis named binds as opaque. It also verifies that fixes preserve string literals, quoted identifiers, PostgreSQL casts, and operator sequences. An edit that violates those invariants is rejected with an explicit diagnostic instead of being written to the index.
+The profile treats MyBatis placeholders and Trellis named binds as opaque. It also verifies that fixes preserve string literals, quoted identifiers, PostgreSQL cast targets, and operator sequences. Cast target casing is not rewritten by the commit profile. An edit that violates those invariants is rejected with an explicit diagnostic instead of being written to the index.
 
 ## Install in a consumer repository
 
