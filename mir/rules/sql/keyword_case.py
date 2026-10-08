@@ -75,27 +75,38 @@ class KeywordCaseRule(BaseRule):
             token for token in tokens
             if token["type"] not in {"WHITESPACE", "COMMENT", "STRING", "PARAM"}
         ]
+        keyword_sequences = [tuple(keyword.split()) for keyword in keywords]
+        sequences_by_first: Dict[str, List[tuple[str, ...]]] = {}
+        for sequence in keyword_sequences:
+            if sequence:
+                sequences_by_first.setdefault(sequence[0], []).append(sequence)
+
         found = {}
-        for keyword in keywords:
-            words = keyword.split()
-            for index in range(len(active) - len(words) + 1):
-                candidates = active[index:index + len(words)]
-                if all(
-                    token["type"] in {"KEYWORD", "IDENTIFIER"}
-                    and token["value"].lower() == word
-                    for token, word in zip(candidates, words)
+        for index, token in enumerate(active):
+            if token["type"] not in {"KEYWORD", "IDENTIFIER"}:
+                continue
+            for sequence in sequences_by_first.get(token["value"].lower(), ()):
+                end = index + len(sequence)
+                if end > len(active):
+                    continue
+                candidates = active[index:end]
+                if not all(
+                    candidate["type"] in {"KEYWORD", "IDENTIFIER"}
+                    and candidate["value"].lower() == word
+                    for candidate, word in zip(candidates, sequence)
                 ):
-                    for candidate_offset, token in enumerate(candidates):
-                        active_index = index + candidate_offset
-                        if (
-                            token["value"].lower() in FUNCTION_KEYWORD_AMBIGUITIES
-                            and active_index + 1 < len(active)
-                            and active[active_index + 1]["type"] == "PAREN"
-                            and active[active_index + 1]["value"] == "("
-                        ):
-                            continue
-                        if token["value"] != token["value"].upper():
-                            found[token["start"]] = token
+                    continue
+                for candidate_offset, candidate in enumerate(candidates):
+                    active_index = index + candidate_offset
+                    if (
+                        candidate["value"].lower() in FUNCTION_KEYWORD_AMBIGUITIES
+                        and active_index + 1 < len(active)
+                        and active[active_index + 1]["type"] == "PAREN"
+                        and active[active_index + 1]["value"] == "("
+                    ):
+                        continue
+                    if candidate["value"] != candidate["value"].upper():
+                        found[candidate["start"]] = candidate
         return [found[start] for start in sorted(found)]
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:

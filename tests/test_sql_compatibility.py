@@ -48,6 +48,16 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(fixed, "SELECT :end, #{limit}, ${order} FROM sample_table;")
 
+    def test_keyword_case_handles_overlapping_configured_phrases(self):
+        content = "select item_id group by item_id order by item_id;"
+        fixed = KeywordCaseRule().fix(
+            content,
+            "generic.sql",
+            {"additional_keywords": ["group", "group by", "order by"]},
+        )
+
+        self.assertEqual(fixed, "SELECT item_id GROUP BY item_id ORDER BY item_id;")
+
     def test_postgresql_contextual_keywords_are_not_functions(self):
         content = (
             "SELECT COUNT(*) FILTER (WHERE enabled) FROM sample_table "

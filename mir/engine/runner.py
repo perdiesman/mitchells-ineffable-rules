@@ -423,6 +423,13 @@ def process_document(
         else:
             result.errors += 1
     result.errors += len(result.diagnostics)
+    if lang == "sql":
+        # Tokenization is shared across every rule and formatting pass for this
+        # document. Do not retain large compatibility or migration files after
+        # their result has been fully materialized.
+        from mir.rules.sql.sql_utils import _tokenize_sql_impl
+
+        _tokenize_sql_impl.cache_clear()
     return result
 
 

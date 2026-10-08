@@ -87,6 +87,15 @@ where retired_at is null
         self.assertEqual(result.diagnostics, [])
         self.assertIn("IR-datatype-case", result.rules_fixed)
 
+    def test_processing_releases_the_document_token_cache(self):
+        from mir.rules.sql.sql_utils import _tokenize_sql_impl
+
+        _tokenize_sql_impl.cache_clear()
+        config = Config()
+        process_document(config, "SELECT item_id FROM sample_item;", "generic.sql", "sql")
+
+        self.assertEqual(_tokenize_sql_impl.cache_info().currsize, 0)
+
     def test_changed_directive_expands_through_its_block(self):
         content = """SELECT item_id
 FROM sample_table
