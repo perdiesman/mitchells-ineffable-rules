@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from mir.engine.config import Config
 from mir.engine.runner import process_document, run_linter
+from mir.rules.xml.xml_mybatis_sql import get_mybatis_protected_signatures
 
 class TestRunnerIntegration(unittest.TestCase):
     def setUp(self):
@@ -702,6 +703,10 @@ class TestRunnerIntegration(unittest.TestCase):
 
         result = process_document(config, xml_content, "generic.xml", "xml")
 
+        self.assertEqual(
+            get_mybatis_protected_signatures(result.content),
+            get_mybatis_protected_signatures(xml_content),
+        )
         self.assertIn("payload -&gt;&gt; 'key'", result.content)
         self.assertIn("between #{start} AND #{end}", result.content)
         self.assertIn("days =&gt; #{limit}", result.content)

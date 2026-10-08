@@ -8,6 +8,8 @@ mir --staged --fix
 
 `--staged` automatically enables the conservative `commit` profile. Changed lines are expanded to the enclosing SQL statement, Trellis block, or MyBatis statement element. MIR writes successful fixes back to the index and does not stage unrelated working-tree changes.
 
+The profile treats MyBatis placeholders and Trellis named binds as opaque. It also verifies that fixes preserve string literals, quoted identifiers, PostgreSQL casts, and operator sequences. An edit that violates those invariants is rejected with an explicit diagnostic instead of being written to the index.
+
 ## Install in a consumer repository
 
 Set the MIR checkout once, install it into the Python environment used for commits, and copy the portable hook:
@@ -62,3 +64,4 @@ External rules remain supported with `include_dirs` and `rule_mode`. A SQL rule 
 - Non-overlapping unstaged edits are preserved in the working tree while the staged blob is formatted.
 - Overlapping unstaged edits are never silently staged or overwritten. MIR updates the index, leaves the worktree untouched, and prints a warning.
 - Unfixable errors in the changed construct block the commit. Existing errors outside the authorized changed scope do not.
+- PostgreSQL operators such as `->`, `->>`, `#>`, `#>>`, `=>`, and `:=` remain atomic when spacing is normalized, including their XML-escaped MyBatis forms.

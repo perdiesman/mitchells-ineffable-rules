@@ -293,6 +293,40 @@ def get_element_base_indent(el: dict, tokens: List[dict], content: str, rule_con
         
     return tag_indent + " " * xml_indent_size
 
+
+def get_mybatis_protected_signatures(content: str) -> tuple:
+    """Describe protected SQL syntax for every embedded MyBatis statement."""
+    from mir.rules.sql.sql_utils import protected_sql_signature
+
+    tokens = tokenize_xml(content)
+    elements = get_all_elements_recursively(parse_xml_elements(tokens))
+    sql_defs = {}
+    for element in elements:
+        if element["tag"] == "sql" and "id" in element["attrs"]:
+            sql_id = element["attrs"]["id"]
+            sql_defs[sql_id] = element["inner_tokens"]
+            if "." in sql_id:
+                sql_defs[sql_id.split(".")[-1]] = element["inner_tokens"]
+
+    signatures = []
+    target_tags = {"select", "insert", "update", "delete", "sql"}
+    for element in elements:
+        if element["tag"] not in target_tags or "id" not in element["attrs"]:
+            continue
+        expanded_chars = []
+        mapping = []
+        is_after_tag = []
+        expand_tokens(
+            element["inner_tokens"], sql_defs, expanded_chars, mapping, is_after_tag
+        )
+        signatures.append((
+            element["tag"],
+            element["attrs"]["id"],
+            protected_sql_signature("".join(expanded_chars)),
+        ))
+    return tuple(signatures)
+
+
 class XmlMybatisSqlRule(BaseRule):
     commit_profile = True
     rule_id = "IR-xml-mybatis-sql"
@@ -579,4 +613,11 @@ class XmlMybatisSqlRule(BaseRule):
         for start, end, new_text in resolved_edits:
             chars[start:end] = list(new_text)
 
-        return "".join(chars)
+        fixed_content = "".join(chars)
+        if (
+            rule_config.get("_profile") == "commit"
+            and get_mybatis_protected_signatures(fixed_content)
+            != get_mybatis_protected_signatures(content)
+        ):
+            raise ValueError("protected MyBatis SQL syntax changed after source mapping")
+        return fixed_content

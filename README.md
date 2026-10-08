@@ -197,9 +197,11 @@ Consumer repositories only need the pre-commit formatter hook; the time-tracking
 
 ## MyBatis and Trellis
 
-MyBatis mapper elements (`select`, `insert`, `update`, `delete`, and reusable `sql` fragments) are expanded into source-mapped SQL. Safe edits map back into text nodes without touching XML tags. MyBatis `#{value}` and `${identifier}` placeholders are opaque SQL parameters.
+MyBatis mapper elements (`select`, `insert`, `update`, `delete`, and reusable `sql` fragments) are expanded into source-mapped SQL. Safe edits map back into text nodes without touching XML tags, including SQL text beside inline MyBatis tags. MyBatis `#{value}` and `${identifier}` placeholders are opaque SQL parameters.
 
-Trellis templates are detected from `-- trellis:` directives. MIR validates `if`/`elif`/`else`/`endif`, `choose`/`when`/`otherwise`/`endchoose`, and `for item in items separator=","`/`endfor`. Named binds such as `:item_id` and `:model.item_id` are opaque parameters. A Trellis template runs only rules whose metadata declares `trellis_safe = True`; external rules can opt in through the same `BaseRule` interface.
+Trellis templates are detected from `-- trellis:` directives or named binds. MIR validates `if`/`elif`/`else`/`endif`, `choose`/`when`/`otherwise`/`endchoose`, and `for item in items separator=","`/`endfor`. Named binds such as `:item_id` and `:model.item_id` are opaque parameters. A Trellis template runs only rules whose metadata declares `trellis_safe = True`; external rules can opt in through the same `BaseRule` interface.
+
+The commit profile rejects a proposed fix if it changes protected SQL syntax: template parameters, string literals, quoted identifiers, PostgreSQL casts, or the operator sequence. The same invariant is checked after staged-line filtering and after MyBatis edits are mapped back into XML.
 
 ---
 
@@ -311,6 +313,6 @@ For instructions on building distribution archives, TestPyPI validation, and pub
 
 *This package has been developed with **Antigravity** and **OpenAI Codex**.*
 
-*Total Cumulative Development Time: ~25.9 hours*
+*Total Cumulative Development Time: ~28.0 hours*
 
-*Last Developer Session: 2026-10-08T14:17:17Z*
+*Last Developer Session: 2026-10-08T16:25:30Z*

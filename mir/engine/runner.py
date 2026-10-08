@@ -385,6 +385,8 @@ def process_document(
                 except Exception as error:
                     result.diagnostics.append(f"Error fixing rule {rule.rule_id} on {path}: {error}")
                     continue
+                if selection.restricted:
+                    fixed = apply_filtered_fixes(current, fixed, set(selection.allowed))
                 if config.profile == "commit" and lang == "sql" and fixed != current:
                     from mir.rules.sql.sql_utils import protected_sql_signature
 
@@ -394,8 +396,6 @@ def process_document(
                             "protected SQL syntax changed"
                         )
                         continue
-                if selection.restricted:
-                    fixed = apply_filtered_fixes(current, fixed, set(selection.allowed))
                 if fixed != current:
                     result.rules_fixed.add(rule.rule_id)
                     current = fixed
