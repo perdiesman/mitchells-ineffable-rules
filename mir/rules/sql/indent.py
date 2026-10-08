@@ -2,6 +2,7 @@ from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 
 class IndentRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-indent"
     description = "Indent should be equal amounts of spaces (default 4)."
     category = "general"

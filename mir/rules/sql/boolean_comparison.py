@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class BooleanComparisonRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-boolean-comparison"
     description = "Standardize boolean comparison predicates to use idiomatic boolean predicates."
     category = "queries"

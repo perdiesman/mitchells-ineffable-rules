@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren
 
 class UnresolvedAliasRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-unresolved-alias"
     description = "Detect references to table aliases or qualifiers that are not declared in the query context."
     category = "general"

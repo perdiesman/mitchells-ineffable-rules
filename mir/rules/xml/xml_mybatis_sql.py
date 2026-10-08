@@ -321,20 +321,6 @@ class XmlMybatisSqlRule(BaseRule):
 
     def __init__(self) -> None:
         super().__init__()
-        # Exclude structural/layout rules that can modify query token-to-line boundaries, but ALLOW indentation/alignment rules
-        self.excluded_rule_ids = {
-            "IR-eof-newline", "IR-trailing-semicolon", "IR-statement-semicolon",
-            "IR-blank-lines", "IR-statement-blank-lines",
-            "IR-from-multi", "IR-from-single", "IR-from-paren-layout",
-            "IR-where-multi", "IR-where-single", "IR-column-layout",
-            "IR-subquery-compact", "IR-dollar-quote-alignment",
-            "IR-table-field-spacing", "IR-trigger-layout", "IR-create-view-indent",
-            "IR-function-body-indent", "IR-function-header-layout", "IR-raise-layout",
-            "IR-plpgsql-block-indent", "IR-join-on-multi",
-            "IR-paren-content-indent", "IR-paren-multi",
-            "IR-paren-single", "IR-join-parens",
-            "IR-subquery-indent"
-        }
         self.sql_rules = None
         self._expansion_cache = {}
         self._cached_content = None
@@ -425,7 +411,7 @@ class XmlMybatisSqlRule(BaseRule):
                     mapping=mapping,
                     file_path=file_path,
                     rule_config=inner_config,
-                    excluded_rule_ids=self.excluded_rule_ids,
+                    require_embedded_safe=True,
                     extra_check_args={
                         "ignored_comma_offsets": ignored_comma_offsets,
                         "base_indent": base_indent,
@@ -549,7 +535,7 @@ class XmlMybatisSqlRule(BaseRule):
                     mapping=mapping,
                     file_path=file_path,
                     rule_config=inner_config,
-                    excluded_rule_ids=self.excluded_rule_ids,
+                    require_embedded_safe=True,
                     extra_fix_args={
                         "ignored_comma_offsets": ignored_comma_offsets,
                         "base_indent": base_indent,

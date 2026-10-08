@@ -6,7 +6,7 @@ Enforce that set operators (UNION, UNION ALL, INTERSECT, EXCEPT) are on their ow
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
 - **Commit Profile**: No
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`

@@ -6,7 +6,7 @@ Enforce named parameter notation (:= or =>) in function calls with 3 or more arg
 - **Enabled by Default**: No
 - **Category**: Routine & Procedure Rules
 - **Commit Profile**: No
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `false`

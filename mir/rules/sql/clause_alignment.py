@@ -2,6 +2,7 @@ from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 
 class ClauseAlignmentRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-clause-alignment"
     description = "Main query clause keywords (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT) must have the exact same indentation within the same query block when the query spans multiple lines."
     category = "queries"

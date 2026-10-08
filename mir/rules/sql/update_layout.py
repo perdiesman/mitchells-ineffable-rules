@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class UpdateLayoutRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-update-layout"
     description = "Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent assignments."
     category = "data-modification"

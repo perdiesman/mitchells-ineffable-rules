@@ -6,7 +6,7 @@ PL/pgSQL variable and trigger field assignments must use the standard assignment
 - **Enabled by Default**: Yes
 - **Category**: Routine & Procedure Rules
 - **Commit Profile**: No
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`

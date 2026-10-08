@@ -6,7 +6,7 @@ Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent 
 - **Enabled by Default**: Yes
 - **Category**: Data Modification Rules
 - **Commit Profile**: No
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.

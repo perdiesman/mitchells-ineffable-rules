@@ -5,6 +5,7 @@ from mir.rules.sql.line_length import LineLengthRule
 from mir.rules.sql.indent import IndentRule
 
 class ExpressionSplitRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-expression-split"
     description = "Long lines should split on function/expression parentheses, and optionally on additive/logical operators if still too long."
     category = "queries"

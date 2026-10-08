@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class IsNullRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-is-null"
     description = "Standardize NULL comparison predicates to use IS NULL and IS NOT NULL operators."
     category = "queries"

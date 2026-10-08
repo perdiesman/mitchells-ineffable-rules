@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class RedundantKeywordsRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-redundant-keywords"
     description = "Remove redundant implied keywords like INNER, OUTER, and ASC."
     category = "general"

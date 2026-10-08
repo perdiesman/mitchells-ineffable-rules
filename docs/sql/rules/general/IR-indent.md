@@ -6,7 +6,7 @@ Indent should be equal amounts of spaces (default 4).
 - **Enabled by Default**: Yes
 - **Category**: General Rules
 - **Commit Profile**: No
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.

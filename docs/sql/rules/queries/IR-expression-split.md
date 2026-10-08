@@ -6,7 +6,7 @@ Long lines should split on function/expression parentheses, and optionally on ad
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
 - **Commit Profile**: No
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.

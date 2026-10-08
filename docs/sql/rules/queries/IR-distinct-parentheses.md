@@ -6,7 +6,7 @@ Remove redundant parentheses around DISTINCT arguments, preserving DISTINCT ON (
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
 - **Commit Profile**: No
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`

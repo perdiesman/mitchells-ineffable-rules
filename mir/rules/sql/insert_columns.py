@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class InsertColumnsRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-insert-columns"
     description = "Ensure INSERT statements explicitly list target columns."
     category = "queries"

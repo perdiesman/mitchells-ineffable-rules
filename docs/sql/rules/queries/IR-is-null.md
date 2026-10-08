@@ -6,7 +6,7 @@ Standardize NULL comparison predicates to use IS NULL and IS NOT NULL operators.
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
 - **Commit Profile**: No
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`

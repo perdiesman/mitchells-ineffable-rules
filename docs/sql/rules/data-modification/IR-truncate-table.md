@@ -6,7 +6,7 @@ Prefer TRUNCATE table_name over DELETE FROM table_name with no conditions.
 - **Enabled by Default**: Yes
 - **Category**: Data Modification Rules
 - **Commit Profile**: No
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`

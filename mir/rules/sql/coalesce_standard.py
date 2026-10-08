@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class CoalesceStandardRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-coalesce-standard"
     description = "Use standard COALESCE instead of dialect-specific null-handling functions like NVL, IFNULL, or ISNULL."
     category = "queries"

@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class CommaStyleRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-comma-style"
     description = "Enforce trailing commas in multiline listings and forbid leading commas."
     category = "general"

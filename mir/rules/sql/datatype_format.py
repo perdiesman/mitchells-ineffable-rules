@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, find_datatype_token_groups
 
 class DataTypeFormatRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-datatype-format"
     description = "Standardize SQL data types to use their long format (character varying instead of varchar, timestamp with time zone instead of timestamptz)."
     category = "queries"

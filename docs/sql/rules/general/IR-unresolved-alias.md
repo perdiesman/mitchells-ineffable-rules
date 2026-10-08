@@ -6,7 +6,7 @@ Detect references to table aliases or qualifiers that are not declared in the qu
 - **Enabled by Default**: Yes
 - **Category**: General Rules
 - **Commit Profile**: No
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`

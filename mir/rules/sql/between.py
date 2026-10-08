@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class BetweenRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-between"
     description = "Standardize range predicate check of form 'a >= b AND a <= c' to 'a BETWEEN b AND c'."
     category = "queries"

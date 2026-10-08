@@ -17,6 +17,7 @@ PLPGSQL_KEYWORDS = {
 }
 
 class PlpgsqlKeywordCaseRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-plpgsql-keyword-case"
     description = "Procedural PL/pgSQL keywords and trigger variables must be in uppercase."
     category = "routines"

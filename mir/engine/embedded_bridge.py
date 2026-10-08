@@ -19,7 +19,12 @@ def find_single_difference(s1: str, s2: str) -> Tuple[int, int, int, int]:
         suffix_len += 1
     return (prefix_len, n1 - suffix_len, prefix_len, n2 - suffix_len)
 
-def get_guest_rules(guest_language: str, rule_config: Dict[str, Any], excluded_rule_ids: set = None) -> List[BaseRule]:
+def get_guest_rules(
+    guest_language: str,
+    rule_config: Dict[str, Any],
+    excluded_rule_ids: set = None,
+    require_embedded_safe: bool = False,
+) -> List[BaseRule]:
     all_rules = load_rules_for_language(guest_language)
     all_configs = rule_config.get("_all_configs", {})
     rules_to_disable = rule_config.get("_rules_to_disable", set())
@@ -30,6 +35,8 @@ def get_guest_rules(guest_language: str, rule_config: Dict[str, Any], excluded_r
     filtered = []
     for rule in all_rules:
         if excluded_rule_ids and rule.rule_id in excluded_rule_ids:
+            continue
+        if require_embedded_safe and not rule.embedded_safe:
             continue
         if profile == "commit" and not (rule.commit_profile and rule.embedded_safe):
             continue
@@ -66,9 +73,15 @@ def check_embedded_content(
     file_path: str,
     rule_config: Dict[str, Any],
     excluded_rule_ids: set = None,
-    extra_check_args: Dict[str, Any] = None
+    extra_check_args: Dict[str, Any] = None,
+    require_embedded_safe: bool = False,
 ) -> List[dict]:
-    guest_rules = get_guest_rules(guest_language, rule_config, excluded_rule_ids)
+    guest_rules = get_guest_rules(
+        guest_language,
+        rule_config,
+        excluded_rule_ids,
+        require_embedded_safe,
+    )
     violations = []
     
     all_configs = rule_config.get("_all_configs", {})
@@ -174,9 +187,15 @@ def fix_embedded_content(
     file_path: str,
     rule_config: Dict[str, Any],
     excluded_rule_ids: set = None,
-    extra_fix_args: Dict[str, Any] = None
+    extra_fix_args: Dict[str, Any] = None,
+    require_embedded_safe: bool = False,
 ) -> List[Tuple[int, int, str]]:
-    guest_rules = get_guest_rules(guest_language, rule_config, excluded_rule_ids)
+    guest_rules = get_guest_rules(
+        guest_language,
+        rule_config,
+        excluded_rule_ids,
+        require_embedded_safe,
+    )
     fixed_text = guest_text
     
     all_configs = rule_config.get("_all_configs", {})

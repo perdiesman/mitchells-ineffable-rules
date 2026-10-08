@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class UnionLayoutRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-union-layout"
     description = "Enforce that set operators (UNION, UNION ALL, INTERSECT, EXCEPT) are on their own line, aligned with the query block."
     category = "queries"

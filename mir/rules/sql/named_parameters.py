@@ -21,6 +21,7 @@ RESERVED_WORDS = {
 }
 
 class NamedParametersRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-named-parameters"
     description = "Enforce named parameter notation (:= or =>) in function calls with 3 or more arguments."
     category = "routines"

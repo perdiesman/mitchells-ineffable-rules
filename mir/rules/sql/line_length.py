@@ -51,6 +51,7 @@ def wrap_comment_line(line: str, max_length: int) -> List[str]:
     return wrapped_lines
 
 class LineLengthRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-line-length"
     description = "Lines must not exceed the configured maximum length."
     category = "general"

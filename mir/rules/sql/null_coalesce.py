@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class NullCoalesceRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-null-coalesce"
     description = "Standardize nullable equality predicates to COALESCE(x, -1) form."
     category = "queries"

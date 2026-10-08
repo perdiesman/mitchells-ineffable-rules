@@ -6,7 +6,7 @@ Enforce that boolean columns in table definitions explicitly define a DEFAULT co
 - **Enabled by Default**: Yes
 - **Category**: Schema Definition Rules
 - **Commit Profile**: No
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`

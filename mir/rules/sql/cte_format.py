@@ -4,6 +4,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths, find_matchin
 from mir.rules.sql.indent import IndentRule
 
 class CteFormatRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-cte-format"
     description = "Format layout of CTE WITH blocks: align subquery aliases, parenthesis and the final query block."
     category = "queries"

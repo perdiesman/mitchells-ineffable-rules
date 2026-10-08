@@ -6,7 +6,7 @@ Remove empty SQL commands, such as duplicate semicolons or leading semicolons.
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
 - **Commit Profile**: No
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`

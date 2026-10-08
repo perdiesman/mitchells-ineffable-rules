@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren
 
 class SubqueryDepthLimitRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-subquery-depth-limit"
     description = "Subquery nesting depth should not exceed the configured limit (default: 3). When over the limit, Common Table Expressions (CTEs) are preferred."
     category = "queries"

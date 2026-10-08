@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths, find_datatype_token_groups
 
 class AliasAsRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-alias-as"
     description = "Column aliases must use the AS keyword."
     category = "queries"

@@ -11,6 +11,7 @@ EXCLUDED_STARTERS = {
 }
 
 class PlpgsqlAssignmentRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-plpgsql-assignment"
     description = "PL/pgSQL variable and trigger field assignments must use the standard assignment operator (:=)."
     category = "routines"

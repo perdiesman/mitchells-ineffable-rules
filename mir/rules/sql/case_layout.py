@@ -5,6 +5,7 @@ from mir.rules.sql.indent import IndentRule
 from mir.rules.sql.line_length import LineLengthRule
 
 class CaseLayoutRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-case"
     description = (
         "CASE statements should be formatted with WHEN/THEN on separate lines "
