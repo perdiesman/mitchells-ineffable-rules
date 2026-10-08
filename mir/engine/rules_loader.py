@@ -3,7 +3,7 @@ import glob
 import importlib.util
 import inspect
 from typing import List, Optional, Type
-from mir.engine.rule_interface import BaseRule
+from mir.engine.rule_interface import BaseRule, RuleCase
 
 class RuleValidationError(Exception):
     """
@@ -103,6 +103,23 @@ def validate_rule_class(rule_class: Type[BaseRule]) -> None:
                 raise RuleValidationError(
                     f"Rule '{rule_id}' (class {rule_class.__name__}) additional_validation #{idx + 1} must be a string."
                 )
+
+    cases = getattr(rule_class, "cases", None)
+    if cases is not None:
+        if not isinstance(cases, list):
+            raise RuleValidationError(f"Rule '{rule_id}' (class {rule_class.__name__}) 'cases' must be a list.")
+        valid_expectations = {"accepted", "reported", "fixed", "not_fixed"}
+        for idx, case in enumerate(cases):
+            if not isinstance(case, RuleCase):
+                raise RuleValidationError(
+                    f"Rule '{rule_id}' (class {rule_class.__name__}) case #{idx + 1} must be a RuleCase."
+                )
+            if case.expectation not in valid_expectations:
+                raise RuleValidationError(
+                    f"Rule '{rule_id}' case #{idx + 1} has unknown expectation '{case.expectation}'."
+                )
+            if case.expectation == "fixed" and case.fixed is None:
+                raise RuleValidationError(f"Rule '{rule_id}' fixed case #{idx + 1} must define fixed output.")
 
 def load_rules_from_dir(directory: str, language: str, is_external: bool = False) -> List[BaseRule]:
     """

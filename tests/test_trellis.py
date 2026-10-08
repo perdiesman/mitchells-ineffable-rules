@@ -1,0 +1,82 @@
+import unittest
+
+from mir.engine.config import Config
+from mir.engine.runner import process_document
+from mir.engine.selection import expand_selection
+from mir.rules.sql.trellis_directives import TrellisDirectivesRule
+
+
+class TestTrellisSupport(unittest.TestCase):
+    def test_all_supported_directive_families_are_accepted(self):
+        content = """SELECT item_id
+FROM sample_table
+-- trellis: if filters.enabled
+WHERE item_state = :filters.state
+-- trellis: elif include_archived
+OR archived_at IS NOT NULL
+-- trellis: else
+AND item_state IS NOT NULL
+-- trellis: endif
+-- trellis: choose sort_mode
+-- trellis: when "name"
+ORDER BY item_name
+-- trellis: otherwise
+ORDER BY item_id
+-- trellis: endchoose
+-- trellis: for item in item_ids separator=","
+:item
+-- trellis: endfor
+"""
+
+        self.assertEqual(TrellisDirectivesRule().check(content, "generic.sql", {}), [])
+
+    def test_mismatched_directives_are_reported_without_a_fix(self):
+        content = """SELECT item_id FROM sample_table
+-- trellis: if active_only
+WHERE retired_at IS NULL
+-- trellis: endchoose
+"""
+        rule = TrellisDirectivesRule()
+
+        violations = rule.check(content, "generic.sql", {})
+
+        self.assertTrue(any("no matching choose" in violation.message for violation in violations))
+        self.assertTrue(any("Unclosed if" in violation.message for violation in violations))
+        self.assertEqual(rule.fix(content, "generic.sql", {}), content)
+
+    def test_template_detection_limits_fixes_to_declared_safe_rules(self):
+        content = """select item_id
+    ,item_name
+from sample_table
+-- trellis: if active_only
+where retired_at is null
+-- trellis: endif
+"""
+        config = Config()
+        config.fix = True
+
+        result = process_document(config, content, "generic.sql", "sql")
+
+        self.assertIn("SELECT item_id", result.content)
+        self.assertIn("FROM sample_table", result.content)
+        self.assertIn("    ,item_name", result.content)
+        self.assertNotIn("IR-comma-style", result.rules_fixed)
+
+    def test_changed_directive_expands_through_its_block(self):
+        content = """SELECT item_id
+FROM sample_table
+-- trellis: if active_only
+WHERE retired_at IS NULL
+-- trellis: endif
+;
+SELECT audit_id FROM audit_table;
+"""
+
+        selection = expand_selection(content, "sql", {3})
+
+        self.assertTrue(set(range(1, 7)).issubset(selection.allowed))
+        self.assertNotIn(7, selection.allowed)
+
+
+if __name__ == "__main__":
+    unittest.main()

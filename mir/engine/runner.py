@@ -149,6 +149,7 @@ def resolve_rule_config(
     lang: str,
     detected_base_indent: Optional[str] = None,
     lines: Optional[Set[int]] = None,
+    template_dialect: Optional[str] = None,
 ) -> dict:
     rule_config: dict = {}
     global_config = config.rule_configs.get(rule_id, {})
@@ -169,6 +170,8 @@ def resolve_rule_config(
     )
     if lines:
         rule_config["_lines"] = lines
+    if template_dialect:
+        rule_config["_template_dialect"] = template_dialect
     if "base_indent" not in rule_config and detected_base_indent is not None:
         rule_config["base_indent"] = detected_base_indent
     return rule_config
@@ -230,6 +233,8 @@ def _rule_enabled(config: Config, rule: BaseRule, lang: str, rule_config: dict) 
         return False
     if config.profile == "commit" and not rule.commit_profile:
         return False
+    if lang == "sql" and rule_config.get("_template_dialect") == "trellis" and not rule.trellis_safe:
+        return False
     if config.disable_all:
         return bool(
             rule_config.get("enabled") is True
@@ -270,10 +275,23 @@ def _collect(
 ) -> tuple[list[tuple[Violation, BaseRule, str]], list[str]]:
     disabled = get_disabled_rules_map(content, path)
     base_indent = detect_base_indent(content)
+    template_dialect = None
+    if lang == "sql":
+        from mir.rules.sql.trellis_utils import has_trellis_directives
+
+        if has_trellis_directives(content):
+            template_dialect = "trellis"
     collected: list[tuple[Violation, BaseRule, str]] = []
     diagnostics: list[str] = []
     for rule in load_rules_for_language(lang, config.include_dirs, config.rule_mode):
-        rule_config = resolve_rule_config(config, rule.rule_id, lang, base_indent, set(selection.allowed))
+        rule_config = resolve_rule_config(
+            config,
+            rule.rule_id,
+            lang,
+            base_indent,
+            set(selection.allowed),
+            template_dialect,
+        )
         if not _rule_enabled(config, rule, lang, rule_config):
             continue
         try:
@@ -289,7 +307,12 @@ def _collect(
                 continue
             violation_rule = _find_rule(violation.rule_id, lang, config) or rule
             violation_config = resolve_rule_config(
-                config, violation_rule.rule_id, lang, base_indent, set(selection.allowed)
+                config,
+                violation_rule.rule_id,
+                lang,
+                base_indent,
+                set(selection.allowed),
+                template_dialect,
             )
             severity = violation_rule.get_config_value(violation_config, "severity", "error")
             if config.no_warnings and severity == "warning":
@@ -328,9 +351,20 @@ def process_document(
             if not fix_rules:
                 break
             before_pass = current
+            template_dialect = None
+            if lang == "sql":
+                from mir.rules.sql.trellis_utils import has_trellis_directives
+
+                if has_trellis_directives(current):
+                    template_dialect = "trellis"
             for rule in fix_rules:
                 rule_config = resolve_rule_config(
-                    config, rule.rule_id, lang, detect_base_indent(current), set(selection.allowed)
+                    config,
+                    rule.rule_id,
+                    lang,
+                    detect_base_indent(current),
+                    set(selection.allowed),
+                    template_dialect,
                 )
                 rule_config["rules_fixed"] = result.rules_fixed
                 try:

@@ -5,6 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql
 class OperatorSpacingRule(BaseRule):
     commit_profile = True
     embedded_safe = True
+    trellis_safe = True
     rule_id = "IR-operator-spacing"
     description = "Operators should have a single space on both sides."
     category = "general"

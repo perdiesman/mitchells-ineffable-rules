@@ -13,6 +13,7 @@ KEYWORDS = [
 class KeywordCaseRule(BaseRule):
     commit_profile = True
     embedded_safe = True
+    trellis_safe = True
     rule_id = "IR-keyword-case"
     description = "SQL keywords must be in uppercase."
     category = "general"

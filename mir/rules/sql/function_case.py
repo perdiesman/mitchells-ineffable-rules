@@ -19,6 +19,7 @@ EXCLUDED_WORDS = {
 class FunctionCaseRule(BaseRule):
     commit_profile = True
     embedded_safe = True
+    trellis_safe = True
     rule_id = "IR-function-case"
     description = "Function names should be the same case (default lowercase)."
     category = "routines"

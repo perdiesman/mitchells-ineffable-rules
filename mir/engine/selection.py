@@ -31,6 +31,7 @@ def _line_at(content: str, offset: int) -> int:
 
 def _expand_sql(content: str, changed: set[int]) -> set[int]:
     from mir.rules.sql.sql_utils import tokenize_sql
+    from mir.rules.sql.trellis_utils import analyze_trellis
 
     tokens = tokenize_sql(content)
     ranges: list[tuple[int, int]] = []
@@ -58,6 +59,12 @@ def _expand_sql(content: str, changed: set[int]) -> set[int]:
             end = _line_at(content, token["end"])
             if changed.intersection(range(start, end + 1)):
                 expanded.update(range(start, end + 1))
+
+    _, _, template_ranges = analyze_trellis(content)
+    changed_or_expanded = set(expanded)
+    for start, end in template_ranges:
+        if changed_or_expanded.intersection(range(start, end + 1)):
+            expanded.update(range(start, end + 1))
     return expanded
 
 
