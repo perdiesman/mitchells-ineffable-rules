@@ -111,18 +111,25 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(protected_sql_signature(original), protected_sql_signature(formatted))
 
     def test_protected_signature_includes_cast_targets(self):
-        original = "SELECT :county_fips::text[], CAST(:start AS timestamp with time zone);"
-        changed = "SELECT :county_fips::TEXT[], CAST(:start AS TIMESTAMP WITH TIME ZONE);"
+        original = "SELECT :county_fips::text[];"
+        changed = "SELECT :county_fips::TEXT[];"
 
         self.assertNotEqual(
             protected_sql_signature(original), protected_sql_signature(changed)
         )
 
-        custom_original = "SELECT payload::archive.custom_type[], CAST(payload AS archive.custom_type[]);"
-        custom_changed = "SELECT payload::archive.other_type[], CAST(payload AS archive.other_type[]);"
+        custom_original = "SELECT payload::archive.custom_type[];"
+        custom_changed = "SELECT payload::archive.other_type[];"
         self.assertNotEqual(
             protected_sql_signature(custom_original),
             protected_sql_signature(custom_changed),
+        )
+
+        standard_original = "SELECT CAST(:start AS timestamp with time zone);"
+        standard_changed = "SELECT CAST(:start AS TIMESTAMP WITH TIME ZONE);"
+        self.assertNotEqual(
+            protected_sql_signature(standard_original),
+            protected_sql_signature(standard_changed),
         )
 
     def test_foreign_schema_limit_list_is_not_a_function_call(self):

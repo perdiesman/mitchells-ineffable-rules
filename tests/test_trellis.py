@@ -70,7 +70,7 @@ where retired_at is null
 
     def test_commit_profile_preserves_postgresql_cast_targets(self):
         content = (
-            "select generate_series(:start::timestamp, :end::timestamp) as outage_hour,\n"
+            "select generate_series(:start::timestamp with time zone, :end::timestamp) as outage_hour,\n"
             "hourly.customers_out::bigint from hourly;\n"
         )
         config = Config()
@@ -81,7 +81,7 @@ where retired_at is null
 
         self.assertEqual(
             result.content,
-            "SELECT generate_series(:start::timestamp, :end::timestamp) AS outage_hour,\n"
+            "SELECT generate_series(:start::timestamp with time zone, :end::timestamp) AS outage_hour,\n"
             "hourly.customers_out::bigint FROM hourly;\n",
         )
         self.assertEqual(result.diagnostics, [])

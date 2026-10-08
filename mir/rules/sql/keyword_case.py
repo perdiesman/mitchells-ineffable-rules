@@ -1,6 +1,6 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql
+from mir.rules.sql.sql_utils import find_cast_target_token_groups, tokenize_sql
 
 KEYWORDS = [
     "select", "from", "where", "join", "on", "and", "or", "limit",
@@ -69,8 +69,19 @@ class KeywordCaseRule(BaseRule):
                 result.append(k_lower)
         return result
 
-    def _find_keyword_tokens(self, content: str, keywords: List[str]) -> List[dict]:
+    def _find_keyword_tokens(
+        self, content: str, keywords: List[str], preserve_casts: bool = False
+    ) -> List[dict]:
         tokens = tokenize_sql(content)
+        cast_token_ids = (
+            {
+                id(token)
+                for group in find_cast_target_token_groups(tokens, content)
+                for token in group
+            }
+            if preserve_casts
+            else set()
+        )
         active = [
             token for token in tokens
             if token["type"] not in {"WHITESPACE", "COMMENT", "STRING", "PARAM"}
@@ -86,6 +97,8 @@ class KeywordCaseRule(BaseRule):
                     for token, word in zip(candidates, words)
                 ):
                     for candidate_offset, token in enumerate(candidates):
+                        if id(token) in cast_token_ids:
+                            continue
                         active_index = index + candidate_offset
                         if (
                             token["value"].lower() in FUNCTION_KEYWORD_AMBIGUITIES
@@ -100,7 +113,11 @@ class KeywordCaseRule(BaseRule):
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         keywords = self._get_keywords(rule_config)
-        violations_found = self._find_keyword_tokens(content, keywords)
+        violations_found = self._find_keyword_tokens(
+            content,
+            keywords,
+            preserve_casts=rule_config.get("_profile") == "commit",
+        )
         
         by_line: Dict[int, List[str]] = {}
         for token in violations_found:
@@ -122,7 +139,11 @@ class KeywordCaseRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        tokens = self._find_keyword_tokens(content, self._get_keywords(rule_config))
+        tokens = self._find_keyword_tokens(
+            content,
+            self._get_keywords(rule_config),
+            preserve_casts=rule_config.get("_profile") == "commit",
+        )
         if not tokens:
             return content
         chars = list(content)
