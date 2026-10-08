@@ -26,6 +26,10 @@ class SubqueryIndentRule(BaseRule):
         {
             "violating": "UPDATE sample_item SET state_id = (SELECT state.id\nFROM sample_state state\nWHERE state.code = sample_item.state_code);",
             "correct": "UPDATE sample_item SET state_id = (\n    SELECT state.id\n    FROM sample_state state\n    WHERE state.code = sample_item.state_code\n);"
+        },
+        {
+            "violating": "SELECT parent.item_id\nFROM\n    sample_parent parent\n    LEFT JOIN LATERAL (\n        SELECT child.parent_id\n        FROM sample_child child\n    ) child ON true;",
+            "correct": "SELECT parent.item_id\nFROM\n    sample_parent parent\n    LEFT JOIN LATERAL (\n            SELECT child.parent_id\n            FROM sample_child child\n        ) child ON true;"
         }
     ]
     additional_validations = [
@@ -107,6 +111,15 @@ class SubqueryIndentRule(BaseRule):
                         if tokens[idx]["line"] != tok["line"]:
                             break
                         if tokens[idx]["type"] != "WHITESPACE" and tokens[idx]["type"] != "COMMENT":
+                            # LATERAL qualifies a derived relation. Continue to
+                            # the JOIN/FROM token that owns the parenthesis so
+                            # its closing line uses the relation-continuation
+                            # indentation rather than the join-entry indent.
+                            if (
+                                tokens[idx]["type"] == "KEYWORD"
+                                and tokens[idx]["value"].upper() == "LATERAL"
+                            ):
+                                continue
                             if tokens[idx]["type"] == "KEYWORD" and tokens[idx]["value"].upper() in ("FROM", "JOIN"):
                                 is_from_join = True
                                 has_prev_active = False

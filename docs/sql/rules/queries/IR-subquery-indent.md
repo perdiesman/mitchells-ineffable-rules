@@ -55,6 +55,28 @@ UPDATE sample_item SET state_id = (
 );
 ```
 
+#### ❌ Violating Example #4
+```sql
+SELECT parent.item_id
+FROM
+    sample_parent parent
+    LEFT JOIN LATERAL (
+        SELECT child.parent_id
+        FROM sample_child child
+    ) child ON true;
+```
+
+####  Correct Example #4
+```sql
+SELECT parent.item_id
+FROM
+    sample_parent parent
+    LEFT JOIN LATERAL (
+            SELECT child.parent_id
+            FROM sample_child child
+        ) child ON true;
+```
+
 #### Additional Validations
 ```sql
 SELECT * FROM (/* preserve placement */ SELECT item_id FROM sample_item

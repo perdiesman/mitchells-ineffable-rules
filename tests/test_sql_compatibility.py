@@ -193,14 +193,14 @@ class TestSqlCompatibility(unittest.TestCase):
             "SELECT item.item_id\n"
             "FROM sample_item item\n"
             "LEFT JOIN LATERAL (\n"
-            "    SELECT child.value\n"
-            "    FROM sample_child child\n"
-            "    WHERE NOT EXISTS (\n"
-            "        SELECT 1\n"
-            "        FROM sample_exclusion exclusion\n"
-            "        WHERE exclusion.child_id = child.child_id\n"
-            "    )\n"
-            ") details ON true"
+            "        SELECT child.value\n"
+            "        FROM sample_child child\n"
+            "        WHERE NOT EXISTS (\n"
+            "            SELECT 1\n"
+            "            FROM sample_exclusion exclusion\n"
+            "            WHERE exclusion.child_id = child.child_id\n"
+            "        )\n"
+            "    ) details ON true"
         )
 
         rule = SubqueryIndentRule()
@@ -227,6 +227,33 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(fixed, expected)
         self.assertEqual(SubqueryIndentRule().fix(fixed, "generic.sql", {}), fixed)
+
+    def test_lateral_join_subquery_uses_join_continuation_indent(self):
+        content = (
+            "SELECT parent.item_id\n"
+            "FROM\n"
+            "    sample_parent parent\n"
+            "    LEFT JOIN LATERAL (\n"
+            "        SELECT child.parent_id\n"
+            "        FROM sample_child child\n"
+            "    ) child ON true;"
+        )
+        expected = (
+            "SELECT parent.item_id\n"
+            "FROM\n"
+            "    sample_parent parent\n"
+            "    LEFT JOIN LATERAL (\n"
+            "            SELECT child.parent_id\n"
+            "            FROM sample_child child\n"
+            "        ) child ON true;"
+        )
+
+        rule = SubqueryIndentRule()
+        fixed = rule.fix(content, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
 
     def test_single_statement_file_does_not_require_semicolon(self):
         content = "SELECT item_id FROM sample_item\n"
