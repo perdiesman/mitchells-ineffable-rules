@@ -33,7 +33,7 @@ class UnresolvedAliasRule(BaseRule):
         # 1. Collect valid qualifiers
         valid = {
             "pg_catalog", "information_schema", "public", "my_schema", "other_schema",
-            "new", "old", "tg_op", "excluded"
+            "new", "old", "tg_op"
         }
         
         # Parse DECLARE block variables
@@ -151,6 +151,19 @@ class UnresolvedAliasRule(BaseRule):
                     continue
                     
                 qualifier = tokens[i]["value"].lower()
+                if qualifier == "excluded":
+                    statement_values = []
+                    for previous in range(i - 1, -1, -1):
+                        if tokens[previous]["type"] == "SEMI":
+                            break
+                        if tokens[previous]["type"] not in ("WHITESPACE", "COMMENT"):
+                            statement_values.append(tokens[previous]["value"].upper())
+                    statement_values.reverse()
+                    if any(
+                        statement_values[index:index + 2] == ["ON", "CONFLICT"]
+                        for index in range(len(statement_values) - 1)
+                    ):
+                        continue
                 if qualifier not in valid:
                     violations.append({
                         "token": tokens[i],

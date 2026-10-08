@@ -41,6 +41,14 @@ class TestSqlCompatibility(unittest.TestCase):
         rule = UnresolvedAliasRule()
         self.assertEqual(rule.check(content, "generic.sql", {}), [])
 
+    def test_excluded_is_not_globally_treated_as_a_relation(self):
+        content = "SELECT excluded.item_value FROM sample_table;"
+
+        violations = UnresolvedAliasRule().check(content, "generic.sql", {})
+
+        self.assertEqual(len(violations), 1)
+        self.assertIn("excluded", violations[0].message)
+
 
 if __name__ == "__main__":
     unittest.main()
