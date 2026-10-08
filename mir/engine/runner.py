@@ -458,6 +458,18 @@ def _run_staged(config: Config) -> int:
             changes.append((document, result.content))
             if not config.quiet:
                 print(f"Fixed staged issues in {document.path} ({', '.join(sorted(result.rules_fixed))})")
+        elif config.dry_run and result.content != document.content and not config.quiet:
+            print_diff_with_delta(
+                list(
+                    difflib.unified_diff(
+                        document.content.splitlines(keepends=True),
+                        result.content.splitlines(keepends=True),
+                        fromfile=f"a/{document.path}",
+                        tofile=f"b/{document.path}",
+                        n=2,
+                    )
+                )
+            )
     if config.fix and changes:
         try:
             warnings = update_staged_documents(root, changes)

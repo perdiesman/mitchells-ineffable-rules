@@ -1,11 +1,14 @@
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 from mir.engine.config import Config
 from mir.engine.git_staged import read_staged_documents, update_staged_documents
-from mir.engine.runner import process_document
+from mir.engine.runner import process_document, run_linter
 from mir.engine.selection import expand_selection
 
 
@@ -161,6 +164,26 @@ where item_id=:filters.item_id
             "WHERE item_id = :filters.item_id\n"
             "-- trellis: endif\n",
         )
+
+    def test_staged_dry_run_prints_diff_without_updating_index(self):
+        path = self.root / "queries.sql"
+        path.write_text("select item_id from sample_table;\n", encoding="utf-8")
+        self.git("add", "queries.sql")
+        config = Config()
+        config.staged = True
+        config.dry_run = True
+        output = StringIO()
+
+        with patch("mir.engine.git_staged.repository_root", return_value=self.root):
+            with patch("mir.engine.runner.shutil.which", return_value=None):
+                with redirect_stdout(output):
+                    exit_code = run_linter(config)
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("--- a/queries.sql", output.getvalue())
+        self.assertIn("+++ b/queries.sql", output.getvalue())
+        self.assertIn("+SELECT item_id FROM sample_table;", output.getvalue())
+        self.assertEqual(self.git("show", ":queries.sql"), "select item_id from sample_table;\n")
 
 
 if __name__ == "__main__":
