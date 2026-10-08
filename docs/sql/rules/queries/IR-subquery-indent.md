@@ -38,3 +38,25 @@ SELECT * FROM users WHERE id IN (
     SELECT user_id FROM roles
 );
 ```
+
+#### ❌ Violating Example #3
+```sql
+UPDATE sample_item SET state_id = (SELECT state.id
+FROM sample_state state
+WHERE state.code = sample_item.state_code);
+```
+
+####  Correct Example #3
+```sql
+UPDATE sample_item SET state_id = (
+    SELECT state.id
+    FROM sample_state state
+    WHERE state.code = sample_item.state_code
+);
+```
+
+#### Additional Validations
+```sql
+SELECT * FROM (/* preserve placement */ SELECT item_id FROM sample_item
+) sample_rows;
+```

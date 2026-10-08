@@ -22,9 +22,15 @@ class SubqueryIndentRule(BaseRule):
         {
             "violating": "SELECT * FROM users WHERE id IN (\nSELECT user_id FROM roles\n);",
             "correct": "SELECT * FROM users WHERE id IN (\n    SELECT user_id FROM roles\n);"
+        },
+        {
+            "violating": "UPDATE sample_item SET state_id = (SELECT state.id\nFROM sample_state state\nWHERE state.code = sample_item.state_code);",
+            "correct": "UPDATE sample_item SET state_id = (\n    SELECT state.id\n    FROM sample_state state\n    WHERE state.code = sample_item.state_code\n);"
         }
     ]
-    additional_validations = []
+    additional_validations = [
+        "SELECT * FROM (/* preserve placement */ SELECT item_id FROM sample_item\n) sample_rows;"
+    ]
 
     def _find_violations(self, content: str) -> List[dict]:
         tokens = tokenize_sql(content)
@@ -34,14 +40,24 @@ class SubqueryIndentRule(BaseRule):
         for i, tok in enumerate(tokens):
             if tok["type"] == "PAREN" and tok["value"] == "(":
                 next_active = None
+                next_active_idx = None
                 for idx in range(i + 1, n):
                     if tokens[idx]["type"] == "WHITESPACE":
                         continue
                     if tokens[idx]["type"] != "COMMENT":
                         next_active = tokens[idx]
+                        next_active_idx = idx
                         break
                         
                 if next_active and next_active["type"] == "KEYWORD" and next_active["value"].upper() == "SELECT":
+                    if (
+                        next_active["line"] == tok["line"]
+                        and any(
+                            token["type"] == "COMMENT"
+                            for token in tokens[i + 1 : next_active_idx]
+                        )
+                    ):
+                        continue
                     # Skip if this parenthesis is preceded by AS (which indicates a CTE definition)
                     is_cte = False
                     prev_idx = i - 1
@@ -114,6 +130,9 @@ class SubqueryIndentRule(BaseRule):
                     end_line = tokens[close_idx]["line"]
                     
                     needs_fix = False
+
+                    if next_active["line"] == tok["line"]:
+                        needs_fix = True
                     
                     close_line_text = lines[end_line - 1]
                     close_tok = tokens[close_idx]
@@ -154,6 +173,7 @@ class SubqueryIndentRule(BaseRule):
                         violations.append({
                             "open_tok": tok,
                             "close_tok": tokens[close_idx],
+                            "first_sub_tok": next_active,
                             "open_line": tok["line"],
                             "close_line": tokens[close_idx]["line"],
                             "content_indent": expected_content_indent,
@@ -181,6 +201,15 @@ class SubqueryIndentRule(BaseRule):
         return violations
 
     def _fix_one(self, content: str, item: dict) -> str:
+        first_sub_tok = item["first_sub_tok"]
+        if first_sub_tok["line"] == item["open_tok"]["line"]:
+            return (
+                content[: item["open_tok"]["end"]]
+                + "\n"
+                + item["content_indent"]
+                + content[first_sub_tok["start"] :]
+            )
+
         lines = content.splitlines()
         start_line = item["open_line"] + 1
         end_line = item["close_line"]
@@ -188,24 +217,13 @@ class SubqueryIndentRule(BaseRule):
         expected_close_indent = item["close_indent"]
         close_tok = item["close_tok"]
         
-        # Find actual indentation of the first non-empty content line to compute shift delta
-        first_content_indent_len = None
-        for line_no in range(start_line, end_line):
-            line_text = lines[line_no - 1]
-            if line_text.strip() != "" and not line_text.strip().startswith("--") and not line_text.strip().startswith("/*"):
-                stripped = line_text.lstrip()
-                first_content_indent_len = len(line_text) - len(stripped)
-                break
-                
-        delta = len(expected_content_indent) - (first_content_indent_len or 0)
-        
         for line_no in range(start_line, end_line):
             line_text = lines[line_no - 1]
             if line_text.strip() != "":
                 stripped = line_text.lstrip()
-                actual_indent_len = len(line_text) - len(stripped)
-                new_indent_len = max(0, actual_indent_len + delta)
-                lines[line_no - 1] = (" " * new_indent_len) + stripped
+                actual_indent = line_text[:len(line_text) - len(stripped)]
+                if not actual_indent.startswith(expected_content_indent):
+                    lines[line_no - 1] = expected_content_indent + stripped
                 
         close_line_text = lines[end_line - 1]
         line_start_char = content.rfind("\n", 0, close_tok["start"]) + 1
@@ -234,31 +252,10 @@ class SubqueryIndentRule(BaseRule):
             offending.sort(key=lambda x: x["open_line"])
             target = offending[-1]
             
-            # Check if this target will result in no changes (delta == 0 and close paren is already correct)
-            lines = content.splitlines()
-            start_line = target["open_line"] + 1
-            end_line = target["close_line"]
-            expected_content_indent = target["content_indent"]
-            expected_close_indent = target["close_indent"]
-            
-            first_content_indent_len = None
-            for line_no in range(start_line, end_line):
-                line_text = lines[line_no - 1]
-                if line_text.strip() != "" and not line_text.strip().startswith("--") and not line_text.strip().startswith("/*"):
-                    stripped = line_text.lstrip()
-                    first_content_indent_len = len(line_text) - len(stripped)
-                    break
-            delta = len(expected_content_indent) - (first_content_indent_len or 0)
-            
-            close_line_text = lines[end_line - 1]
-            line_start_char = content.rfind("\n", 0, target["close_tok"]["start"]) + 1
-            relative_offset = target["close_tok"]["start"] - line_start_char
-            prefix = close_line_text[:relative_offset]
-            close_correct = (prefix.strip() == "") and prefix == expected_close_indent
-            
-            if delta == 0 and close_correct:
+            fixed = self._fix_one(content, target)
+            if fixed == content:
                 processed.add((target["open_line"], target["close_line"]))
                 continue
-                
-            content = self._fix_one(content, target)
+
+            content = fixed
         return content
