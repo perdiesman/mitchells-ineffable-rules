@@ -1,6 +1,6 @@
 # IR-trellis-indent
 
-Indent SQL inside directive-controlled multiline parentheses one level without moving Trellis comments.
+Align Trellis directives with the SQL they control and indent SQL inside multiline parentheses one level.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
@@ -27,13 +27,22 @@ Expected fixed output:
 ```sql
 WHERE
     item_id IN (
--- trellis: for item in item_ids separator=","
+        -- trellis: for item in item_ids separator=","
         :item
--- trellis: endfor
+        -- trellis: endfor
     )
 ```
 
-##### directive layout remains unchanged — Accepted
+##### directive layout aligns with its body — Fixed
+```sql
+VALUES (
+-- trellis: if optional_value
+    :optional_value
+-- trellis: endif
+)
+```
+
+Expected fixed output:
 ```sql
 VALUES (
     -- trellis: if optional_value

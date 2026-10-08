@@ -3,14 +3,14 @@ from typing import Any, Dict, List
 from mir.engine.rule_interface import BaseRule, RuleCase, Violation
 from mir.rules.sql.indent import IndentRule
 from mir.rules.sql.sql_utils import find_matching_paren, tokenize_sql
-from mir.rules.sql.trellis_utils import has_trellis_directives, parse_directive
+from mir.rules.sql.trellis_utils import analyze_trellis, has_trellis_directives, parse_directive
 
 
 class TrellisIndentRule(BaseRule):
     rule_id = "IR-trellis-indent"
     description = (
-        "Indent SQL inside directive-controlled multiline parentheses one level "
-        "without moving Trellis comments."
+        "Align Trellis directives with the SQL they control and indent SQL inside "
+        "multiline parentheses one level."
     )
     category = "templates"
     is_fixable = "yes"
@@ -34,14 +34,16 @@ class TrellisIndentRule(BaseRule):
             "WHERE\n    item_id IN (\n-- trellis: for item in item_ids separator=\",\"\n"
             "  :item\n-- trellis: endfor\n  )",
             "fixed",
-            "WHERE\n    item_id IN (\n-- trellis: for item in item_ids separator=\",\"\n"
-            "        :item\n-- trellis: endfor\n    )",
+            "WHERE\n    item_id IN (\n        -- trellis: for item in item_ids separator=\",\"\n"
+            "        :item\n        -- trellis: endfor\n    )",
         ),
         RuleCase(
-            "directive layout remains unchanged",
+            "directive layout aligns with its body",
+            "VALUES (\n-- trellis: if optional_value\n"
+            "    :optional_value\n-- trellis: endif\n)",
+            "fixed",
             "VALUES (\n    -- trellis: if optional_value\n"
             "    :optional_value\n    -- trellis: endif\n)",
-            "accepted",
         ),
     ]
 
@@ -96,6 +98,35 @@ class TrellisIndentRule(BaseRule):
                 if line_number == close_token["line"] and line.lstrip().startswith(")")
                 else open_indent + (" " * indent_size)
             )
+
+        directives, issues, ranges = analyze_trellis(content)
+        if issues:
+            return expected
+        range_indents = {}
+        for start, end in ranges:
+            body_indent = None
+            for line_number in range(start + 1, end):
+                line = lines[line_number - 1]
+                if not line.strip() or parse_directive(line, line_number) is not None:
+                    continue
+                body_indent = expected.get(
+                    line_number,
+                    line[: len(line) - len(line.lstrip())],
+                )
+                break
+            if body_indent is not None:
+                range_indents[(start, end)] = body_indent
+
+        for directive in directives:
+            containing = [
+                (start, end)
+                for start, end in ranges
+                if start <= directive.line <= end and (start, end) in range_indents
+            ]
+            if not containing:
+                continue
+            start, end = min(containing, key=lambda item: item[1] - item[0])
+            expected[directive.line] = range_indents[(start, end)]
         return expected
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
@@ -110,14 +141,14 @@ class TrellisIndentRule(BaseRule):
         for line_number, expected in self._expected_indents(content, indent_size).items():
             line = lines[line_number - 1]
             actual = line[: len(line) - len(line.lstrip())]
-            is_closer = line.lstrip().startswith(")")
-            mismatch = actual != expected if is_closer else not actual.startswith(expected)
+            is_exact = line.lstrip().startswith(")") or parse_directive(line, line_number) is not None
+            mismatch = actual != expected if is_exact else not actual.startswith(expected)
             if mismatch:
                 violations.append(
                     Violation(
                         self.rule_id,
                         line_number,
-                        "Indent parenthesized Trellis SQL relative to its containing clause.",
+                        "Align Trellis SQL and directives with their containing clause.",
                         [line],
                         True,
                     )
@@ -138,8 +169,8 @@ class TrellisIndentRule(BaseRule):
         for line_number, indentation in expected.items():
             line = lines[line_number - 1]
             actual = line[: len(line) - len(line.lstrip())]
-            is_closer = line.lstrip().startswith(")")
-            mismatch = actual != indentation if is_closer else not actual.startswith(indentation)
+            is_exact = line.lstrip().startswith(")") or parse_directive(line, line_number) is not None
+            mismatch = actual != indentation if is_exact else not actual.startswith(indentation)
             if mismatch:
                 lines[line_number - 1] = indentation + line.lstrip()
         return "\n".join(lines) + ("\n" if content.endswith("\n") else "")

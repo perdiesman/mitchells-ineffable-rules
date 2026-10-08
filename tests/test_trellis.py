@@ -92,7 +92,7 @@ ORDER BY item_id
             ],
         )
 
-    def test_trellis_parenthesis_indentation_preserves_directive_lines(self):
+    def test_trellis_parenthesis_indentation_aligns_directive_lines(self):
         content = (
             "WHERE\n"
             "    TRUE\n"
@@ -107,13 +107,13 @@ ORDER BY item_id
         expected = (
             "WHERE\n"
             "    TRUE\n"
-            "-- trellis: if item_ids\n"
+            "    -- trellis: if item_ids\n"
             "    AND item_id IN (\n"
-            "-- trellis: for item in item_ids separator=\",\"\n"
+            "        -- trellis: for item in item_ids separator=\",\"\n"
             "        :item\n"
-            "-- trellis: endfor\n"
+            "        -- trellis: endfor\n"
             "    )\n"
-            "-- trellis: endif\n"
+            "    -- trellis: endif\n"
         )
         rule = TrellisIndentRule()
 
@@ -122,10 +122,7 @@ ORDER BY item_id
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
-        self.assertEqual(
-            [line for line in content.splitlines() if "trellis:" in line],
-            [line for line in fixed.splitlines() if "trellis:" in line],
-        )
+        self.assertEqual(trellis_directive_signature(content), trellis_directive_signature(fixed))
 
     def test_trellis_indent_does_not_format_named_bind_sql_without_directives(self):
         content = "WHERE item_id IN (\n  :item_id\n)\n"
@@ -229,10 +226,9 @@ SELECT audit_id FROM audit_table;
 
         self.assertIn("        :item\n", result.content)
         self.assertIn("    )\n", result.content)
-        self.assertEqual(
-            [line for line in content.splitlines() if "trellis:" in line],
-            [line for line in result.content.splitlines() if "trellis:" in line],
-        )
+        self.assertIn("-- trellis: if item_ids\n", result.content)
+        self.assertIn("        -- trellis: for item in item_ids separator=\",\"\n", result.content)
+        self.assertEqual(trellis_directive_signature(content), trellis_directive_signature(result.content))
 
 
 if __name__ == "__main__":

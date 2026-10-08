@@ -67,7 +67,8 @@ class WhereMultiRule(BaseRule):
                         break
                     if d == outer_depth:
                         if t["type"] == "KEYWORD" and t["value"].upper() in (
-                            "GROUP", "ORDER", "LIMIT", "HAVING", "OFFSET", "UNION", "INTERSECT", "EXCEPT"
+                            "GROUP", "ORDER", "LIMIT", "HAVING", "OFFSET", "RETURNING",
+                            "UNION", "INTERSECT", "EXCEPT"
                         ):
                             clause_end = idx
                             break

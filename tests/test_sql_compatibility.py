@@ -309,6 +309,29 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
 
+    def test_returning_ends_where_clause_length_calculation(self):
+        source = (
+            "UPDATE sample_item\n"
+            "SET item_name = :item_name\n"
+            "WHERE\n"
+            "    item_id = :item_id\n"
+            "    AND item_version = :item_version\n"
+            "RETURNING item_id, item_name"
+        )
+        expected = (
+            "UPDATE sample_item\n"
+            "SET item_name = :item_name\n"
+            "WHERE item_id = :item_id AND item_version = :item_version\n"
+            "RETURNING item_id, item_name"
+        )
+
+        rule = WhereMultiRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
+
     def test_between_delimiter_is_not_a_boolean_condition_boundary(self):
         where_source = (
             "SELECT item_id FROM sample_item WHERE recorded_at BETWEEN :start\n"
