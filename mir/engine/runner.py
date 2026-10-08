@@ -133,6 +133,15 @@ def apply_filtered_fixes(original: str, fixed: str, target_lines: Set[int]) -> s
         if tag == "equal":
             result.extend(original_lines[i1:i2])
             continue
+        if tag == "replace" and i2 - i1 == j2 - j1:
+            for offset in range(i2 - i1):
+                line_number = i1 + offset + 1
+                result.append(
+                    fixed_lines[j1 + offset]
+                    if line_number in target_lines
+                    else original_lines[i1 + offset]
+                )
+            continue
         affected = set(range(i1 + 1, i2 + 1))
         if tag == "insert":
             affected = {max(1, i1), i1 + 1}

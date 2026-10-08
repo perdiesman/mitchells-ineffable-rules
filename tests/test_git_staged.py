@@ -90,6 +90,78 @@ class TestGitStaged(unittest.TestCase):
         self.assertIn(1, selection.allowed)
         self.assertNotIn(2, selection.allowed)
 
+    def test_staged_fix_leaves_existing_out_of_scope_violation_untouched(self):
+        path = self.root / "queries.sql"
+        path.write_text(
+            "select legacy_id from legacy_table;\nSELECT item_id FROM sample_table;\n",
+            encoding="utf-8",
+        )
+        self.git("add", "queries.sql")
+        self.git("commit", "-qm", "initial")
+        path.write_text(
+            "select legacy_id from legacy_table;\nselect item_name from sample_table;\n",
+            encoding="utf-8",
+        )
+        self.git("add", "queries.sql")
+
+        document = read_staged_documents(self.root, {".sql"})[0]
+        selection = expand_selection(document.content, "sql", document.changed_lines)
+        result = process_document(self.config(), document.content, document.path, "sql", selection)
+        update_staged_documents(self.root, [(document, result.content)])
+
+        self.assertEqual(
+            self.git("show", ":queries.sql"),
+            "select legacy_id from legacy_table;\nSELECT item_name FROM sample_table;\n",
+        )
+
+    def test_staged_mybatis_sql_fix_preserves_parameters_and_xml(self):
+        path = self.root / "SampleMapper.xml"
+        path.write_text(
+            """<mapper namespace="sample.Mapper">
+    <select id="findItem">
+        select item_id from sample_table where item_id=#{itemId}
+    </select>
+</mapper>
+""",
+            encoding="utf-8",
+        )
+        self.git("add", "SampleMapper.xml")
+
+        document = read_staged_documents(self.root, {".xml"})[0]
+        selection = expand_selection(document.content, "xml", document.changed_lines)
+        result = process_document(self.config(), document.content, document.path, "xml", selection)
+        update_staged_documents(self.root, [(document, result.content)])
+        staged = self.git("show", ":SampleMapper.xml")
+
+        self.assertIn("SELECT item_id FROM sample_table WHERE item_id = #{itemId}", staged)
+        self.assertIn('<select id="findItem">', staged)
+        self.assertIn("</mapper>", staged)
+
+    def test_staged_trellis_fix_preserves_named_bind(self):
+        path = self.root / "find_items.sql"
+        path.write_text(
+            """select item_id from sample_table
+--trellis:IF active_only
+where item_id=:filters.item_id
+--trellis:ENDIF
+""",
+            encoding="utf-8",
+        )
+        self.git("add", "find_items.sql")
+
+        document = read_staged_documents(self.root, {".sql"})[0]
+        selection = expand_selection(document.content, "sql", document.changed_lines)
+        result = process_document(self.config(), document.content, document.path, "sql", selection)
+        update_staged_documents(self.root, [(document, result.content)])
+
+        self.assertEqual(
+            self.git("show", ":find_items.sql"),
+            "SELECT item_id FROM sample_table\n"
+            "-- trellis: if active_only\n"
+            "WHERE item_id = :filters.item_id\n"
+            "-- trellis: endif\n",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
