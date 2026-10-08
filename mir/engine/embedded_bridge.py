@@ -125,25 +125,22 @@ def check_embedded_content(
             if ignored_comma_offsets:
                 guest_rule_config["ignored_comma_offsets"] = ignored_comma_offsets
             
-        try:
-            sql_violations = rule.check(guest_text, file_path, guest_rule_config)
-            for sv in sql_violations:
-                guest_lines = guest_text.splitlines()
-                char_offset = 0
-                for line_idx in range(sv.line_number - 1):
-                    if line_idx < len(guest_lines):
-                        char_offset += len(guest_lines[line_idx]) + 1
-                        
-                if char_offset < len(mapping):
-                    mapped_idx = mapping[char_offset]
-                    violations.append({
-                        "rule_id": rule.rule_id,
-                        "mapped_offset": mapped_idx,
-                        "message": sv.message,
-                        "is_fixable": sv.is_fixable
-                    })
-        except Exception:
-            pass
+        sql_violations = rule.check(guest_text, file_path, guest_rule_config)
+        for sv in sql_violations:
+            guest_lines = guest_text.splitlines()
+            char_offset = 0
+            for line_idx in range(sv.line_number - 1):
+                if line_idx < len(guest_lines):
+                    char_offset += len(guest_lines[line_idx]) + 1
+
+            if char_offset < len(mapping):
+                mapped_idx = mapping[char_offset]
+                violations.append({
+                    "rule_id": rule.rule_id,
+                    "mapped_offset": mapped_idx,
+                    "message": sv.message,
+                    "is_fixable": sv.is_fixable
+                })
             
     return violations
 
@@ -239,13 +236,10 @@ def fix_embedded_content(
                 if ignored_comma_offsets:
                     guest_rule_config["ignored_comma_offsets"] = ignored_comma_offsets
                 
-            try:
-                prev_text = fixed_text
-                fixed_text = rule.fix(fixed_text, file_path, guest_rule_config)
-                if fixed_text != prev_text and extra_fix_args and "applied_rules" in extra_fix_args:
-                    extra_fix_args["applied_rules"].add(rule.rule_id)
-            except Exception:
-                pass
+            prev_text = fixed_text
+            fixed_text = rule.fix(fixed_text, file_path, guest_rule_config)
+            if fixed_text != prev_text and extra_fix_args and "applied_rules" in extra_fix_args:
+                extra_fix_args["applied_rules"].add(rule.rule_id)
                 
     edits = []
     if fixed_text != guest_text:
