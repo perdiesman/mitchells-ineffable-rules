@@ -13,8 +13,10 @@ EXCLUDED_WORDS = {
     "geometry", "numeric", "varchar", "integer", "int", "bigint",
     "smallint", "text", "boolean", "bool", "decimal", "json", "jsonb",
     "uuid", "date", "timestamp", "timestamptz", "time", "timetz", "real",
-    "char", "character", "double", "varying", "filter", "conflict"
+    "char", "character", "double", "varying", "filter", "conflict", "lateral"
 }
+
+KEYWORD_FUNCTIONS = {"COALESCE", "LEFT", "RIGHT"}
 
 class FunctionCaseRule(BaseRule):
     commit_profile = True
@@ -81,6 +83,8 @@ class FunctionCaseRule(BaseRule):
         ]
         for index, token in enumerate(active[:-1]):
             if token["type"] not in {"IDENTIFIER", "KEYWORD"}:
+                continue
+            if token["type"] == "KEYWORD" and token["value"].upper() not in KEYWORD_FUNCTIONS:
                 continue
             word = token["value"]
             if word.startswith('"') or word.lower() in exclusions:

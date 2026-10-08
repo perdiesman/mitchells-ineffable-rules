@@ -44,6 +44,30 @@ class TestSqlCompatibility(unittest.TestCase):
             "ON CONFLICT (item_id) DO UPDATE SET value = excluded.value;",
         )
 
+    def test_keyword_function_ambiguity_converges(self):
+        content = "select left(item_name, 2) from sample_table left join labels on true;"
+        keyword_fixed = KeywordCaseRule().fix(content, "generic.sql", {})
+        fixed = FunctionCaseRule().fix(keyword_fixed, "generic.sql", {})
+
+        self.assertEqual(
+            fixed,
+            "SELECT left(item_name, 2) FROM sample_table LEFT JOIN labels ON true;",
+        )
+        self.assertEqual(KeywordCaseRule().fix(fixed, "generic.sql", {}), fixed)
+
+    def test_lateral_is_a_keyword_not_a_function(self):
+        content = "select item_id from sample_table left join lateral (select 1) item on true;"
+        keyword_fixed = KeywordCaseRule().fix(content, "generic.sql", {})
+        fixed = FunctionCaseRule().fix(keyword_fixed, "generic.sql", {})
+
+        self.assertIn("LEFT JOIN LATERAL (SELECT 1)", fixed)
+        self.assertEqual(FunctionCaseRule().fix(fixed, "generic.sql", {}), fixed)
+
+    def test_set_row_assignment_is_not_a_function(self):
+        content = "UPDATE sample_table SET (item_name) = ('example');"
+
+        self.assertEqual(FunctionCaseRule().fix(content, "generic.sql", {}), content)
+
     def test_postgresql_operators_remain_atomic_when_spaced(self):
         content = (
             "SELECT row_data->>'key', row_data#>>'{path}', sample_table.* "
@@ -57,6 +81,12 @@ class TestSqlCompatibility(unittest.TestCase):
             "FROM sample_table WHERE days => :days;",
         )
         self.assertEqual(protected_sql_signature(fixed), protected_sql_signature(content))
+
+    def test_protected_signature_allows_formatting_inside_dollar_quoted_code(self):
+        original = "CREATE FUNCTION sample() RETURNS void AS $$ BEGIN RETURN; END; $$ LANGUAGE plpgsql;"
+        formatted = "CREATE FUNCTION sample() RETURNS void AS $$ BEGIN\n    RETURN;\nEND; $$ LANGUAGE plpgsql;"
+
+        self.assertEqual(protected_sql_signature(original), protected_sql_signature(formatted))
 
     def test_foreign_schema_limit_list_is_not_a_function_call(self):
         content = (

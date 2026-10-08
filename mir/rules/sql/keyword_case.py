@@ -7,8 +7,11 @@ KEYWORDS = [
     "group by", "order by", "insert", "into", "values", "update",
     "set", "delete", "create", "table", "drop", "alter", "index",
     "left", "right", "inner", "outer", "as", "having", "union",
-    "with", "distinct", "recursive", "case", "when", "then", "else", "end"
+    "with", "distinct", "recursive", "case", "when", "then", "else", "end",
+    "lateral"
 ]
+
+FUNCTION_KEYWORD_AMBIGUITIES = {"left", "right"}
 
 class KeywordCaseRule(BaseRule):
     commit_profile = True
@@ -82,7 +85,15 @@ class KeywordCaseRule(BaseRule):
                     and token["value"].lower() == word
                     for token, word in zip(candidates, words)
                 ):
-                    for token in candidates:
+                    for candidate_offset, token in enumerate(candidates):
+                        active_index = index + candidate_offset
+                        if (
+                            token["value"].lower() in FUNCTION_KEYWORD_AMBIGUITIES
+                            and active_index + 1 < len(active)
+                            and active[active_index + 1]["type"] == "PAREN"
+                            and active[active_index + 1]["value"] == "("
+                        ):
+                            continue
                         if token["value"] != token["value"].upper():
                             found[token["start"]] = token
         return [found[start] for start in sorted(found)]

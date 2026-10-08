@@ -116,6 +116,11 @@ def run_rule_fix_recursively(
         fixed = rule.fix(body_info["body"], file_path, rule_config)
         if fixed == body_info["body"]:
             continue
+        if rule_config.get("_profile") == "commit":
+            from mir.rules.sql.sql_utils import protected_sql_signature
+
+            if protected_sql_signature(fixed) != protected_sql_signature(body_info["body"]):
+                raise ValueError("protected SQL syntax changed inside a dollar-quoted body")
         token = body_info["token"]
         replacement = body_info["tag"] + fixed + body_info["tag"]
         current = current[: token["start"]] + replacement + current[token["end"] :]

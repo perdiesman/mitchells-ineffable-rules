@@ -31,7 +31,11 @@ def protected_sql_signature(content: str) -> tuple[tuple[str, str], ...]:
     for token in tokenize_sql(content):
         token_type = token["type"]
         value = token["value"]
-        if token_type in {"PARAM", "STRING", "OPERATOR", "CAST"}:
+        if token_type == "STRING" and value.startswith("$"):
+            delimiter_end = value.find("$", 1)
+            delimiter = value[:delimiter_end + 1] if delimiter_end != -1 else value
+            protected.append(("DOLLAR_DELIMITER", delimiter))
+        elif token_type in {"PARAM", "STRING", "OPERATOR", "CAST"}:
             protected.append((token_type, value))
         elif token_type == "IDENTIFIER" and value.startswith('"'):
             protected.append(("QUOTED_IDENTIFIER", value))
