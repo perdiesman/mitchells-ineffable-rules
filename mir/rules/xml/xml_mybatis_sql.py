@@ -5,90 +5,76 @@ from mir.rules.xml.xml_utils import tokenize_xml
 from mir.engine.embedded_bridge import check_embedded_content, fix_embedded_content
 
 def parse_xml_elements(tokens: List[dict]) -> List[dict]:
-    elements = []
-    n = len(tokens)
-    i = 0
-    while i < n:
-        t = tokens[i]
-        if t["type"] == "TAG_OPEN_START":
-            tag_name = t["value"][1:].lower()
-            
-            tag_end_idx = -1
+    """Build the XML element tree in one token pass.
+
+    Element token indexes remain relative to the original document.  The old
+    recursive slice parser repeatedly rescanned large mapper bodies and gave
+    nested elements slice-relative indexes that callers treated as global.
+    """
+    roots = []
+    stack = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token["type"] == "TAG_OPEN_START":
+            tag_end = index + 1
             attrs = {}
-            j = i + 1
-            while j < n:
-                if tokens[j]["type"] == "TAG_END":
-                    tag_end_idx = j
-                    break
-                if tokens[j]["type"] == "ATTR_NAME":
-                    attr_name = tokens[j]["value"]
-                    if j + 2 < n and tokens[j+1]["type"] == "EQUAL" and tokens[j+2]["type"] == "ATTR_VALUE":
-                        val = tokens[j+2]["value"]
-                        if len(val) >= 2 and val[0] in ("'", '"') and val[-1] == val[0]:
-                            val = val[1:-1]
-                        attrs[attr_name] = val
-                        j += 3
-                        continue
-                j += 1
-                
-            if tag_end_idx != -1:
-                is_self_closing = tokens[tag_end_idx]["value"] == "/>"
-                if is_self_closing:
-                    elements.append({
-                        "tag": tag_name,
-                        "attrs": attrs,
-                        "start_idx": i,
-                        "end_idx": tag_end_idx,
-                        "inner_tokens": [],
-                        "start_offset": tokens[i]["start"],
-                        "end_offset": tokens[tag_end_idx]["end"]
-                    })
-                    i = tag_end_idx + 1
-                    continue
-                
-                depth = 1
-                close_idx = -1
-                k = tag_end_idx + 1
-                while k < n:
-                    if tokens[k]["type"] == "TAG_OPEN_START":
-                        if tokens[k]["value"][1:].lower() == tag_name:
-                            depth += 1
-                    elif tokens[k]["type"] == "TAG_CLOSE_START":
-                        if tokens[k]["value"][2:].lower() == tag_name:
-                            depth -= 1
-                            if depth == 0:
-                                close_idx = k
-                                break
-                    k += 1
-                
-                if close_idx != -1:
-                    close_end_idx = -1
-                    for m in range(close_idx + 1, n):
-                        if tokens[m]["type"] == "TAG_END":
-                            close_end_idx = m
-                            break
-                    
-                    if close_end_idx != -1:
-                        elements.append({
-                            "tag": tag_name,
-                            "attrs": attrs,
-                            "start_idx": i,
-                            "end_idx": close_end_idx,
-                            "inner_tokens": tokens[tag_end_idx + 1 : close_idx],
-                            "start_offset": tokens[i]["start"],
-                            "end_offset": tokens[close_end_idx]["end"]
-                        })
-                        i = close_end_idx + 1
-                        continue
-        i += 1
-    return elements
+            while tag_end < len(tokens) and tokens[tag_end]["type"] != "TAG_END":
+                current = tokens[tag_end]
+                if current["type"] == "ATTR_NAME":
+                    value_index = tag_end + 2
+                    if (
+                        value_index < len(tokens)
+                        and tokens[tag_end + 1]["type"] == "EQUAL"
+                        and tokens[value_index]["type"] == "ATTR_VALUE"
+                    ):
+                        value = tokens[value_index]["value"]
+                        if len(value) >= 2 and value[0] in ("'", '"') and value[-1] == value[0]:
+                            value = value[1:-1]
+                        attrs[current["value"]] = value
+                tag_end += 1
+            if tag_end >= len(tokens):
+                break
+            frame = {
+                "tag": token["value"][1:].lower(),
+                "attrs": attrs,
+                "start_idx": index,
+                "open_end_idx": tag_end,
+                "children": [],
+                "start_offset": token["start"],
+            }
+            if tokens[tag_end]["value"] == "/>":
+                frame.update({
+                    "end_idx": tag_end,
+                    "inner_tokens": [],
+                    "end_offset": tokens[tag_end]["end"],
+                })
+                (stack[-1]["children"] if stack else roots).append(frame)
+            else:
+                stack.append(frame)
+            index = tag_end
+        elif token["type"] == "TAG_CLOSE_START" and stack:
+            close_name = token["value"][2:].lower()
+            close_end = index + 1
+            while close_end < len(tokens) and tokens[close_end]["type"] != "TAG_END":
+                close_end += 1
+            if close_end < len(tokens) and stack[-1]["tag"] == close_name:
+                frame = stack.pop()
+                frame.update({
+                    "end_idx": close_end,
+                    "inner_tokens": tokens[frame["open_end_idx"] + 1:index],
+                    "end_offset": tokens[close_end]["end"],
+                })
+                (stack[-1]["children"] if stack else roots).append(frame)
+                index = close_end
+        index += 1
+    return roots
 
 def get_all_elements_recursively(elements: List[dict]) -> List[dict]:
     res = []
     for el in elements:
         res.append(el)
-        inner_el = parse_xml_elements(el["inner_tokens"])
-        res.extend(get_all_elements_recursively(inner_el))
+        res.extend(get_all_elements_recursively(el.get("children", [])))
     return res
 
 def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], expanded_chars: List[str], mapping: List[int], is_after_tag: List[bool], state: dict = None):

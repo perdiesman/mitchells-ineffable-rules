@@ -341,9 +341,8 @@ def process_document(
     if config.fix or config.dry_run:
         current = content
         seen = {current}
+        violations = initial
         for _ in range(10):
-            violations, pass_diagnostics = _collect(config, current, path, lang, selection)
-            result.diagnostics.extend(pass_diagnostics)
             fix_rules: list[BaseRule] = []
             for violation, rule, _ in violations:
                 if violation.is_fixable and rule.is_fixable in {"yes", "sometimes"} and rule not in fix_rules:
@@ -379,16 +378,17 @@ def process_document(
                     current = fixed
             if current == before_pass:
                 break
-            if current in seen:
+            cycle_detected = current in seen
+            violations, pass_diagnostics = _collect(config, current, path, lang, selection)
+            result.diagnostics.extend(pass_diagnostics)
+            if cycle_detected:
                 result.diagnostics.append(f"Formatter did not converge for {path}; a formatting cycle was detected")
                 break
             seen.add(current)
         else:
             result.diagnostics.append(f"Formatter did not converge for {path} after 10 passes")
         result.content = current
-        final, final_diagnostics = _collect(config, current, path, lang, selection)
-        result.violations = final
-        result.diagnostics.extend(final_diagnostics)
+        result.violations = violations
     else:
         result.violations = initial
 
