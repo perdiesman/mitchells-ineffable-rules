@@ -62,6 +62,7 @@ class TestEmbeddedBridgeSafety(unittest.TestCase):
 
         self.assertFalse(is_fixed_text_xml_safe(content, tag_ranges, [(4, 4, "x")]))
         self.assertTrue(is_fixed_text_xml_safe(content, tag_ranges, [(8, 8, "\n")]))
+        self.assertFalse(is_fixed_text_xml_safe(content, tag_ranges, [(22, 22, "\n")]))
 
     def test_overlapping_edits_are_rejected(self):
         self.assertFalse(is_fixed_text_xml_safe("plain text", [], [(0, 5, "a"), (4, 6, "b")]))

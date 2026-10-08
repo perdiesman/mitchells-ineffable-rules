@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+import importlib
 import tempfile
 import shutil
 
@@ -47,6 +48,14 @@ CATEGORIES = {
 """
 
 class TestDynamicLoader(unittest.TestCase):
+    def test_loaded_rule_module_is_importable_for_generated_docs(self):
+        rules = load_rules_for_language("sql")
+        rule = next(rule for rule in rules if rule.rule_id == "IR-keyword-case")
+
+        module = importlib.import_module(rule.__class__.__module__)
+
+        self.assertIn("select", module.KEYWORDS)
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         

@@ -171,7 +171,10 @@ def is_fixed_text_xml_safe(original_xml: str, tag_ranges: List[Tuple[int, int]],
             continue
         tag_start, tag_end = sorted_ranges[range_index]
         if start == end:
-            if tag_start < start < tag_end:
+            # An insertion at a tag's opening boundary is ambiguous: synthetic
+            # MyBatis SQL (for example a <where> prefix) maps there and must
+            # not be allowed to rewrite the XML indentation before the tag.
+            if tag_start <= start < tag_end:
                 return False
         elif start < tag_end and end > tag_start:
             return False
@@ -326,7 +329,7 @@ def fix_embedded_content(
                                     break
                         else:
                             for t_start, t_end in tag_ranges:
-                                if t_start < start_orig < t_end:
+                                if t_start <= start_orig < t_end:
                                     is_contiguous = False
                                     break
                     else:

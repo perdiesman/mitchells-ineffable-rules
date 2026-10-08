@@ -2,6 +2,7 @@ import os
 import glob
 import importlib.util
 import inspect
+import sys
 from typing import List, Optional, Type
 from mir.engine.rule_interface import BaseRule, RuleCase
 
@@ -151,7 +152,16 @@ def load_rules_from_dir(directory: str, language: str, is_external: bool = False
             spec = importlib.util.spec_from_file_location(module_name, file_path)
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
+                previous_module = sys.modules.get(module_name)
+                sys.modules[module_name] = module
+                try:
+                    spec.loader.exec_module(module)
+                except Exception:
+                    if previous_module is None:
+                        sys.modules.pop(module_name, None)
+                    else:
+                        sys.modules[module_name] = previous_module
+                    raise
                 
                 # Scan module for classes that subclass BaseRule
                 for name, obj in inspect.getmembers(module, inspect.isclass):
