@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.xml.xml_utils import tokenize_xml
 
 class XmlSelfClosingRule(BaseRule):
+    commit_profile = True
     rule_id = "IR-xml-self-closing"
     description = "Enforce exactly one space before self-closing tag endings (e.g. <tag />)."
     category = "tags/elements"
