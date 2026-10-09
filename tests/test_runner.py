@@ -1504,6 +1504,62 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_dynamic_boundary_does_not_capture_following_where(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM\n'
+            '            <choose>\n'
+            '                <when test="archived">archived_item</when>\n'
+            '                <otherwise>sample_item</otherwise>\n'
+            '            </choose> item\n'
+            '        WHERE\n'
+            '            item.recorded_at BETWEEN #{start} AND #{end}\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            "        WHERE\n            item.recorded_at",
+            "        WHERE item.recorded_at",
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_multicolumn_if_remains_expanded(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            item_id,\n'
+            '            <if test="includeDetails">\n'
+            '                detail_code,\n'
+            '                detail_name,\n'
+            '            </if>\n'
+            '            item_name\n'
+            '        FROM sample_item;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_sql_line_mapping(self):
         # XML file with a self-comparison on line 5
         xml_content = (

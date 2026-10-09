@@ -143,14 +143,16 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                 len_val = len(val)
                 expanded_chars.extend(val)
                 mapping.extend(range(start_offset, start_offset + len_val))
-                
-                after = state.get("dynamic_depth", 0) > 0
-                if state["last_tag_type"] in ("if", "choose", "when", "otherwise", "include", "case"):
-                    after = True
-                is_after_tag.extend([after] * len_val)
-                
-                if tok["type"] == "TEXT":
-                    state["last_tag_type"] = None
+
+                inside_dynamic = state.get("dynamic_depth", 0) > 0
+                boundary_active = state["last_tag_type"] in (
+                    "if", "choose", "when", "otherwise", "include", "case"
+                )
+                for char in val:
+                    is_after_tag.append(inside_dynamic or boundary_active)
+                    if char not in " \t\r\n," and boundary_active:
+                        boundary_active = False
+                        state["last_tag_type"] = None
                 
                 i += 1
                 continue

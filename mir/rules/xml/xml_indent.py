@@ -522,6 +522,12 @@ class XmlIndentRule(BaseRule):
                 opening_tag = content[start_offset:first_inner]
                 inner_text = content[first_inner:last_inner]
                 closing_tag = content[last_inner:end_offset]
+                if (
+                    el["tag"] in {"if", "when", "otherwise"}
+                    and "," in inner_text
+                    and len([line for line in inner_text.splitlines() if line.strip()]) > 1
+                ):
+                    continue
                 
                 collapsed = opening_tag.strip() + inner_text.strip() + closing_tag.strip()
                 
