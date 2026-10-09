@@ -24,7 +24,10 @@ class FromSingleRule(BaseRule):
         'SELECT id\nFROM (SELECT * FROM raw_users) AS sub;'
     ]
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _find_violations(
+        self, content: str, rule_config: Dict[str, Any] | None = None
+    ) -> List[dict]:
+        rule_config = rule_config or {}
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
         violations = []
@@ -33,6 +36,20 @@ class FromSingleRule(BaseRule):
         for i, tok in enumerate(tokens):
             if tok["type"] == "KEYWORD" and tok["value"].upper() == "FROM":
                 outer_depth = depths[i]
+                previous_active = next(
+                    (
+                        tokens[index]
+                        for index in range(i - 1, -1, -1)
+                        if tokens[index]["type"] not in ("WHITESPACE", "COMMENT")
+                    ),
+                    None,
+                )
+                if (
+                    previous_active
+                    and previous_active["type"] == "KEYWORD"
+                    and previous_active["value"].upper() == "DELETE"
+                ):
+                    continue
                 
                 # Find end of FROM clause
                 clause_end = n
@@ -84,7 +101,8 @@ class FromSingleRule(BaseRule):
                             "from_tok": tok,
                             "table_tok": first_table_tok,
                             "ws_start": tok["end"],
-                            "ws_end": first_table_tok["start"]
+                            "ws_end": first_table_tok["start"],
+                            "replacement": " ",
                         })
                         
         return violations
@@ -92,7 +110,7 @@ class FromSingleRule(BaseRule):
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         
         for item in offending:
             tok = item["from_tok"]
@@ -108,7 +126,7 @@ class FromSingleRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         if not offending:
             return content
             
@@ -116,7 +134,7 @@ class FromSingleRule(BaseRule):
         edits = []
         for item in offending:
             # Replace all whitespace between FROM and the table token with a single space
-            edits.append((item["ws_start"], item["ws_end"], " "))
+            edits.append((item["ws_start"], item["ws_end"], item["replacement"]))
             
         edits.sort(key=lambda x: x[0], reverse=True)
         chars = list(content)

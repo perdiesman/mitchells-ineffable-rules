@@ -4,6 +4,7 @@ from mir.rules.sql.sql_utils import (
     find_between_delimiter_indices,
     find_boolean_operator_indices,
     get_token_depths,
+    source_text_length,
     tokenize_sql,
 )
 
@@ -23,11 +24,11 @@ class WhereMultiRule(BaseRule):
     examples = [
         {
             "violating": "SELECT id FROM users WHERE some_long_column_identifier_active = true AND another_long_column_identifier_type = 'admin' OR age_greater_than_limit > 21;",
-            "correct": "SELECT id FROM users WHERE\n    some_long_column_identifier_active = true\n    AND another_long_column_identifier_type = 'admin'\n    OR age_greater_than_limit > 21;"
+            "correct": "SELECT id FROM users\nWHERE\n    some_long_column_identifier_active = true\n    AND another_long_column_identifier_type = 'admin'\n    OR age_greater_than_limit > 21;"
         },
         {
             "violating": "SELECT item_id FROM sample_item WHERE recorded_at BETWEEN :start\n    AND :end AND owning_organization_identifier = :owning_organization_identifier AND processing_status = :processing_status;",
-            "correct": "SELECT item_id FROM sample_item WHERE\n    recorded_at BETWEEN :start AND :end\n    AND owning_organization_identifier = :owning_organization_identifier\n    AND processing_status = :processing_status;"
+            "correct": "SELECT item_id FROM sample_item\nWHERE\n    recorded_at BETWEEN :start AND :end\n    AND owning_organization_identifier = :owning_organization_identifier\n    AND processing_status = :processing_status;"
         }
     ]
     additional_validations = [
@@ -157,7 +158,33 @@ class WhereMultiRule(BaseRule):
                         " " if t["type"] == "WHITESPACE" else t["value"]
                         for t in where_clause_tokens
                     )
-                    estimated_line_len = len(where_indent) + len(where_clause_single)
+                    prefix_before_where = line_prefix.rstrip()
+                    inline_where = (
+                        prefix_before_where + " " + where_clause_single
+                        if prefix_before_where.strip()
+                        else where_indent + where_clause_single
+                    )
+                    estimated_line_len = source_text_length(
+                        inline_where, rule_config
+                    )
+                    if not prefix_before_where.strip() and line_start > 0:
+                        previous_line_end = line_start - 1
+                        previous_line_start = content.rfind(
+                            "\n", 0, previous_line_end
+                        ) + 1
+                        previous_line = content[
+                            previous_line_start:previous_line_end
+                        ].rstrip()
+                        if previous_line.lstrip().upper().startswith(
+                            ("DELETE ", "FROM ")
+                        ):
+                            estimated_line_len = max(
+                                estimated_line_len,
+                                source_text_length(
+                                    previous_line + " " + where_clause_single,
+                                    rule_config,
+                                ),
+                            )
                     
                     if estimated_line_len <= max_len and not dynamic_boolean_indices:
                         # A short predicate has one canonical compact form. Only
@@ -182,6 +209,31 @@ class WhereMultiRule(BaseRule):
                                         "replacement": " ",
                                     })
                         continue
+                    if prefix_before_where.strip():
+                        ws_before_where = (
+                            tokens[i - 1]
+                            if i > 0 and tokens[i - 1]["type"] == "WHITESPACE"
+                            else None
+                        )
+                        expected_before_where = "\n" + where_indent
+                        actual_before_where = (
+                            ws_before_where["value"] if ws_before_where else ""
+                        )
+                        if actual_before_where != expected_before_where:
+                            violations.append({
+                                "token": tok,
+                                "ws_start": (
+                                    ws_before_where["start"]
+                                    if ws_before_where
+                                    else tok["start"]
+                                ),
+                                "ws_end": (
+                                    ws_before_where["end"]
+                                    if ws_before_where
+                                    else tok["start"]
+                                ),
+                                "replacement": expected_before_where,
+                            })
                     # 1. Format the first condition after WHERE onto its own line
                     first_cond_idx = None
                     for idx in range(i + 1, clause_end):

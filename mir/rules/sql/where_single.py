@@ -1,6 +1,11 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import find_boolean_operator_indices, tokenize_sql, get_token_depths
+from mir.rules.sql.sql_utils import (
+    find_boolean_operator_indices,
+    get_token_depths,
+    source_text_length,
+    tokenize_sql,
+)
 from mir.rules.sql.indent import IndentRule
 from mir.rules.sql.line_length import LineLengthRule
 
@@ -37,7 +42,7 @@ class WhereSingleRule(BaseRule):
         },
         {
             "violating": "SELECT item_id FROM sample_item WHERE recorded_timestamp_for_requested_interval BETWEEN timezone('utc', :requested_interval_start) AND timezone('utc', :requested_interval_end);",
-            "correct": "SELECT item_id FROM sample_item WHERE\n    recorded_timestamp_for_requested_interval BETWEEN timezone('utc', :requested_interval_start) AND timezone('utc', :requested_interval_end);"
+            "correct": "SELECT item_id FROM sample_item\nWHERE\n    recorded_timestamp_for_requested_interval BETWEEN timezone('utc', :requested_interval_start) AND timezone('utc', :requested_interval_end);"
         }
     ]
     additional_validations = [
@@ -117,7 +122,19 @@ class WhereSingleRule(BaseRule):
                         4,
                         fallbacks=[(IndentRule, "indent_size")],
                     )
-                    should_wrap = len(where_indent) + len(clause_single) > max_length
+                    should_wrap = (
+                        source_text_length(where_indent + clause_single, rule_config)
+                        > max_length
+                    )
+                    prefix_before_where = content[line_start:tok["start"]].rstrip()
+                    if prefix_before_where.strip():
+                        should_wrap = (
+                            source_text_length(
+                                prefix_before_where + " " + clause_single,
+                                rule_config,
+                            )
+                            > max_length
+                        )
                     expected = (
                         "\n" + where_indent + " " * indent_size
                         if should_wrap
@@ -131,13 +148,25 @@ class WhereSingleRule(BaseRule):
                     )
                     actual = whitespace["value"] if whitespace else ""
                     if actual != expected:
-                        violations.append({
+                        item = {
                             "where_tok": tok,
                             "cond_tok": first_cond_tok,
                             "ws_start": whitespace["start"] if whitespace else tok["end"],
                             "ws_end": first_cond_tok["start"],
                             "replacement": expected,
-                        })
+                        }
+                        if should_wrap and prefix_before_where.strip():
+                            ws_before_where = (
+                                tokens[i - 1]
+                                if i > 0 and tokens[i - 1]["type"] == "WHITESPACE"
+                                else None
+                            )
+                            item["pre_where_edit"] = (
+                                ws_before_where["start"] if ws_before_where else tok["start"],
+                                ws_before_where["end"] if ws_before_where else tok["start"],
+                                "\n" + where_indent,
+                            )
+                        violations.append(item)
                         
         return violations
 
@@ -167,6 +196,8 @@ class WhereSingleRule(BaseRule):
         edits = []
         for item in offending:
             edits.append((item["ws_start"], item["ws_end"], item["replacement"]))
+            if item.get("pre_where_edit"):
+                edits.append(item["pre_where_edit"])
             
         edits.sort(key=lambda x: x[0], reverse=True)
         chars = list(content)

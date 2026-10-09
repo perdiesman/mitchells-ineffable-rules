@@ -62,9 +62,11 @@ class ClauseAlignmentRule(BaseRule):
                     tokens[active_index]["value"].upper()
                     for active_index in active_indices[-3:]
                 ]
-                if previous_words[-2:] == ["IS", "DISTINCT"] or previous_words[-3:] == [
-                    "IS", "NOT", "DISTINCT"
-                ]:
+                if (
+                    previous_words[-1:] == ["DELETE"]
+                    or previous_words[-2:] == ["IS", "DISTINCT"]
+                    or previous_words[-3:] == ["IS", "NOT", "DISTINCT"]
+                ):
                     active_indices.append(index)
                     continue
                 keyword = word

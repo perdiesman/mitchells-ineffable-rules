@@ -1,3 +1,4 @@
+import re
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.xml.xml_utils import tokenize_xml
@@ -155,6 +156,27 @@ class XmlIndentRule(BaseRule):
             for el in elements
             if el["tag"] in ("select", "insert", "update", "delete", "sql")
         ]
+        for element in elements:
+            if element["tag"] != "delete":
+                continue
+            body_start = tokens[element["open_end_idx"]]["end"]
+            body_end = tokens[element["end_idx"]]["start"]
+            body = content[body_start:body_end]
+            delete_from = re.search(
+                r"(?mi)^([ \t]*)DELETE([ \t]+)FROM\b", body
+            )
+            if delete_from is None:
+                continue
+            indent = delete_from.group(1)
+            gap_start = body_start + delete_from.start(2)
+            gap_end = body_start + delete_from.end(2)
+            violations.append({
+                "line": content.count("\n", 0, gap_start) + 1,
+                "start_offset": gap_start,
+                "end_offset": gap_end,
+                "replacement": "\n" + indent,
+                "message": "MyBatis delete statements should place FROM on the next line.",
+            })
         for token_index, token in enumerate(tokens):
             if token["type"] != "TAG_OPEN_START" or token["value"][1:].lower() != "include":
                 continue

@@ -2,6 +2,21 @@ import re
 from typing import List, Dict, Optional
 from functools import lru_cache
 
+
+def source_text_length(text: str, rule_config: dict | None = None) -> int:
+    """Measure text as it will appear in its source container.
+
+    Embedded MyBatis SQL is decoded before SQL rules run, so XML entities
+    occupy more source columns than their SQL characters.
+    """
+    if rule_config and "original_xml" in rule_config:
+        text = (
+            text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+    return len(text)
+
 SQL_KEYWORDS = {
     "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "BY", "HAVING", "LIMIT", "OFFSET",
     "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "FULL", "CROSS", "NATURAL", "ON", "USING",

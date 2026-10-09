@@ -18,7 +18,8 @@ SELECT id FROM users WHERE some_long_column_identifier_active = true AND another
 
 ####  Correct Example #1
 ```sql
-SELECT id FROM users WHERE
+SELECT id FROM users
+WHERE
     some_long_column_identifier_active = true
     AND another_long_column_identifier_type = 'admin'
     OR age_greater_than_limit > 21;
@@ -32,7 +33,8 @@ SELECT item_id FROM sample_item WHERE recorded_at BETWEEN :start
 
 ####  Correct Example #2
 ```sql
-SELECT item_id FROM sample_item WHERE
+SELECT item_id FROM sample_item
+WHERE
     recorded_at BETWEEN :start AND :end
     AND owning_organization_identifier = :owning_organization_identifier
     AND processing_status = :processing_status;

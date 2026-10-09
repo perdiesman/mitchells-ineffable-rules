@@ -1339,6 +1339,88 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, xml_content)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_long_delete_starts_multiline_where_clause(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <update id="cleanup">\n'
+            '        DELETE FROM sample_data.sample_summary_hour_max_region WHERE recorded_at &lt; #{intervalStart} AND NOT event_data;\n'
+            '    </update>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <update id="cleanup">\n'
+            '        DELETE FROM sample_data.sample_summary_hour_max_region\n'
+            '        WHERE\n'
+            '            recorded_at &lt; #{intervalStart}\n'
+            '            AND NOT event_data;\n'
+            '    </update>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_delete_statement_places_from_on_next_line(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <delete id="cleanup">\n'
+            '        DELETE FROM sample_item\n'
+            '        WHERE item_id = #{itemId}\n'
+            '    </delete>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace("DELETE FROM", "DELETE\n        FROM")
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_multicondition_where_accounts_for_from_line(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="events">\n'
+            '        SELECT event_id\n'
+            '        FROM sample_data.additional_processing_events\n'
+            '        WHERE event_type = #{type} AND event_created_at BETWEEN #{startDate} AND #{endDate}\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="events">\n'
+            '        SELECT event_id\n'
+            '        FROM sample_data.additional_processing_events\n'
+            '        WHERE\n'
+            '            event_type = #{type}\n'
+            '            AND event_created_at BETWEEN #{startDate} AND #{endDate}\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_sql_line_mapping(self):
         # XML file with a self-comparison on line 5
         xml_content = (

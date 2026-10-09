@@ -33,7 +33,8 @@ SELECT item_id FROM sample_item WHERE recorded_timestamp_for_requested_interval 
 
 ####  Correct Example #2
 ```sql
-SELECT item_id FROM sample_item WHERE
+SELECT item_id FROM sample_item
+WHERE
     recorded_timestamp_for_requested_interval BETWEEN timezone('utc', :requested_interval_start) AND timezone('utc', :requested_interval_end);
 ```
 
