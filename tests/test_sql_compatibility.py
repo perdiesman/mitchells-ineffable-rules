@@ -3,6 +3,7 @@ import unittest
 from mir.rules.sql.function_case import FunctionCaseRule
 from mir.rules.sql.from_multi import FromMultiRule
 from mir.rules.sql.clause_alignment import ClauseAlignmentRule
+from mir.rules.sql.case_when_wrap import CaseWhenWrapRule
 from mir.rules.sql.column_layout import ColumnLayoutRule
 from mir.rules.sql.comma_style import CommaStyleRule
 from mir.rules.sql.join_on_multi import JoinOnMultiRule
@@ -23,6 +24,39 @@ from mir.rules.sql.where_multi import WhereMultiRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_case_arm_stays_inline_within_its_line_length_limit(self):
+        source = (
+            "                        WHEN u.active AND coalesce(su.active, true) "
+            "THEN coalesce(ucc.collected_count, 0)"
+        )
+
+        self.assertEqual(CaseWhenWrapRule().fix(source, "generic.sql", {}), source)
+
+    def test_long_case_condition_aligns_root_boolean_and_then(self):
+        source = (
+            "                WHEN TRUE = ANY(SELECT unnest(collected_counts) IS NULL) "
+            "AND array_length(collected_counts, 1) > 1 THEN 'mixed'"
+        )
+        expected = (
+            "                WHEN TRUE = ANY(SELECT unnest(collected_counts) IS NULL)\n"
+            "                    AND array_length(collected_counts, 1) > 1\n"
+            "                    THEN 'mixed'"
+        )
+
+        self.assertEqual(CaseWhenWrapRule().fix(source, "generic.sql", {}), expected)
+
+    def test_long_case_result_does_not_split_a_short_boolean_condition(self):
+        source = (
+            "                    WHEN u.active AND coalesce(su.active, true) "
+            "THEN coalesce(ucc.collected_count, ucc.model_count, 0)"
+        )
+        expected = (
+            "                    WHEN u.active AND coalesce(su.active, true)\n"
+            "                        THEN coalesce(ucc.collected_count, ucc.model_count, 0)"
+        )
+
+        self.assertEqual(CaseWhenWrapRule().fix(source, "generic.sql", {}), expected)
+
     def test_line_length_expands_the_last_call_in_a_filter_expression(self):
         source = (
             "            count(*) FILTER (WHERE current_date = run_start_date "

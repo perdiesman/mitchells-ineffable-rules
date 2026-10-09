@@ -10,7 +10,7 @@ Keep WHEN and THEN on one line when they fit; otherwise put THEN on an indented 
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
-  - `max_line_length` (Default: `100`): Line length threshold for wrapping a WHEN/THEN arm.
+  - `max_line_length` (Default: `110`): Line length threshold for wrapping a WHEN/THEN arm.
 
 #### ❌ Violating Example
 ```sql
@@ -23,7 +23,8 @@ END
 ####  Correct Example
 ```sql
 CASE
-                WHEN a_very_long_condition_name = :condition_value AND another_long_condition_name = :other_value
+                WHEN a_very_long_condition_name = :condition_value
+                    AND another_long_condition_name = :other_value
                     THEN calculate_a_very_long_result_name(:result_value)
     ELSE 0
 END

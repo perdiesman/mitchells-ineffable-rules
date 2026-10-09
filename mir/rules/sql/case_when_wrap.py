@@ -1,7 +1,12 @@
 from typing import Any, Dict, List
 
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import get_token_depths, source_text_length, tokenize_sql
+from mir.rules.sql.sql_utils import (
+    find_boolean_operator_indices,
+    get_token_depths,
+    source_text_length,
+    tokenize_sql,
+)
 
 
 class CaseWhenWrapRule(BaseRule):
@@ -16,10 +21,10 @@ class CaseWhenWrapRule(BaseRule):
     is_fixable = "yes"
     enabled_by_default = True
 
-    default_config = {"max_line_length": 100}
+    default_config = {"max_line_length": 110}
     config_options = {
         "max_line_length": {
-            "default": 100,
+            "default": 110,
             "description": "Line length threshold for wrapping a WHEN/THEN arm.",
         }
     }
@@ -36,8 +41,8 @@ class CaseWhenWrapRule(BaseRule):
             ),
             "correct": (
                 "CASE\n"
-                "                WHEN a_very_long_condition_name = :condition_value "
-                "AND another_long_condition_name = :other_value\n"
+                "                WHEN a_very_long_condition_name = :condition_value\n"
+                "                    AND another_long_condition_name = :other_value\n"
                 "                    THEN calculate_a_very_long_result_name(:result_value)\n"
                 "    ELSE 0\n"
                 "END"
@@ -53,7 +58,7 @@ class CaseWhenWrapRule(BaseRule):
         max_length = self.get_config_value(
             rule_config,
             "max_line_length",
-            default_value=100,
+            default_value=110,
         )
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
@@ -90,6 +95,34 @@ class CaseWhenWrapRule(BaseRule):
             line_start = content.rfind("\n", 0, token["start"]) + 1
             prefix = content[line_start : token["start"]]
             indent = prefix[: len(prefix) - len(prefix.lstrip(" \t"))] + "    "
+            condition_line = content[line_start:then_token["start"]].rstrip()
+            if source_text_length(condition_line, rule_config) > max_length:
+                for boolean_index in find_boolean_operator_indices(
+                    tokens,
+                    depths,
+                    depths[index],
+                    index + 1,
+                    then_index,
+                ):
+                    boolean_token = tokens[boolean_index]
+                    boolean_whitespace = (
+                        tokens[boolean_index - 1]
+                        if boolean_index > 0
+                        and tokens[boolean_index - 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    if (
+                        boolean_whitespace is not None
+                        and "\n" not in boolean_whitespace["value"]
+                    ):
+                        edits.append(
+                            {
+                                "token": boolean_token,
+                                "start": boolean_whitespace["start"],
+                                "end": boolean_whitespace["end"],
+                                "replacement": "\n" + indent,
+                            }
+                        )
             edits.append(
                 {
                     "token": then_token,
