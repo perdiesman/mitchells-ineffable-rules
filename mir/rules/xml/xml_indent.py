@@ -96,7 +96,7 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
                             
                         extra_indent_keywords = {
                             "FROM", "WHERE", "SELECT", "HAVING", "ON", "USING", "VALUES", "SET", 
-                            "AND", "OR", "JOIN", "LEFT", "RIGHT", "INNER", "CROSS", "FULL", "WITH",
+                            "AND", "OR", "IN", "JOIN", "LEFT", "RIGHT", "INNER", "CROSS", "FULL", "WITH",
                             "CASE", "THEN", "ELSE", "BEGIN", "EXCEPTION",
                             "(", "+", "-", "/", "||"
                         }

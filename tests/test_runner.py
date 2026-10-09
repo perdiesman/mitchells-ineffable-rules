@@ -944,6 +944,67 @@ class TestRunnerIntegration(unittest.TestCase):
             )
             self.assertEqual(content, expected)
 
+    def test_xml_mybatis_foreach_continuation_indentation(self):
+        xml_content = (
+            '<mapper namespace="MyMapper">\n'
+            '    <select id="continued">\n'
+            '        SELECT id\n'
+            '        FROM users\n'
+            '        WHERE\n'
+            '            active = true\n'
+            '            <if test="ids != null">\n'
+            '                AND id IN\n'
+            '                <foreach collection="someVeryLongCollectionNameThatKeepsTheForeachBodyOnSeparateLines" item="id" open="(" close=")" separator=",">\n'
+            '                        #{id}\n'
+            '                </foreach>\n'
+            '            </if>\n'
+            '    </select>\n'
+            '    <select id="standalone">\n'
+            '        SELECT id\n'
+            '        FROM users\n'
+            '        <if test="ids != null">\n'
+            '                    <foreach collection="ids" item="id" open="(" close=")" separator=",">#{id}</foreach>\n'
+            '        </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        path = self.write_temp_file("test_mybatis_foreach_indent.xml", xml_content)
+
+        config = Config()
+        config.paths = [path]
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-indent"]
+        config.fix = True
+
+        self.assertEqual(run_linter(config), 0)
+        with open(path, "r") as f:
+            expected = (
+                '<mapper namespace="MyMapper">\n'
+                '    <select id="continued">\n'
+                '        SELECT id\n'
+                '        FROM users\n'
+                '        WHERE\n'
+                '            active = true\n'
+                '            <if test="ids != null">\n'
+                '                AND id IN\n'
+                '                    <foreach collection="someVeryLongCollectionNameThatKeepsTheForeachBodyOnSeparateLines" item="id" open="(" close=")" separator=",">\n'
+                '                        #{id}\n'
+                '                    </foreach>\n'
+                '            </if>\n'
+                '    </select>\n'
+                '    <select id="standalone">\n'
+                '        SELECT id\n'
+                '        FROM users\n'
+                '        <if test="ids != null">\n'
+                '            <foreach collection="ids" item="id" open="(" close=")" separator=",">#{id}</foreach>\n'
+                '        </if>\n'
+                '    </select>\n'
+                '</mapper>'
+            )
+            self.assertEqual(f.read(), expected)
+
+        self.assertEqual(run_linter(config), 0)
+
     def test_sql_function_call_wrap(self):
         # A long SQL function call exceeding 120 characters should be wrapped
         sql_content = (
