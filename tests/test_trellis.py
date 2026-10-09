@@ -279,6 +279,37 @@ SELECT audit_id FROM audit_table;
         self.assertIn("        -- trellis: for item in item_ids separator=\",\"\n", result.content)
         self.assertEqual(trellis_directive_signature(content), trellis_directive_signature(result.content))
 
+    def test_changed_condition_directive_formats_its_where_clause(self):
+        content = (
+            "SELECT item_id\n"
+            "FROM sample_item\n"
+            "WHERE TRUE\n"
+            "-- trellis: if active_only\n"
+            "AND retired_at IS NULL\n"
+            "-- trellis: endif\n"
+            ";\n"
+        )
+        expected = (
+            "SELECT item_id\n"
+            "FROM sample_item\n"
+            "WHERE\n"
+            "    TRUE\n"
+            "    -- trellis: if active_only\n"
+            "        AND retired_at IS NULL\n"
+            "    -- trellis: endif\n"
+            ";\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        selection = expand_selection(content, "sql", {4})
+        result = process_document(config, content, "generic.sql", "sql", selection)
+
+        self.assertEqual(result.content, expected)
+        self.assertEqual(result.diagnostics, [])
+        self.assertEqual(trellis_directive_signature(content), trellis_directive_signature(result.content))
+
     def test_programming_style_nested_blocks_converge(self):
         content = (
             "SELECT item_id, item_name\n"
