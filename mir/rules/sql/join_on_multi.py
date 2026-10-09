@@ -178,9 +178,48 @@ class JoinOnMultiRule(BaseRule):
                     " " if t["type"] == "WHITESPACE" else t["value"]
                     for t in first_cond_toks
                 ).strip()
+
+                operator_split = None
+                comparison_operators = {"=", "!=", "<>", "<", ">", "<=", ">="}
+                for actual_idx in range(i + 1, clause_end):
+                    if actual_idx in boolean_indices:
+                        break
+                    candidate = tokens[actual_idx]
+                    if (
+                        depths[actual_idx] == outer_depth
+                        and candidate["type"] == "OPERATOR"
+                        and candidate["value"] in comparison_operators
+                    ):
+                        left = "".join(
+                            " " if item["type"] == "WHITESPACE" else item["value"]
+                            for item in tokens[i + 1 : actual_idx + 1]
+                        ).strip()
+                        first_condition_end = (
+                            boolean_indices[0] if boolean_indices else clause_end
+                        )
+                        right = "".join(
+                            " " if item["type"] == "WHITESPACE" else item["value"]
+                            for item in tokens[actual_idx + 1 : first_condition_end]
+                        ).strip()
+                        first_candidate = (
+                            join_prefix_for_on.rstrip() + " ON " + left
+                        )
+                        second_candidate = expected_indent + right
+                        if (
+                            right
+                            and len(first_candidate) <= max_len
+                            and len(second_candidate) <= max_len
+                            and len(first_candidate) + 1 + len(right) > max_len
+                        ):
+                            operator_split = actual_idx
+                        break
                 
                 estimated_first_line_len = len(join_prefix_for_on) + len("ON ") + len(first_cond_str_normalized)
-                expected_pre_on_ws = "\n" + expected_indent if estimated_first_line_len > max_len else " "
+                expected_pre_on_ws = (
+                    "\n" + expected_indent
+                    if estimated_first_line_len > max_len and operator_split is None
+                    else " "
+                )
                 expected_post_on_ws = " "
                 
                 ws_before_on = None
@@ -208,6 +247,34 @@ class JoinOnMultiRule(BaseRule):
                         "ws_end": ws_after_on["end"] if ws_after_on else tok["end"],
                         "replacement": expected_post_on_ws
                     })
+
+                if operator_split is not None:
+                    operator = tokens[operator_split]
+                    ws_after_operator = (
+                        tokens[operator_split + 1]
+                        if operator_split + 1 < n
+                        and tokens[operator_split + 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    expected_operator_ws = "\n" + expected_indent
+                    if (
+                        ws_after_operator is None
+                        or ws_after_operator["value"] != expected_operator_ws
+                    ):
+                        violations.append({
+                            "token": operator,
+                            "ws_start": (
+                                ws_after_operator["start"]
+                                if ws_after_operator
+                                else operator["end"]
+                            ),
+                            "ws_end": (
+                                ws_after_operator["end"]
+                                if ws_after_operator
+                                else operator["end"]
+                            ),
+                            "replacement": expected_operator_ws,
+                        })
 
                 for delimiter_idx in between_delimiter_indices:
                     delimiter = tokens[delimiter_idx]

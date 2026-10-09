@@ -1281,6 +1281,64 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_long_join_predicate_wraps_after_operator(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT sample_error.error_id\n'
+            '        FROM\n'
+            '            sample_error\n'
+            '            JOIN sample_error_category sample_error_category\n'
+            '                ON sample_error_category.category_identifier =\n'
+            '        sample_error.sample_error_category_identifier;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT sample_error.error_id\n'
+            '        FROM\n'
+            '            sample_error\n'
+            '            JOIN sample_error_category sample_error_category ON sample_error_category.category_identifier =\n'
+            '                sample_error.sample_error_category_identifier;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_multicondition_join_keeps_fitting_first_predicate(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT sample_item.item_id\n'
+            '        FROM\n'
+            '            sample_item\n'
+            '            LEFT JOIN sample_customer customer ON customer.item_id = sample_item.item_id\n'
+            '                AND coalesce(customer.organization_identifier, -1) = coalesce(sample_item.organization_identifier, -1);\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_sql_line_mapping(self):
         # XML file with a self-comparison on line 5
         xml_content = (
