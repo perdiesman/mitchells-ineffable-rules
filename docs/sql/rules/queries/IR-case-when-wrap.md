@@ -9,7 +9,8 @@ Keep WHEN and THEN on one line when they fit; otherwise put THEN on an indented 
 - **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
-  - `enabled`: `true`
+  - `enabled` (Default: `true`): Enable or disable this rule.
+  - `max_line_length` (Default: `100`): Line length threshold for wrapping a WHEN/THEN arm.
 
 #### ❌ Violating Example
 ```sql

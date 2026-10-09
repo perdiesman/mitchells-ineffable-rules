@@ -5,8 +5,9 @@ Unnecessary parentheses around a single condition should be removed.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
-- **Commit Profile**: No
-- **MyBatis Safe**: No
+- **Commit Profile**: Yes
+- **Intentional Semantic Rewrite**: Yes
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
@@ -54,4 +55,24 @@ SELECT item_id FROM sample_item WHERE EXISTS (SELECT 1 FROM sample_child);
 
 ```sql
 SELECT item_id FROM sample_item ORDER BY (rank <= :maximum_rank) DESC;
+```
+
+```sql
+SELECT CAST(item_id AS TEXT) FROM sample_item;
+```
+
+```sql
+SELECT item_id FROM sample_item WHERE item_id IN (:item_id);
+```
+
+```sql
+SELECT item_id FROM sample_item JOIN sample_owner USING (owner_id);
+```
+
+```sql
+SELECT (covered_count::NUMERIC / total_count) - 1 FROM sample_item;
+```
+
+```sql
+INSERT INTO sample_item (item_id) VALUES (:item_id) ON CONFLICT (item_id) DO NOTHING;
 ```

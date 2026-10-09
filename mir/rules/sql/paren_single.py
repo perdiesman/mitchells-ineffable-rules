@@ -8,6 +8,9 @@ from mir.rules.sql.sql_utils import (
 )
 
 class ParenSingleRule(BaseRule):
+    commit_profile = True
+    commit_semantic_rewrite = True
+    embedded_safe = True
     rule_id = "IR-paren-single"
     description = "Unnecessary parentheses around a single condition should be removed."
     category = "queries"
@@ -34,6 +37,11 @@ class ParenSingleRule(BaseRule):
         "SELECT max(value) FILTER (WHERE active), ANY(:item_ids) FROM sample_item;",
         "SELECT item_id FROM sample_item WHERE EXISTS (SELECT 1 FROM sample_child);",
         "SELECT item_id FROM sample_item ORDER BY (rank <= :maximum_rank) DESC;",
+        "SELECT CAST(item_id AS TEXT) FROM sample_item;",
+        "SELECT item_id FROM sample_item WHERE item_id IN (:item_id);",
+        "SELECT item_id FROM sample_item JOIN sample_owner USING (owner_id);",
+        "SELECT (covered_count::NUMERIC / total_count) - 1 FROM sample_item;",
+        "INSERT INTO sample_item (item_id) VALUES (:item_id) ON CONFLICT (item_id) DO NOTHING;",
     ]
 
     def _is_simple_atom(self, tokens: List[dict]) -> bool:
@@ -95,7 +103,13 @@ class ParenSingleRule(BaseRule):
                         is_special = True
                     elif prev_active["type"] == "IDENTIFIER":
                         is_special = True
-                    elif prev_active["type"] == "KEYWORD" and val_upper in ("COUNT", "COALESCE", "SUM", "AVG", "MIN", "MAX", "CONCAT", "SUBSTR", "DATE_PART", "NOW", "STRING_AGG", "DATE", "FILTER", "ANY", "SOME", "EXISTS", "LATERAL"):
+                    elif prev_active["type"] == "KEYWORD" and val_upper in (
+                        "COUNT", "COALESCE", "SUM", "AVG", "MIN", "MAX",
+                        "CONCAT", "SUBSTR", "DATE_PART", "NOW", "STRING_AGG",
+                        "DATE", "FILTER", "ANY", "SOME", "EXISTS", "LATERAL",
+                        "CAST", "EXTRACT", "IN", "VALUES", "USING", "ROW",
+                        "CONFLICT",
+                    ):
                         is_special = True
                         
                 if is_special:
@@ -131,6 +145,17 @@ class ParenSingleRule(BaseRule):
                             has_multi = True
                             break
                 if has_multi:
+                    continue
+
+                # Parentheses around arithmetic may document or control the
+                # operand that a following operator applies to. This rule is
+                # limited to a single predicate/atom, not expression regrouping.
+                if any(
+                    depth == 0
+                    and inner_token["type"] == "OPERATOR"
+                    and inner_token["value"] in {"+", "-", "*", "/", "%", "||"}
+                    for inner_token, depth in zip(inner_tokens, inner_depths)
+                ):
                     continue
                     
                 # Check next token for CAST

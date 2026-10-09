@@ -9,7 +9,8 @@ Long additive expressions should wrap before an operator, with all continuation 
 - **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
-  - `enabled`: `true`
+  - `enabled` (Default: `true`): Enable or disable this rule.
+  - `max_line_length` (Default: `120`): Line length threshold for wrapping additive expressions.
 
 #### ❌ Violating Example
 ```sql
