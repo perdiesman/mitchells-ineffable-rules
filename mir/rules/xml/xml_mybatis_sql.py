@@ -271,6 +271,12 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                             close_end_idx = m
                             break
                     if close_end_idx != -1:
+                        # Punctuation after a dynamic block belongs to the
+                        # surrounding MyBatis structure. Mark it as crossing
+                        # a tag boundary so SQL rules such as comma-style do
+                        # not move it into text on the other side of the tag.
+                        state["last_tag_line"] = inner_tokens[close_end_idx]["line"]
+                        state["last_tag_type"] = tag_name
                         i = close_end_idx + 1
                         continue
         i += 1

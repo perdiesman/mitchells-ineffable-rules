@@ -766,6 +766,46 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertIn('SELECT count(*) <include refid="from" />', result.content)
         self.assertNotIn("IR-function-case", [item[0].rule_id for item in result.violations])
 
+    def test_xml_mybatis_does_not_move_commas_across_dynamic_tags(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="dynamicOrder">\n'
+            '        SELECT created_at::TIMESTAMPTZ\n'
+            '        FROM utility\n'
+            '        ORDER BY utility_name\n'
+            '        <if test="showState">\n'
+            '            , state_name\n'
+            '        </if>\n'
+            '    </select>\n'
+            '    <select id="dynamicArgument">\n'
+            '        SELECT outage_breakdown(\n'
+            '            <choose>\n'
+            '                <when test="byCounty">\'county\'</when>\n'
+            '                <otherwise>\'state\'</otherwise>\n'
+            '            </choose>, #{runStartTime})\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.disable_all = True
+        config.rules_to_enable = [
+            "IR-xml-mybatis-sql",
+            "IR-comma-style",
+            "IR-datatype-format",
+        ]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        expected = xml_content.replace(
+            "created_at::TIMESTAMPTZ", "created_at::TIMESTAMP WITH TIME ZONE"
+        )
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertNotIn("utility_name,", first.content)
+        self.assertIn("</choose>, #{runStartTime}", first.content)
+
     def test_xml_mybatis_sql_line_mapping(self):
         # XML file with a self-comparison on line 5
         xml_content = (
