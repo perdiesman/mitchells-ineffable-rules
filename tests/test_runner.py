@@ -876,6 +876,7 @@ class TestRunnerIntegration(unittest.TestCase):
             '        WHERE coalesce(enabled, FALSE) = TRUE\n'
             '        <if test="includeHidden == true">\n'
             '            AND #{showHidden} = FALSE\n'
+            '            AND recorded_at &gt;= #{start} AND recorded_at &lt;= #{end}\n'
             '        </if>\n'
             '    </select>\n'
             '</mapper>'
@@ -886,12 +887,19 @@ class TestRunnerIntegration(unittest.TestCase):
         ).replace(
             '            AND #{showHidden} = FALSE\n',
             '            AND NOT #{showHidden}\n',
+        ).replace(
+            'recorded_at &gt;= #{start} AND recorded_at &lt;= #{end}',
+            'recorded_at BETWEEN #{start} AND #{end}',
         )
         config = Config()
         config.profile = "commit"
         config.fix = True
         config.disable_all = True
-        config.rules_to_enable = ["IR-xml-mybatis-sql", "IR-boolean-comparison"]
+        config.rules_to_enable = [
+            "IR-xml-mybatis-sql",
+            "IR-boolean-comparison",
+            "IR-between",
+        ]
 
         first = process_document(config, xml_content, "generic.xml", "xml")
         second = process_document(config, first.content, "generic.xml", "xml")
@@ -1053,7 +1061,7 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertIn("            ),\n        </if>", first.content)
         self.assertIn("                        AND ready", first.content)
 
-    def test_xml_mybatis_dynamic_where_stays_multiline(self):
+    def test_xml_mybatis_dynamic_range_compacts_after_between_rewrite(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
             '    <select id="bounded">\n'
@@ -1073,11 +1081,12 @@ class TestRunnerIntegration(unittest.TestCase):
 
         self.assertEqual(second.content, first.content)
         self.assertIn(
-            "            WHERE\n"
-            "                recorded_timestamp_for_requested_interval &gt;= #{start}\n"
-            "                AND recorded_timestamp_for_requested_interval &lt;= #{end}",
+            '<if test="start != null">WHERE '
+            "recorded_timestamp_for_requested_interval BETWEEN #{start} AND #{end}</if>",
             first.content,
         )
+        self.assertNotIn("&gt;=", first.content)
+        self.assertNotIn("&lt;=", first.content)
         self.assertFalse(
             any("Formatter did not converge" in item for item in first.diagnostics)
         )

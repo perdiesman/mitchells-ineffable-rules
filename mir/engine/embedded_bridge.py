@@ -275,6 +275,7 @@ def fix_embedded_content(
         )
     fixed_text = guest_text
     dynamic_indent_safe_lines: set[int] = set()
+    semantic_changed = False
     xml_safety_context = None
     if (
         extra_fix_args
@@ -289,6 +290,8 @@ def fix_embedded_content(
     
     for rule in guest_rules:
         if rule.is_fixable in ("yes", "sometimes"):
+            if semantic_changed and not rule.commit_semantic_rewrite:
+                break
             guest_rule_config = {}
             global_config = all_configs.get(rule.rule_id, {})
             lang_config = all_configs.get(f"{guest_language}:{rule.rule_id}", {})
@@ -370,7 +373,7 @@ def fix_embedded_content(
                 # Keep deliberate token rewrites separate from line-moving
                 # formatting. This makes their XML source mapping unambiguous;
                 # the host convergence loop applies layout on the next pass.
-                break
+                semantic_changed = True
 
     if extra_fix_args is not None:
         from mir.rules.sql.sql_utils import protected_sql_signature
