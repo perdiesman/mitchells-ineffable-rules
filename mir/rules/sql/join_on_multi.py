@@ -52,6 +52,9 @@ class JoinOnMultiRule(BaseRule):
         violations = []
         n = len(tokens)
         mybatis_dynamic_offsets = rule_config.get("mybatis_dynamic_offsets", set())
+        mybatis_boundary_offsets = sorted(
+            rule_config.get("mybatis_boundary_offsets", set())
+        )
         
         for i, tok in enumerate(tokens):
             if tok["type"] == "KEYWORD" and tok["value"].upper() == "ON":
@@ -120,9 +123,20 @@ class JoinOnMultiRule(BaseRule):
                 expected_indent = on_indent + "    "
                 
                 clause_end = n
+                next_boundary = next(
+                    (
+                        offset
+                        for offset in mybatis_boundary_offsets
+                        if offset > tok["end"]
+                    ),
+                    None,
+                )
                 for idx in range(i + 1, n):
                     t = tokens[idx]
                     d = depths[idx]
+                    if next_boundary is not None and t["end"] > next_boundary:
+                        clause_end = idx
+                        break
                     if d < outer_depth:
                         clause_end = idx
                         break

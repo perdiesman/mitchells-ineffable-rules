@@ -1331,7 +1331,6 @@ class TestRunnerIntegration(unittest.TestCase):
         config = Config()
         config.profile = "commit"
         config.fix = True
-
         first = process_document(config, xml_content, "generic.xml", "xml")
         second = process_document(config, first.content, "generic.xml", "xml")
 
@@ -1609,6 +1608,69 @@ class TestRunnerIntegration(unittest.TestCase):
             '                coalesce(category_id, -1)\n'
             '            ) *\n'
             '        FROM sample_item;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_nested_dynamic_where_keeps_cte_indentation(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        WITH filtered_items AS (\n'
+            '            SELECT item_id\n'
+            '            FROM sample_item\n'
+            '            WHERE\n'
+            '                recorded_at BETWEEN #{start} AND #{end}\n'
+            '                AND active\n'
+            '                <if test="organizationId != null">\n'
+            '                    AND organization_id = #{organizationId}\n'
+            '                </if>\n'
+            '        )\n'
+            '        SELECT item_id\n'
+            '        FROM filtered_items;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+        expected = xml_content.replace(
+            '                <if test="organizationId != null">\n'
+            '                    AND organization_id = #{organizationId}\n'
+            '                </if>',
+            '                <if test="organizationId != null">AND organization_id = #{organizationId}</if>',
+        )
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_choose_branches_do_not_extend_join_predicates(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM\n'
+            '            <choose>\n'
+            '                <when test="county">\n'
+            '                    sample_county_item item\n'
+            '                    LEFT JOIN sample_owner owner ON owner.owner_id = item.owner_id\n'
+            '                </when>\n'
+            '                <otherwise>sample_state_item item</otherwise>\n'
+            '            </choose>\n'
             '    </select>\n'
             '</mapper>'
         )

@@ -10,6 +10,7 @@ from mir.rules.sql.named_parameters import NamedParametersRule
 from mir.rules.sql.operator_spacing import OperatorSpacingRule
 from mir.rules.sql.paren_content_indent import ParenContentIndentRule
 from mir.rules.sql.paren_multi import ParenMultiRule
+from mir.rules.sql.paren_same_op import ParenSameOpRule
 from mir.rules.sql.paren_single import ParenSingleRule
 from mir.rules.sql.sql_utils import _tokenize_sql_impl, protected_sql_signature, tokenize_sql
 from mir.rules.sql.statement_semicolon import StatementSemicolonRule
@@ -332,13 +333,38 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
 
+    def test_filter_where_does_not_capture_following_join_conditions(self):
+        source = (
+            "SELECT count(*) FILTER (WHERE sample_item.enabled AND sample_item.visible)\n"
+            "FROM sample_item\n"
+            "LEFT JOIN sample_owner owner ON owner.owner_id = sample_item.owner_id\n"
+            "    AND owner.enabled"
+        )
+
+        fixed = WhereMultiRule().fix(source, "generic.sql", {})
+
+        self.assertIn("FILTER (WHERE sample_item.enabled AND sample_item.visible)", fixed)
+        self.assertIn("\n    AND owner.enabled", fixed)
+
+    def test_homogeneous_filter_predicate_keeps_required_parentheses(self):
+        source = (
+            "SELECT count(*) FILTER (WHERE sample_item.enabled AND sample_item.visible) "
+            "FROM sample_item;"
+        )
+
+        rule = ParenSameOpRule()
+
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+
     def test_between_delimiter_is_not_a_boolean_condition_boundary(self):
         where_source = (
             "SELECT item_id FROM sample_item WHERE recorded_at BETWEEN :start\n"
             "    AND :end AND organization_identifier = :organization_identifier;"
         )
         where_expected = (
-            "SELECT item_id FROM sample_item WHERE\n"
+            "SELECT item_id FROM sample_item\n"
+            "WHERE\n"
             "    recorded_at BETWEEN :start AND :end\n"
             "    AND organization_identifier = :organization_identifier;"
         )

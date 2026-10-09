@@ -1,8 +1,45 @@
+from bisect import bisect_right
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.engine.rules_loader import load_rules_for_language
 from mir.rules.xml.xml_utils import tokenize_xml
 from mir.engine.embedded_bridge import check_embedded_content, fix_embedded_content
+
+
+def mapped_offsets_in_ranges(mapping: List[int], ranges: List[tuple]) -> set[int]:
+    if not ranges:
+        return set()
+    ordered = sorted(ranges)
+    starts = [start for start, _ in ordered]
+    result = set()
+    for index, source_offset in enumerate(mapping):
+        range_index = bisect_right(starts, source_offset) - 1
+        if range_index >= 0 and source_offset < ordered[range_index][1]:
+            result.add(index)
+    return result
+
+
+def mapping_boundary_offsets(
+    mapping: List[int], tag_ranges: List[tuple]
+) -> set[int]:
+    if not tag_ranges:
+        return set()
+    ordered = sorted(tag_ranges)
+    starts = [start for start, _ in ordered]
+    result = set()
+    for index in range(1, len(mapping)):
+        previous = mapping[index - 1]
+        current = mapping[index]
+        if current <= previous + 1:
+            continue
+        range_index = bisect_right(starts, previous) - 1
+        if range_index >= 0 and ordered[range_index][1] > previous:
+            result.add(index)
+            continue
+        next_index = range_index + 1
+        if next_index < len(ordered) and ordered[next_index][0] < current:
+            result.add(index)
+    return result
 
 def parse_xml_elements(tokens: List[dict]) -> List[dict]:
     """Build the XML element tree in one token pass.
@@ -496,6 +533,7 @@ class XmlMybatisSqlRule(BaseRule):
                         ignored_comma_offsets.add(idx)
                         
                 base_indent = get_element_base_indent(el, tokens, content, rule_config)
+                boundary_offsets = mapping_boundary_offsets(mapping, tag_ranges)
                 
                 inner_config = dict(rule_config)
                 if "_lines" in inner_config:
@@ -513,14 +551,10 @@ class XmlMybatisSqlRule(BaseRule):
                         "mybatis_dynamic_offsets": {
                             idx for idx, after_tag in enumerate(is_after_tag) if after_tag
                         },
-                        "mybatis_foreach_offsets": {
-                            idx
-                            for idx, source_offset in enumerate(mapping)
-                            if any(
-                                start <= source_offset < end
-                                for start, end in foreach_ranges
-                            )
-                        },
+                        "mybatis_foreach_offsets": mapped_offsets_in_ranges(
+                            mapping, foreach_ranges
+                        ),
+                        "mybatis_boundary_offsets": boundary_offsets,
                         "base_indent": base_indent,
                         "tag_ranges": tag_ranges,
                         "original_xml": content
@@ -638,6 +672,7 @@ class XmlMybatisSqlRule(BaseRule):
                         ignored_comma_offsets.add(idx)
                         
                 base_indent = get_element_base_indent(el, tokens, content, rule_config)
+                boundary_offsets = mapping_boundary_offsets(mapping, tag_ranges)
                 
                 inner_config = dict(rule_config)
                 if "_lines" in inner_config:
@@ -649,14 +684,10 @@ class XmlMybatisSqlRule(BaseRule):
                     "mybatis_dynamic_offsets": {
                         idx for idx, after_tag in enumerate(is_after_tag) if after_tag
                     },
-                    "mybatis_foreach_offsets": {
-                        idx
-                        for idx, source_offset in enumerate(mapping)
-                        if any(
-                            start <= source_offset < end
-                            for start, end in foreach_ranges
-                        )
-                    },
+                    "mybatis_foreach_offsets": mapped_offsets_in_ranges(
+                        mapping, foreach_ranges
+                    ),
+                    "mybatis_boundary_offsets": boundary_offsets,
                     "mybatis_dynamic_indent_ranges": [
                         item
                         for item in dynamic_indent_ranges

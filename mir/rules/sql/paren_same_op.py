@@ -29,7 +29,8 @@ class ParenSameOpRule(BaseRule):
     additional_validations = [
         "SELECT id FROM users WHERE (active = true AND type = 'admin') OR age > 21;",
         "SELECT id FROM users WHERE active = true AND (type = 'admin' OR age > 21);",
-        "SELECT id FROM users WHERE (active = true);"  # Checked by IR-paren-single, skip here
+        "SELECT id FROM users WHERE (active = true);",  # Checked by IR-paren-single, skip here
+        "SELECT count(*) FILTER (WHERE active AND visible) FROM users;",
     ]
 
     def _find_violations(
@@ -82,7 +83,11 @@ class ParenSameOpRule(BaseRule):
                         is_special = True
                     elif prev_active["type"] == "IDENTIFIER":
                         is_special = True
-                    elif prev_active["type"] == "KEYWORD" and val_upper in ("COUNT", "COALESCE", "SUM", "AVG", "MIN", "MAX", "CONCAT", "SUBSTR", "DATE_PART", "NOW", "STRING_AGG", "DATE"):
+                    elif prev_active["type"] == "KEYWORD" and val_upper in (
+                        "COUNT", "COALESCE", "SUM", "AVG", "MIN", "MAX",
+                        "CONCAT", "SUBSTR", "DATE_PART", "NOW", "STRING_AGG",
+                        "DATE", "FILTER", "ANY", "SOME", "EXISTS", "LATERAL",
+                    ):
                         is_special = True
                         
                 if is_special:

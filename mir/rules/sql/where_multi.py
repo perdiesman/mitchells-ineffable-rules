@@ -71,6 +71,7 @@ class WhereMultiRule(BaseRule):
                 if (
                     "mybatis_dynamic_offsets" in rule_config
                     and isinstance(base_indent, str)
+                    and len(where_indent) < len(base_indent)
                 ):
                     where_indent = base_indent
 
