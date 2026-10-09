@@ -124,6 +124,55 @@ ORDER BY item_id
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
         self.assertEqual(trellis_directive_signature(content), trellis_directive_signature(fixed))
 
+    def test_trellis_conditions_extend_an_inline_where_as_indented_predicates(self):
+        content = (
+            "SELECT item_id\n"
+            "FROM sample_item\n"
+            "WHERE TRUE\n"
+            "-- trellis: if item_ids\n"
+            "    AND item_id IN (\n"
+            "        -- trellis: for item in item_ids separator=\",\"\n"
+            "            :item\n"
+            "        -- trellis: endfor\n"
+            "    )\n"
+            "-- trellis: endif\n"
+            "-- trellis: choose ordering\n"
+            "-- trellis: when \"name\"\n"
+            "ORDER BY item_name\n"
+            "-- trellis: otherwise\n"
+            "ORDER BY item_id\n"
+            "-- trellis: endchoose\n"
+            ";\n"
+        )
+        expected = (
+            "SELECT item_id\n"
+            "FROM sample_item\n"
+            "WHERE\n"
+            "    TRUE\n"
+            "    -- trellis: if item_ids\n"
+            "        AND item_id IN (\n"
+            "            -- trellis: for item in item_ids separator=\",\"\n"
+            "                :item\n"
+            "            -- trellis: endfor\n"
+            "        )\n"
+            "    -- trellis: endif\n"
+            "    -- trellis: choose ordering\n"
+            "        -- trellis: when \"name\"\n"
+            "            ORDER BY item_name\n"
+            "        -- trellis: otherwise\n"
+            "            ORDER BY item_id\n"
+            "    -- trellis: endchoose\n"
+            ";\n"
+        )
+        rule = TrellisIndentRule()
+
+        fixed = rule.fix(content, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
+        self.assertEqual(trellis_directive_signature(content), trellis_directive_signature(fixed))
+
     def test_trellis_indent_does_not_format_named_bind_sql_without_directives(self):
         content = "WHERE item_id IN (\n  :item_id\n)\n"
 
@@ -262,12 +311,12 @@ SELECT audit_id FROM audit_table;
             "            -- trellis: endfor\n"
             "        )\n"
             "    -- trellis: endif\n"
-            "-- trellis: choose order\n"
-            "    -- trellis: when \"name\"\n"
-            "        ORDER BY item_name\n"
-            "    -- trellis: otherwise\n"
-            "        ORDER BY item_id\n"
-            "-- trellis: endchoose\n"
+            "    -- trellis: choose order\n"
+            "        -- trellis: when \"name\"\n"
+            "            ORDER BY item_name\n"
+            "        -- trellis: otherwise\n"
+            "            ORDER BY item_id\n"
+            "    -- trellis: endchoose\n"
         )
         config = Config()
         config.profile = "commit"

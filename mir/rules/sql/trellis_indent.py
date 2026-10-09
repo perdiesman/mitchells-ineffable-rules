@@ -1,3 +1,4 @@
+import re
 from typing import Any, Dict, List
 
 from mir.engine.rule_interface import BaseRule, RuleCase, Violation
@@ -29,6 +30,13 @@ class TrellisIndentRule(BaseRule):
     examples = []
     additional_validations = []
     cases = [
+        RuleCase(
+            "conditional WHERE predicates",
+            "WHERE TRUE\n-- trellis: if enabled\nAND active = TRUE\n-- trellis: endif",
+            "fixed",
+            "WHERE\n    TRUE\n    -- trellis: if enabled\n"
+            "        AND active = TRUE\n    -- trellis: endif",
+        ),
         RuleCase(
             "directive-controlled collection",
             "WHERE\n    item_id IN (\n-- trellis: for item in item_ids separator=\",\"\n"
@@ -110,6 +118,41 @@ class TrellisIndentRule(BaseRule):
     def _deeper_indent(*values: str | None) -> str:
         return max((value for value in values if value is not None), key=len, default="")
 
+    @staticmethod
+    def _inline_where_lines(content: str) -> set[int]:
+        """Find inline WHERE predicates immediately extended by a Trellis condition."""
+        lines = content.splitlines()
+        matches: set[int] = set()
+        for index, line in enumerate(lines):
+            if not re.match(r"^[ \t]*WHERE\s+\S", line, re.IGNORECASE):
+                continue
+            for following_number, following in enumerate(lines[index + 1 :], index + 2):
+                if not following.strip():
+                    continue
+                directive = parse_directive(following, following_number)
+                if directive is not None and directive.keyword == "if":
+                    matches.add(index + 1)
+                break
+        return matches
+
+    @staticmethod
+    def _expand_inline_where(content: str, line_numbers: set[int], indent_size: int) -> str:
+        if not line_numbers:
+            return content
+        lines = content.splitlines()
+        unit = " " * indent_size
+        for line_number in sorted(line_numbers, reverse=True):
+            line = lines[line_number - 1]
+            match = re.match(r"^(?P<indent>[ \t]*)WHERE\s+(?P<predicate>\S.*)$", line, re.IGNORECASE)
+            if match is None:
+                continue
+            lines[line_number - 1 : line_number] = [
+                f"{match.group('indent')}WHERE",
+                f"{match.group('indent')}{unit}{match.group('predicate')}",
+            ]
+        ending = "\r\n" if "\r\n" in content else "\n"
+        return ending.join(lines) + (ending if content.endswith(ending) else "")
+
     def _expected_indents(self, content: str, indent_size: int) -> Dict[int, str]:
         if not has_trellis_directives(content):
             return {}
@@ -128,8 +171,14 @@ class TrellisIndentRule(BaseRule):
         expected: Dict[int, str] = {}
         stack: list[dict[str, str | None]] = []
         unit = " " * indent_size
+        clause_body: str | None = None
         openers = {"if", "for", "choose"}
         closers = {"endif": "if", "endfor": "for", "endchoose": "choose"}
+        clause_boundary = re.compile(
+            r"^(?:SELECT|FROM|JOIN|(?:LEFT|RIGHT|FULL|INNER|CROSS)(?:\s+OUTER)?\s+JOIN|"
+            r"WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT|OFFSET|FETCH|UNION|INTERSECT|EXCEPT)\b",
+            re.IGNORECASE,
+        )
 
         for line_number, line in enumerate(lines, 1):
             if not line.strip():
@@ -138,14 +187,29 @@ class TrellisIndentRule(BaseRule):
             parent_body = stack[-1]["body"] if stack else None
             paren_indent = parenthesis_indents.get(line_number)
             if directive is None:
-                required = self._deeper_indent(parent_body, paren_indent)
+                stripped = line.strip()
+                starts_clause = False
+                if not stack:
+                    leading = line[: len(line) - len(line.lstrip())]
+                    if stripped.upper() == "WHERE":
+                        clause_body = leading + unit
+                        starts_clause = True
+                    elif clause_boundary.match(stripped):
+                        clause_body = None
+                    elif stripped == ";":
+                        clause_body = None
+                required = self._deeper_indent(
+                    parent_body,
+                    paren_indent,
+                    None if starts_clause else clause_body,
+                )
                 if required:
                     expected[line_number] = required
                 continue
 
             keyword = directive.keyword
             if keyword in openers:
-                base = self._deeper_indent(parent_body, paren_indent)
+                base = self._deeper_indent(parent_body, paren_indent, clause_body)
                 if not base:
                     base = directive.indent
                 expected[line_number] = base
@@ -172,6 +236,16 @@ class TrellisIndentRule(BaseRule):
         )
         lines = content.splitlines()
         violations = []
+        for line_number in sorted(self._inline_where_lines(content)):
+            violations.append(
+                Violation(
+                    self.rule_id,
+                    line_number,
+                    "Place a Trellis-controlled WHERE predicate on continuation lines.",
+                    [lines[line_number - 1]],
+                    True,
+                )
+            )
         for line_number, expected in self._expected_indents(content, indent_size).items():
             line = lines[line_number - 1]
             actual = line[: len(line) - len(line.lstrip())]
@@ -196,7 +270,7 @@ class TrellisIndentRule(BaseRule):
             4,
             fallbacks=[(IndentRule, "indent_size")],
         )
-        current = content
+        current = self._expand_inline_where(content, self._inline_where_lines(content), indent_size)
         for _ in range(10):
             expected = self._expected_indents(current, indent_size)
             if not expected:

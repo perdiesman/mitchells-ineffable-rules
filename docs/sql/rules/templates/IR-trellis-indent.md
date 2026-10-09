@@ -13,6 +13,23 @@ Indent Trellis blocks like programming-language control flow and align multiline
   - `indent_size` (Default: `4`): Spaces added inside a multiline parenthesized expression. *Note: Value dynamically inherited from rule [`IR-indent`](../general/IR-indent.md) -> `indent_size` if not configured.*
 
 #### Executable Cases
+##### conditional WHERE predicates — Fixed
+```sql
+WHERE TRUE
+-- trellis: if enabled
+AND active = TRUE
+-- trellis: endif
+```
+
+Expected fixed output:
+```sql
+WHERE
+    TRUE
+    -- trellis: if enabled
+        AND active = TRUE
+    -- trellis: endif
+```
+
 ##### directive-controlled collection — Fixed
 ```sql
 WHERE
