@@ -146,10 +146,19 @@ def check_embedded_content(
 
 def _build_xml_safety_context(
     original_xml: str, tag_ranges: List[Tuple[int, int]]
-) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]]]:
+) -> Tuple[
+    List[Tuple[int, int]],
+    List[Tuple[int, int]],
+    List[Tuple[int, int]],
+]:
     sorted_ranges = sorted(tag_ranges)
     newline_gaps = []
+    tag_indent_ranges = []
     for tag_start, tag_end in sorted_ranges:
+        line_start = original_xml.rfind("\n", 0, tag_start) + 1
+        if not original_xml[line_start:tag_start].strip():
+            tag_indent_ranges.append((line_start, tag_start))
+
         before = tag_start
         while before > 0 and original_xml[before - 1].isspace():
             before -= 1
@@ -162,14 +171,18 @@ def _build_xml_safety_context(
         if "\n" in original_xml[tag_end:after]:
             newline_gaps.append((tag_end, after))
     newline_gaps.sort()
-    return sorted_ranges, newline_gaps
+    return sorted_ranges, newline_gaps, tag_indent_ranges
 
 
 def is_fixed_text_xml_safe(
     original_xml: str,
     tag_ranges: List[Tuple[int, int]],
     edits: List[Tuple[int, int, str]],
-    safety_context: Tuple[List[Tuple[int, int]], List[Tuple[int, int]]] = None,
+    safety_context: Tuple[
+        List[Tuple[int, int]],
+        List[Tuple[int, int]],
+        List[Tuple[int, int]],
+    ] = None,
 ) -> bool:
     """Return whether source-mapped edits leave every XML tag untouched.
 
@@ -190,7 +203,7 @@ def is_fixed_text_xml_safe(
 
     if safety_context is None:
         safety_context = _build_xml_safety_context(original_xml, tag_ranges)
-    sorted_ranges, newline_gaps = safety_context
+    sorted_ranges, newline_gaps, tag_indent_ranges = safety_context
 
     range_index = 0
     for start, end, replacement in sorted_edits:
@@ -207,6 +220,15 @@ def is_fixed_text_xml_safe(
                 return False
         elif start < tag_end and end > tag_start:
             return False
+
+        for indent_start, indent_end in tag_indent_ranges:
+            if indent_start >= end and start != end:
+                break
+            if start == end:
+                if indent_start <= start < indent_end:
+                    return False
+            elif start < indent_end and end > indent_start:
+                return False
 
         for gap_start, gap_end in newline_gaps:
             if gap_start >= end:
@@ -325,35 +347,96 @@ def fix_embedded_content(
             offset += len(line)
         guest_line_offsets.append(offset)
 
-        guest_lines_stripped = [l.rstrip("\r\n") for l in guest_text.splitlines(keepends=True)]
-        fixed_lines_stripped = [l.rstrip("\r\n") for l in fixed_text.splitlines(keepends=True)]
+        guest_lines = guest_text.splitlines(keepends=True)
+        fixed_lines = fixed_text.splitlines(keepends=True)
+        has_dynamic_context = bool(
+            extra_fix_args
+            and extra_fix_args.get("mybatis_dynamic_indent_ranges")
+        )
+        guest_lines_stripped = [
+            line.rstrip("\r\n").lstrip(" \t")
+            if has_dynamic_context
+            else line.rstrip("\r\n")
+            for line in guest_lines
+        ]
+        fixed_lines_stripped = [
+            line.rstrip("\r\n").lstrip(" \t")
+            if has_dynamic_context
+            else line.rstrip("\r\n")
+            for line in fixed_lines
+        ]
 
         sm = difflib.SequenceMatcher(None, guest_lines_stripped, fixed_lines_stripped)
         tag_ranges = extra_fix_args.get("tag_ranges") if extra_fix_args else None
 
         for tag, i1, i2, j1, j2 in sm.get_opcodes():
-            if tag in ("replace", "delete", "insert"):
+            if tag in ("equal", "replace", "delete", "insert"):
                 sub_ops = []
-                if tag == "replace":
+                if tag == "equal":
+                    for old_index, new_index in zip(range(i1, i2), range(j1, j2)):
+                        guest_line = guest_lines[old_index]
+                        fixed_line = fixed_lines[new_index]
+                        guest_indent = len(guest_line) - len(guest_line.lstrip(" \t"))
+                        fixed_indent = len(fixed_line) - len(fixed_line.lstrip(" \t"))
+                        if guest_indent != fixed_indent:
+                            sub_ops.append((
+                                guest_line_offsets[old_index],
+                                guest_line_offsets[old_index] + guest_indent,
+                                fixed_line[:fixed_indent],
+                            ))
+                elif tag == "replace":
                     guest_block_start = guest_line_offsets[i1]
                     guest_block_end = guest_line_offsets[i2]
                     guest_block = guest_text[guest_block_start:guest_block_end]
-                    fixed_block = "".join(fixed_text.splitlines(keepends=True)[j1:j2])
-                    char_matcher = difflib.SequenceMatcher(
-                        None, guest_block, fixed_block, autojunk=False
-                    )
-                    for char_tag, ci1, ci2, cj1, cj2 in char_matcher.get_opcodes():
-                        if char_tag == "equal":
-                            continue
-                        sub_ops.append((
-                            guest_block_start + ci1,
-                            guest_block_start + ci2,
-                            fixed_block[cj1:cj2],
-                        ))
+                    fixed_block = "".join(fixed_lines[j1:j2])
+                    guest_block_lines = guest_block.splitlines(keepends=True)
+                    fixed_block_lines = fixed_block.splitlines(keepends=True)
+                    if (
+                        has_dynamic_context
+                        and len(guest_block_lines) == len(fixed_block_lines)
+                    ):
+                        line_offset = guest_block_start
+                        for guest_line, fixed_line in zip(
+                            guest_block_lines, fixed_block_lines
+                        ):
+                            guest_indent = len(guest_line) - len(guest_line.lstrip(" \t"))
+                            fixed_indent = len(fixed_line) - len(fixed_line.lstrip(" \t"))
+                            if guest_indent != fixed_indent:
+                                sub_ops.append((
+                                    line_offset,
+                                    line_offset + guest_indent,
+                                    fixed_line[:fixed_indent],
+                                ))
+                            guest_body = guest_line[guest_indent:]
+                            fixed_body = fixed_line[fixed_indent:]
+                            char_matcher = difflib.SequenceMatcher(
+                                None, guest_body, fixed_body, autojunk=False
+                            )
+                            for char_tag, ci1, ci2, cj1, cj2 in char_matcher.get_opcodes():
+                                if char_tag == "equal":
+                                    continue
+                                sub_ops.append((
+                                    line_offset + guest_indent + ci1,
+                                    line_offset + guest_indent + ci2,
+                                    fixed_body[cj1:cj2],
+                                ))
+                            line_offset += len(guest_line)
+                    else:
+                        char_matcher = difflib.SequenceMatcher(
+                            None, guest_block, fixed_block, autojunk=False
+                        )
+                        for char_tag, ci1, ci2, cj1, cj2 in char_matcher.get_opcodes():
+                            if char_tag == "equal":
+                                continue
+                            sub_ops.append((
+                                guest_block_start + ci1,
+                                guest_block_start + ci2,
+                                fixed_block[cj1:cj2],
+                            ))
                 else:
                     g_start_char = guest_line_offsets[i1]
                     g_end_char = guest_line_offsets[i2]
-                    replacement = "".join(fixed_text.splitlines(keepends=True)[j1:j2])
+                    replacement = "".join(fixed_lines[j1:j2])
                     sub_ops.append((g_start_char, g_end_char, replacement))
                     
                 block_edits = []
@@ -397,6 +480,31 @@ def fix_embedded_content(
                     if orig_str.strip() == "" and replacement.strip() == "":
                         if all(c in " \t\r\n" for c in orig_str) and all(c in " \t\r\n" for c in replacement):
                             if not (extra_fix_args and "base_indent" in extra_fix_args):
+                                skip = True
+                        if extra_fix_args and "original_xml" in extra_fix_args:
+                            original_xml = extra_fix_args["original_xml"]
+                            xml_line_start = original_xml.rfind("\n", 0, start_orig) + 1
+                            xml_indent_end = xml_line_start
+                            while (
+                                xml_indent_end < len(original_xml)
+                                and original_xml[xml_indent_end] in " \t"
+                            ):
+                                xml_indent_end += 1
+                            is_dynamic_line = any(
+                                range_start < xml_indent_end < range_end
+                                for range_start, range_end, _ in extra_fix_args.get(
+                                    "mybatis_dynamic_indent_ranges", []
+                                )
+                            )
+                            if (
+                                is_dynamic_line
+                                and xml_line_start <= start_orig <= xml_indent_end
+                                and end_orig <= xml_indent_end
+                            ):
+                                # Dynamic XML nesting contributes indentation
+                                # that is invisible in the expanded SQL view.
+                                # XML indentation has already normalized the
+                                # line, so keep its leading whitespace atomic.
                                 skip = True
 
                     candidate_edit = (start_orig, end_orig, replacement)

@@ -206,7 +206,10 @@ class XmlIndentRule(BaseRule):
                             break
                     
                     if query_el is not None:
-                        delta = query_el.get("delta", 0)
+                        # SQL indentation is owned by the embedded SQL rules.
+                        # Moving a query tag must not shift every text line in
+                        # its body and then fight the SQL formatter next pass.
+                        delta = 0
                     else:
                         delta = 0
                         for el in reversed(tag_stack):
@@ -247,19 +250,33 @@ class XmlIndentRule(BaseRule):
                         parent_line = lines[dynamic_parent["token"]["line"] - 1]
                         parent_indent = parent_line[: len(parent_line) - len(parent_line.lstrip(" \t"))]
                     minimum_indent = parent_indent + " " * indent_size
+                    token_line_start = content.rfind("\n", 0, t["start"]) + 1
+                    starts_inline = bool(
+                        content[token_line_start:t["start"]].strip()
+                    )
                     for text_line in range(line, end_line + 1):
                         if text_line < 1 or text_line > len(lines):
                             continue
                         line_text = lines[text_line - 1]
                         if not line_text.strip() or line_text.lstrip().startswith("<"):
                             continue
+                        if text_line == line and starts_inline:
+                            # The dynamic tag starts in an existing SQL line;
+                            # its text must not redefine that whole line's
+                            # indentation.
+                            continue
                         actual_indent = line_text[: len(line_text) - len(line_text.lstrip(" \t"))]
                         first_word = line_text.strip().split(None, 1)[0].upper()
-                        is_dynamic_continuation = (
+                        is_bind_body = line_text.strip().startswith(("#{", "${", ":"))
+                        malformed_boolean_indent = (
                             first_word in {"AND", "OR"}
-                            or line_text.strip().startswith(("#{", "${", ":"))
+                            and len(actual_indent) % indent_size != 0
                         )
-                        if is_dynamic_continuation or len(actual_indent) < len(minimum_indent):
+                        if (
+                            is_bind_body
+                            or malformed_boolean_indent
+                            or len(actual_indent) < len(minimum_indent)
+                        ):
                             explicit_expected_indent[text_line] = minimum_indent
 
             # Track depth transitions

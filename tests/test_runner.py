@@ -806,6 +806,52 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertNotIn("utility_name,", first.content)
         self.assertIn("</choose>, #{runStartTime}", first.content)
 
+    def test_xml_and_sql_indenters_converge_around_dynamic_blocks(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="dynamicCtes">\n'
+            '        WITH base AS (\n'
+            '            SELECT id, enabled, ready\n'
+            '            FROM sample\n'
+            '        ),\n'
+            '        <if test="includeOptional">\n'
+            '            optional AS (\n'
+            '                SELECT id, name <if test="includeGeometry">, geom</if>\n'
+            '                FROM sample\n'
+            '            ),\n'
+            '        </if>\n'
+            '        final AS (\n'
+            '            SELECT\n'
+            '                CASE\n'
+            '                    WHEN enabled\n'
+            '                        AND ready\n'
+            "                        THEN 'ready'\n"
+            "                    ELSE 'waiting'\n"
+            '                END AS status\n'
+            '            FROM base\n'
+            '        )\n'
+            '        SELECT *\n'
+            '        FROM final\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(
+            any("Formatter did not converge" in item for item in first.diagnostics)
+        )
+        self.assertIn(
+            '                SELECT id, name <if test="includeGeometry">, geom</if>',
+            first.content,
+        )
+        self.assertIn("            ),\n        </if>", first.content)
+        self.assertIn("                        AND ready", first.content)
+
     def test_xml_mybatis_sql_line_mapping(self):
         # XML file with a self-comparison on line 5
         xml_content = (

@@ -80,11 +80,26 @@ class TestEmbeddedBridgeSafety(unittest.TestCase):
                 [(edit_start, tag_start, "SELECT item_id ")],
             )
         )
+        sql_line_end = content.index("\n", edit_start)
         self.assertTrue(
             is_fixed_text_xml_safe(
                 content,
                 [(0, len("<select>")), (tag_start, tag_end)],
-                [(edit_start, tag_start, "SELECT item_id\n    ")],
+                [(edit_start, sql_line_end, "SELECT item_id")],
+            )
+        )
+
+    def test_embedded_edit_cannot_reindent_a_standalone_xml_tag(self):
+        content = "<select>\n    SELECT id\n        <if test=\"enabled\">\n"
+        tag_start = content.index("<if")
+        tag_end = content.index(">", tag_start) + 1
+        indent_start = content.rfind("\n", 0, tag_start) + 1
+
+        self.assertFalse(
+            is_fixed_text_xml_safe(
+                content,
+                [(0, len("<select>")), (tag_start, tag_end)],
+                [(indent_start, tag_start, "    ")],
             )
         )
 

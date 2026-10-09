@@ -300,6 +300,33 @@ def get_element_base_indent(el: dict, tokens: List[dict], content: str, rule_con
     return tag_indent + " " * xml_indent_size
 
 
+def get_dynamic_indent_ranges(
+    elements: List[dict], content: str, rule_config: Dict[str, Any]
+) -> List[tuple]:
+    xml_indent_config = rule_config.get("_all_configs", {}).get("IR-xml-indent", {})
+    indent_size = (
+        4
+        if isinstance(xml_indent_config, bool)
+        else xml_indent_config.get("indent_size", 4)
+    )
+    dynamic_tags = {
+        "if", "foreach", "choose", "when", "otherwise", "trim", "where", "set",
+    }
+    ranges = []
+    for element in elements:
+        if element["tag"] not in dynamic_tags:
+            continue
+        line_start = content.rfind("\n", 0, element["start_offset"]) + 1
+        prefix = content[line_start:element["start_offset"]]
+        parent_indent = len(prefix) - len(prefix.lstrip(" \t"))
+        ranges.append((
+            element["start_offset"],
+            element["end_offset"],
+            parent_indent + indent_size,
+        ))
+    return ranges
+
+
 def get_mybatis_protected_signatures(content: str) -> tuple:
     """Describe protected SQL syntax for every embedded MyBatis statement."""
     from mir.rules.sql.sql_utils import protected_sql_signature
@@ -523,6 +550,9 @@ class XmlMybatisSqlRule(BaseRule):
 
         root_elements = parse_xml_elements(tokens)
         elements = get_all_elements_recursively(root_elements)
+        dynamic_indent_ranges = get_dynamic_indent_ranges(
+            elements, content, rule_config
+        )
 
         sql_defs = {}
         for el in elements:
@@ -577,6 +607,11 @@ class XmlMybatisSqlRule(BaseRule):
                     "mybatis_dynamic_offsets": {
                         idx for idx, after_tag in enumerate(is_after_tag) if after_tag
                     },
+                    "mybatis_dynamic_indent_ranges": [
+                        item
+                        for item in dynamic_indent_ranges
+                        if el["start_offset"] < item[0] < item[1] < el["end_offset"]
+                    ],
                     "base_indent": base_indent,
                     "tag_ranges": tag_ranges,
                     "original_xml": content,
