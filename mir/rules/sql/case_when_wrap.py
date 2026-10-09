@@ -41,8 +41,8 @@ class CaseWhenWrapRule(BaseRule):
             ),
             "correct": (
                 "CASE\n"
-                "    WHEN a_very_long_condition_name = :condition_value\n"
-                "        AND another_long_condition_name = :other_value\n"
+                "    WHEN a_very_long_condition_name = :condition_value "
+                "AND another_long_condition_name = :other_value\n"
                 "        THEN calculate_a_very_long_result_name(:result_value)\n"
                 "    ELSE 0\n"
                 "END"
@@ -51,7 +51,7 @@ class CaseWhenWrapRule(BaseRule):
     ]
     additional_validations = [
         "CASE WHEN enabled THEN value ELSE 0 END",
-        "CASE\n    WHEN enabled\n        THEN value\n    ELSE 0\nEND",
+        "CASE\n    WHEN enabled THEN value\n    ELSE 0\nEND",
     ]
 
     def _find_edits(self, content: str, rule_config: Dict[str, Any]) -> List[dict]:
@@ -138,17 +138,12 @@ class CaseWhenWrapRule(BaseRule):
             if then_index is None or tokens[then_index]["value"].upper() != "THEN":
                 continue
             then_token = tokens[then_index]
-            if token["line"] != then_token["line"]:
-                continue
-            line = lines[token["line"] - 1]
-            if source_text_length(line, rule_config) <= max_length:
-                continue
             whitespace = (
                 tokens[then_index - 1]
                 if then_index > 0 and tokens[then_index - 1]["type"] == "WHITESPACE"
                 else None
             )
-            if whitespace is None or "\n" in whitespace["value"]:
+            if whitespace is None:
                 continue
             line_start = content.rfind("\n", 0, token["start"]) + 1
             prefix = content[line_start : token["start"]]
@@ -157,7 +152,51 @@ class CaseWhenWrapRule(BaseRule):
                 prefix[: len(prefix) - len(prefix.lstrip(" \t"))],
             )
             indent = when_indent + "    "
-            condition_line = content[line_start:then_token["start"]].rstrip()
+            condition_text = "".join(
+                " " if item["type"] == "WHITESPACE" else item["value"]
+                for item in tokens[index + 1:then_index]
+            ).strip()
+            next_boundary = next(
+                (
+                    candidate
+                    for candidate in range(then_index + 1, len(tokens))
+                    if depths[candidate] == depths[index]
+                    and tokens[candidate]["type"] == "KEYWORD"
+                    and tokens[candidate]["value"].upper() in {"WHEN", "ELSE", "END"}
+                ),
+                len(tokens),
+            )
+            result_tokens = tokens[then_index + 1:next_boundary]
+            result_text = "".join(
+                " " if item["type"] == "WHITESPACE" else item["value"]
+                for item in result_tokens
+            ).strip()
+            active_result = [
+                position
+                for position, item in enumerate(result_tokens)
+                if item["type"] not in ("WHITESPACE", "COMMENT")
+            ]
+            meaningful_result_tokens = (
+                result_tokens[active_result[0]:active_result[-1] + 1]
+                if active_result
+                else []
+            )
+            result_multiline = any(
+                item["type"] == "WHITESPACE" and "\n" in item["value"]
+                for item in meaningful_result_tokens
+            )
+            candidate_line = (
+                when_indent
+                + "WHEN "
+                + condition_text
+                + " THEN "
+                + result_text
+            )
+            should_wrap_then = (
+                result_multiline
+                or source_text_length(candidate_line, rule_config) > max_length
+            )
+            condition_line = when_indent + "WHEN " + condition_text
             if source_text_length(condition_line, rule_config) > max_length:
                 for boolean_index in find_boolean_operator_indices(
                     tokens,
@@ -185,14 +224,35 @@ class CaseWhenWrapRule(BaseRule):
                                 "replacement": "\n" + indent,
                             }
                         )
-            edits.append(
-                {
-                    "token": then_token,
-                    "start": whitespace["start"],
-                    "end": whitespace["end"],
-                    "replacement": "\n" + indent,
-                }
-            )
+            expected_then_whitespace = "\n" + indent if should_wrap_then else " "
+            if whitespace["value"] != expected_then_whitespace:
+                edits.append(
+                    {
+                        "token": then_token,
+                        "start": whitespace["start"],
+                        "end": whitespace["end"],
+                        "replacement": expected_then_whitespace,
+                    }
+                )
+            if active_result:
+                first_result_index = then_index + 1 + active_result[0]
+                result_whitespace = (
+                    tokens[first_result_index - 1]
+                    if tokens[first_result_index - 1]["type"] == "WHITESPACE"
+                    else None
+                )
+                if (
+                    result_whitespace is not None
+                    and result_whitespace["value"] != " "
+                ):
+                    edits.append(
+                        {
+                            "token": tokens[first_result_index],
+                            "start": result_whitespace["start"],
+                            "end": result_whitespace["end"],
+                            "replacement": " ",
+                        }
+                    )
         return edits
 
     def check(
