@@ -268,13 +268,12 @@ class XmlIndentRule(BaseRule):
                         actual_indent = line_text[: len(line_text) - len(line_text.lstrip(" \t"))]
                         first_word = line_text.strip().split(None, 1)[0].upper()
                         is_bind_body = line_text.strip().startswith(("#{", "${", ":"))
-                        malformed_boolean_indent = (
-                            first_word in {"AND", "OR"}
-                            and len(actual_indent) % indent_size != 0
+                        malformed_dynamic_indent = (
+                            len(actual_indent) % indent_size != 0
                         )
                         if (
                             is_bind_body
-                            or malformed_boolean_indent
+                            or malformed_dynamic_indent
                             or len(actual_indent) < len(minimum_indent)
                         ):
                             explicit_expected_indent[text_line] = minimum_indent

@@ -79,7 +79,11 @@ def get_all_elements_recursively(elements: List[dict]) -> List[dict]:
 
 def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], expanded_chars: List[str], mapping: List[int], is_after_tag: List[bool], state: dict = None):
     if state is None:
-        state = {"last_tag_line": -1, "last_tag_type": None}
+        state = {
+            "last_tag_line": -1,
+            "last_tag_type": None,
+            "dynamic_depth": 0,
+        }
     n_tok = len(inner_tokens)
     i = 0
     while i < n_tok:
@@ -140,7 +144,7 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                 expanded_chars.extend(val)
                 mapping.extend(range(start_offset, start_offset + len_val))
                 
-                after = False
+                after = state.get("dynamic_depth", 0) > 0
                 if state["last_tag_type"] in ("if", "choose", "when", "otherwise", "include", "case"):
                     after = True
                 is_after_tag.extend([after] * len_val)
@@ -173,7 +177,7 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                     expanded_chars.append(dec_char)
                     mapping.append(start_offset + offset_in_val)
                     
-                    after = False
+                    after = state.get("dynamic_depth", 0) > 0
                     if state["last_tag_type"] in ("if", "choose", "when", "otherwise", "include", "case"):
                         char_line = start_line + val[:offset_in_val].count('\n')
                         if char_line <= state["last_tag_line"] + 1:
@@ -189,7 +193,7 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                     expanded_chars.append(char)
                     mapping.append(start_offset + offset_in_val)
                     
-                    after = False
+                    after = state.get("dynamic_depth", 0) > 0
                     if state["last_tag_type"] in ("if", "choose", "when", "otherwise", "include", "case"):
                         char_line = start_line + val[:offset_in_val].count('\n')
                         if char_line <= state["last_tag_line"] + 1:
@@ -264,7 +268,15 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                             mapping.append(tok["start"])
                             is_after_tag.append(False)
                             
+                    dynamic_tags = {
+                        "if", "foreach", "choose", "when", "otherwise",
+                        "trim", "where", "set",
+                    }
+                    if tag_name in dynamic_tags:
+                        state["dynamic_depth"] = state.get("dynamic_depth", 0) + 1
                     expand_tokens(inner_tokens[tag_end_idx + 1 : close_idx], sql_defs, expanded_chars, mapping, is_after_tag, state)
+                    if tag_name in dynamic_tags:
+                        state["dynamic_depth"] -= 1
                     close_end_idx = -1
                     for m in range(close_idx + 1, n_tok):
                         if inner_tokens[m]["type"] == "TAG_END":

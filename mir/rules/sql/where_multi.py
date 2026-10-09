@@ -174,7 +174,10 @@ class WhereMultiRule(BaseRule):
                         if first_cond_idx - 1 >= 0 and tokens[first_cond_idx - 1]["type"] == "WHITESPACE":
                             ws_before = tokens[first_cond_idx - 1]
                             
-                        expected_replacement = "\n" + expected_indent
+                        first_condition_indent = expected_indent
+                        if fc_tok["start"] in mybatis_dynamic_offsets:
+                            first_condition_indent += "    "
+                        expected_replacement = "\n" + first_condition_indent
                         if not ws_before or ws_before["value"] != expected_replacement:
                             violations.append({
                                 "token": fc_tok,

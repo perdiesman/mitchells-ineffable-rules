@@ -876,6 +876,35 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertIn("            ),\n        </if>", first.content)
         self.assertIn("                        AND ready", first.content)
 
+    def test_xml_mybatis_dynamic_where_stays_multiline(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="bounded">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        <if test="start != null">\n'
+            '                                  WHERE recorded_timestamp_for_requested_interval &gt;= #{start} AND recorded_timestamp_for_requested_interval &lt;= #{end}\n'
+            '        </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(second.content, first.content)
+        self.assertIn(
+            "            WHERE\n"
+            "                recorded_timestamp_for_requested_interval &gt;= #{start}\n"
+            "                AND recorded_timestamp_for_requested_interval &lt;= #{end}",
+            first.content,
+        )
+        self.assertFalse(
+            any("Formatter did not converge" in item for item in first.diagnostics)
+        )
+
     def test_xml_mybatis_sql_line_mapping(self):
         # XML file with a self-comparison on line 5
         xml_content = (

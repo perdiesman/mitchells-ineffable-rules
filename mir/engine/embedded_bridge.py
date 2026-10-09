@@ -257,10 +257,15 @@ def fix_embedded_content(
         require_embedded_safe,
     )
     if extra_fix_args and extra_fix_args.get("tag_ranges"):
-        # Comma-style uses source offsets to identify punctuation separated
-        # from the prior SQL token by a dynamic XML tag. Run it before rules
-        # that may change guest-text lengths and invalidate those offsets.
-        guest_rules.sort(key=lambda rule: rule.rule_id != "IR-comma-style")
+        # These rules use source offsets to recognize tokens controlled by
+        # dynamic XML tags. Run them before fixes that can invalidate offsets.
+        offset_sensitive_order = {
+            "IR-comma-style": 0,
+            "IR-where-multi": 1,
+        }
+        guest_rules.sort(
+            key=lambda rule: offset_sensitive_order.get(rule.rule_id, 2)
+        )
     fixed_text = guest_text
     xml_safety_context = None
     if (
