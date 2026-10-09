@@ -263,6 +263,8 @@ def fix_embedded_content(
             "IR-comma-style": 0,
             "IR-where-multi": 1,
             "IR-column-layout": 2,
+            "IR-case-when-wrap": 3,
+            "IR-line-length": 4,
         }
         guest_rules.sort(
             key=lambda rule: (
@@ -270,7 +272,7 @@ def fix_embedded_content(
                 if rule.commit_semantic_rewrite
                 else offset_sensitive_order.get(
                     rule.rule_id,
-                    3 if rule.embedded_dynamic_indent_safe else 4,
+                    5 if rule.embedded_dynamic_indent_safe else 6,
                 )
             )
         )

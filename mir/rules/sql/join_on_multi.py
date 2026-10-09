@@ -93,6 +93,7 @@ class JoinOnMultiRule(BaseRule):
                 if join_tok:
                     join_line_start = content.rfind("\n", 0, join_tok["start"]) + 1
                     join_part = content[join_line_start:tok["start"]]
+                    join_target_multiline = "\n" in join_part
                     join_indent = join_part[:len(join_part) - len(join_part.lstrip())]
                     if "\n" in join_part:
                         last_line = join_part.splitlines()[-1]
@@ -110,6 +111,7 @@ class JoinOnMultiRule(BaseRule):
                         join_prefix_for_on = join_indent + join_text_normalized + " "
                     on_indent = join_indent
                 else:
+                    join_target_multiline = False
                     line_start = content.rfind("\n", 0, tok["start"]) + 1
                     line_prefix = content[line_start:tok["start"]]
                     join_prefix_for_on = line_prefix
@@ -305,7 +307,11 @@ class JoinOnMultiRule(BaseRule):
                             "replacement": " ",
                         })
                 
-                if estimated_line_len <= max_len and not has_dynamic_boolean:
+                if (
+                    estimated_line_len <= max_len
+                    and not has_dynamic_boolean
+                    and not join_target_multiline
+                ):
                     if not any(
                         token["type"] == "COMMENT"
                         for token in tokens[i + 1 : clause_end]

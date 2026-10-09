@@ -16,10 +16,10 @@ class AdditiveWrapRule(BaseRule):
     is_fixable = "yes"
     enabled_by_default = True
 
-    default_config = {"max_line_length": 120}
+    default_config = {"max_line_length": 100}
     config_options = {
         "max_line_length": {
-            "default": 120,
+            "default": 100,
             "description": "Line length threshold for wrapping additive expressions.",
         }
     }
@@ -46,7 +46,7 @@ class AdditiveWrapRule(BaseRule):
         max_length = self.get_config_value(
             rule_config,
             "max_line_length",
-            default_value=120,
+            default_value=100,
         )
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
@@ -86,6 +86,20 @@ class AdditiveWrapRule(BaseRule):
 
             shallowest = min(depth for _, _, depth in candidates)
             candidates = [item for item in candidates if item[2] == shallowest]
+            first_active = next(
+                (
+                    (index, token)
+                    for index, token in enumerate(tokens)
+                    if token["line"] == line_number
+                    and token["type"] not in {"WHITESPACE", "COMMENT"}
+                ),
+                None,
+            )
+            if first_active is not None and depths[first_active[0]] < shallowest:
+                # A function opened on this line owns the wrapping decision.
+                # Its arguments should expand before arithmetic inside one
+                # argument is considered for continuation wrapping.
+                continue
             indent = line[: len(line) - len(line.lstrip(" \t"))] + "    "
             segment_start = line_start
             remaining = candidates

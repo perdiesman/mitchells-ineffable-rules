@@ -104,6 +104,11 @@ class LineLengthRule(BaseRule):
             base_indent_spaces = base_indent_opt
         else:
             base_indent_spaces = 0
+        if "original_xml" in rule_config:
+            # MyBatis review uses the physical XML line width. The mapper's
+            # statement indent is real horizontal space, not a display-only
+            # wrapper that should be discounted.
+            base_indent_spaces = 0
             
         violations = []
         lines = content.splitlines()
@@ -208,15 +213,24 @@ class LineLengthRule(BaseRule):
                                 "name_token": tok
                             })
                             
-            # Filter out nested calls
+            # Prefer the outer call only when it begins on the same overlong
+            # physical line. A short wrapper on an earlier line must not hide
+            # a nested call whose own argument line needs expansion.
             outer_calls = []
             for i, call_a in enumerate(all_calls):
                 is_nested = False
                 for j, call_b in enumerate(all_calls):
                     if i != j:
                         if call_b["start"] <= call_a["start"] and call_a["end"] <= call_b["end"]:
-                            is_nested = True
-                            break
+                            container_line_index = call_b["name_token"]["line"] - 1
+                            container_line = (
+                                lines[container_line_index]
+                                if container_line_index < len(lines)
+                                else ""
+                            )
+                            if len(container_line) > max_length:
+                                is_nested = True
+                                break
                 if not is_nested:
                     outer_calls.append(call_a)
                     

@@ -397,6 +397,25 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(where_rule.check(where_expected, "generic.sql", where_config), [])
         self.assertEqual(join_rule.check(join_expected, "generic.sql", {}), [])
 
+    def test_multiline_join_target_keeps_predicates_on_continuation_lines(self):
+        source = (
+            "SELECT item.item_id\n"
+            "FROM sample_item item\n"
+            "LEFT JOIN sample_owner_at(\n"
+            "        :effective_at\n"
+            "    ) owner ON owner.owner_id = item.owner_id AND owner.enabled"
+        )
+        expected = source.replace(
+            "item.owner_id AND owner.enabled",
+            "item.owner_id\n    AND owner.enabled",
+        )
+
+        rule = JoinOnMultiRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+
     def test_distinct_on_wraps_independently_from_projection_columns(self):
         rule = ColumnLayoutRule()
         compact = (
