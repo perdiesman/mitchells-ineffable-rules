@@ -259,11 +259,43 @@ class LineLengthRule(BaseRule):
         try:
             tokens = tokenize_sql(content)
             lines = content.splitlines()
+            token_depths = get_token_depths(tokens)
+            case_arm_lines = set()
+            active_by_line = {}
+            for token_index, token in enumerate(tokens):
+                if token["type"] not in ("WHITESPACE", "COMMENT"):
+                    active_by_line.setdefault(token["line"], []).append(token_index)
+            for line_number, indices in active_by_line.items():
+                when_depths = {
+                    token_depths[index]
+                    for index in indices
+                    if tokens[index]["type"] == "KEYWORD"
+                    and tokens[index]["value"].upper() == "WHEN"
+                }
+                if any(
+                    tokens[index]["type"] == "KEYWORD"
+                    and tokens[index]["value"].upper() == "THEN"
+                    and token_depths[index] in when_depths
+                    for index in indices
+                ):
+                    case_arm_lines.add(line_number)
             
             # Find all function calls
             all_calls = []
             for i, tok in enumerate(tokens):
                 if tok["type"] in ("IDENTIFIER", "KEYWORD"):
+                    if tok["line"] in case_arm_lines:
+                        continue
+                    if (
+                        tok["type"] == "KEYWORD"
+                        and tok["value"].upper()
+                        not in {
+                            "ANY", "CAST", "COALESCE", "EXTRACT", "FILTER",
+                            "GREATEST", "LEAST", "LEFT", "NULLIF", "RIGHT",
+                            "ROW_NUMBER", "SOME",
+                        }
+                    ):
+                        continue
                     next_act_idx = None
                     for j in range(i + 1, len(tokens)):
                         if tokens[j]["type"] not in ("WHITESPACE", "COMMENT"):

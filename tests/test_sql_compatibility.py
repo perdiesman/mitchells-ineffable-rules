@@ -3,8 +3,10 @@ import unittest
 from mir.rules.sql.additive_wrap import AdditiveWrapRule
 from mir.rules.sql.function_case import FunctionCaseRule
 from mir.rules.sql.from_multi import FromMultiRule
+from mir.rules.sql.expression_split import ExpressionSplitRule
 from mir.rules.sql.clause_alignment import ClauseAlignmentRule
 from mir.rules.sql.case_when_wrap import CaseWhenWrapRule
+from mir.rules.sql.case_layout import CaseLayoutRule
 from mir.rules.sql.column_layout import ColumnLayoutRule
 from mir.rules.sql.comma_style import CommaStyleRule
 from mir.rules.sql.join_on_multi import JoinOnMultiRule
@@ -28,6 +30,62 @@ from mir.rules.sql.where_multi import WhereMultiRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_case_layout_counts_the_trailing_alias_in_the_line_limit(self):
+        source = (
+            "                                    CASE WHEN "
+            "(sum(item_count) IS NULL) THEN false ELSE true END "
+            "AS has_summary_data_flag"
+        )
+        expected = (
+            "                                    CASE\n"
+            "                                        WHEN (sum(item_count) IS NULL) THEN false\n"
+            "                                        ELSE true\n"
+            "                                    END AS has_summary_data_flag"
+        )
+
+        rule = CaseLayoutRule()
+        fixed = rule.fix(
+            source,
+            "generic.xml",
+            {"base_indent": "        ", "original_xml": "<mapper />"},
+        )
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(
+            rule.fix(
+                fixed,
+                "generic.xml",
+                {"base_indent": "        ", "original_xml": "<mapper />"},
+            ),
+            expected,
+        )
+
+    def test_expression_split_defers_single_line_case_arm_layout(self):
+        source = (
+            "                                        CASE WHEN "
+            "(sum(item_count_with_a_long_name) IS NULL) THEN false ELSE true END "
+            "AS has_summary_data"
+        )
+
+        self.assertEqual(ExpressionSplitRule().fix(source, "generic.sql", {}), source)
+
+    def test_line_length_defers_single_line_case_arm_layout(self):
+        source = (
+            "                                        CASE WHEN "
+            "(sum(item_count_with_a_long_name) IS NULL) THEN false ELSE true END "
+            "AS has_summary_data"
+        )
+
+        self.assertEqual(LineLengthRule().fix(source, "generic.sql", {}), source)
+
+    def test_case_function_null_predicate_grouping_is_preserved(self):
+        source = "CASE WHEN (sum(item_count) IS NULL) THEN false ELSE true END"
+
+        rule = ParenSingleRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
     def test_additive_continuations_align_and_join_a_stranded_operand(self):
         source = (
             "    first_value + second_value\n"

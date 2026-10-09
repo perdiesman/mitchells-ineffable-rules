@@ -66,6 +66,22 @@ class ExpressionSplitRule(BaseRule):
             active_tokens = [t for t in line_tokens if t["type"] not in ("WHITESPACE", "COMMENT")]
             if not active_tokens:
                 continue
+            case_when_depths = {
+                depths[get_index(token)]
+                for token in active_tokens
+                if token["type"] == "KEYWORD"
+                and token["value"].upper() == "WHEN"
+            }
+            if any(
+                token["type"] == "KEYWORD"
+                and token["value"].upper() == "THEN"
+                and depths[get_index(token)] in case_when_depths
+                for token in active_tokens
+            ):
+                # CASE layout owns WHEN/THEN arms. Splitting a grouping or
+                # function parenthesis first prevents that rule from choosing
+                # the compact form after surrounding alignment is removed.
+                continue
                 
             is_line_val_multi = False
             for t in active_tokens:

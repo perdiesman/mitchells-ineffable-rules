@@ -84,6 +84,10 @@ class CaseLayoutRule(BaseRule):
             base_indent_spaces = base_indent_opt
         else:
             base_indent_spaces = 0
+        if "original_xml" in rule_config:
+            # MyBatis line limits apply to the physical XML line, matching
+            # IR-line-length rather than discounting the statement indent.
+            base_indent_spaces = 0
             
         for block in blocks:
             start_idx = block["start_idx"]
@@ -109,13 +113,21 @@ class CaseLayoutRule(BaseRule):
                         
             line_start = content.rfind("\n", 0, case_tok["start"]) + 1
             line_prefix = content[line_start:case_tok["start"]]
+            line_end = content.find("\n", end_tok["end"])
+            if line_end == -1:
+                line_end = len(content)
+            line_suffix = content[end_tok["end"]:line_end]
             effective_prefix_len = max(0, len(line_prefix) - base_indent_spaces)
             
             # Simple inline allows exactly one WHEN condition and optional ELSE
             is_simple_inline = (
                 case_tok["line"] == end_tok["line"]
                 and when_count == 1
-                and (effective_prefix_len + len(original_text.strip())) <= 140
+                and (
+                    effective_prefix_len
+                    + len(original_text.strip())
+                    + len(line_suffix)
+                ) <= max_len
             )
             
             if is_simple_inline:

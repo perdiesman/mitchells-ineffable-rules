@@ -43,6 +43,7 @@ class ParenSingleRule(BaseRule):
         "SELECT (covered_count::NUMERIC / total_count) - 1 FROM sample_item;",
         "INSERT INTO sample_item (item_id) VALUES (:item_id) ON CONFLICT (item_id) DO NOTHING;",
         "SELECT item_id FROM sample_item WHERE NOT (enabled AND visible);",
+        "SELECT CASE WHEN (sum(item_count) IS NULL) THEN false ELSE true END FROM sample_item;",
     ]
 
     def _is_simple_atom(self, tokens: List[dict]) -> bool:
@@ -120,6 +121,25 @@ class ParenSingleRule(BaseRule):
                 inner_tokens = tokens[i + 1:close_idx]
                 inner_active = [t for t in inner_tokens if t["type"] != "WHITESPACE"]
                 if not inner_active:
+                    continue
+
+                if (
+                    prev_active is not None
+                    and prev_active["type"] == "KEYWORD"
+                    and prev_active["value"].upper() == "WHEN"
+                    and len(inner_active) >= 5
+                    and inner_active[0]["type"] in {"IDENTIFIER", "KEYWORD"}
+                    and inner_active[1]["type"] == "PAREN"
+                    and inner_active[1]["value"] == "("
+                    and (
+                        [token["value"].upper() for token in inner_active[-2:]]
+                        == ["IS", "NULL"]
+                        or [token["value"].upper() for token in inner_active[-3:]]
+                        == ["IS", "NOT", "NULL"]
+                    )
+                ):
+                    # A function NULL predicate is intentionally grouped as
+                    # the atomic condition of a CASE arm.
                     continue
 
                 next_after_close = None
