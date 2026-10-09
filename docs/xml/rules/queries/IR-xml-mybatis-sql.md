@@ -53,7 +53,8 @@ Format embedded SQL inside MyBatis XML mapper files using SQL rules.
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="my_namespace.MyMapper">
     <select id="selectListByQuery">
-        SELECT id,
+        SELECT
+            id,
             name
         FROM users
         <if test="distinct">
@@ -79,7 +80,8 @@ Format embedded SQL inside MyBatis XML mapper files using SQL rules.
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="my_namespace.MyMapper">
     <select id="selectListByQuery">
-        SELECT id,
+        SELECT
+            id,
             name
         FROM users
         <if test="distinct">

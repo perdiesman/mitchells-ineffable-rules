@@ -748,6 +748,82 @@ class TestRunnerIntegration(unittest.TestCase):
             any("protected MyBatis SQL syntax changed" in item for item in result.diagnostics)
         )
 
+    def test_xml_mybatis_repeated_static_select_lists_use_column_layout(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="first">\n'
+            '        SELECT\n'
+            '            first_identifier,\n'
+            '            second_identifier,\n'
+            '            third_identifier,\n'
+            '            fourth_identifier,\n'
+            '            fifth_identifier,\n'
+            '            sixth_identifier,\n'
+            '            seventh_identifier\n'
+            '        FROM sample_items_for_period(\n'
+            '                #{period}\n'
+            '            ) AS sample_item\n'
+            '    </select>\n'
+            '    <select id="second">\n'
+            '        SELECT\n'
+            '        first_identifier,\n'
+            '        second_identifier,\n'
+            '        third_identifier,\n'
+            '        fourth_identifier,\n'
+            '        fifth_identifier,\n'
+            '        sixth_identifier,\n'
+            '        seventh_identifier\n'
+            '        FROM sample_items_for_period(\n'
+            '                #{period}\n'
+            '            ) AS sample_item\n'
+            '        <if test="activeOnly">\n'
+            '            WHERE active = TRUE\n'
+            '        </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '        first_identifier,\n'
+            '        second_identifier,\n'
+            '        third_identifier,\n'
+            '        fourth_identifier,\n'
+            '        fifth_identifier,\n'
+            '        sixth_identifier,\n'
+            '        seventh_identifier\n',
+            '            first_identifier,\n'
+            '            second_identifier,\n'
+            '            third_identifier,\n'
+            '            fourth_identifier,\n'
+            '            fifth_identifier,\n'
+            '            sixth_identifier,\n'
+            '            seventh_identifier\n',
+        ).replace(
+            '        FROM sample_items_for_period(\n'
+            '                #{period}\n'
+            '            ) AS sample_item',
+            '        FROM sample_items_for_period(\n'
+            '            #{period}\n'
+            '        ) AS sample_item',
+        ).replace(
+            '        <if test="activeOnly">\n'
+            '            WHERE active = TRUE\n'
+            '        </if>',
+            '        <if test="activeOnly">WHERE active = TRUE</if>',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertEqual(
+            get_mybatis_protected_signatures(first.content),
+            get_mybatis_protected_signatures(xml_content),
+        )
+
     def test_xml_mybatis_formats_text_beside_inline_tags(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

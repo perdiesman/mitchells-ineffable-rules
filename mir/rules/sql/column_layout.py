@@ -1,4 +1,5 @@
 import re
+from bisect import bisect_left
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.line_length import LineLengthRule
@@ -18,6 +19,7 @@ def _normalize_inline_expression(expression: str) -> str:
 
 class ColumnLayoutRule(BaseRule):
     commit_profile = True
+    embedded_safe = True
     trellis_safe = True
     rule_id = "IR-column-layout"
     description = "On select, order by, group by, if all the columns fit on one line then put them on one line, otherwise wrap one per line."
@@ -513,6 +515,13 @@ class ColumnLayoutRule(BaseRule):
                 rebuilt.append(new_indent + " " * relative_indent + stripped)
         return "\n".join(rebuilt)
 
+    @staticmethod
+    def _crosses_dynamic_content(clause: dict, dynamic_offsets: List[int]) -> bool:
+        if not dynamic_offsets:
+            return False
+        index = bisect_left(dynamic_offsets, clause["keyword_start"])
+        return index < len(dynamic_offsets) and dynamic_offsets[index] < clause["list_end"]
+
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         max_length = self.get_config_value(
             rule_config,
@@ -544,7 +553,13 @@ class ColumnLayoutRule(BaseRule):
         clauses = self._parse_clauses(content)
         lines = content.splitlines()
         
-        top_level_clauses = [cl for cl in clauses if not cl.get("is_nested", False)]
+        dynamic_offsets = sorted(rule_config.get("mybatis_dynamic_offsets", set()))
+        top_level_clauses = [
+            cl
+            for cl in clauses
+            if not cl.get("is_nested", False)
+            and not self._crosses_dynamic_content(cl, dynamic_offsets)
+        ]
         for cl in top_level_clauses:
             keyword = cl["keyword"]
             expressions = cl["expressions"]
@@ -562,6 +577,32 @@ class ColumnLayoutRule(BaseRule):
             total_len = effective_indent_len + len(single_line_clause)
             
             current_clause_text = content[cl["keyword_start"]:cl["list_end"]]
+
+            if "mybatis_dynamic_offsets" in rule_config:
+                if "\n" not in current_clause_text:
+                    continue
+                inner_indent = indentation + (" " * indent_size)
+                formatted_exprs = [
+                    self._reindent_multiline(expr, inner_indent, orig_indent)
+                    if "\n" in expr
+                    else f"{inner_indent}{expr}"
+                    for expr, orig_indent in zip(
+                        expressions,
+                        cl.get("expression_indents", [""] * len(expressions)),
+                    )
+                ]
+                expected = f"{prefix}\n" + ",\n".join(formatted_exprs)
+                if current_clause_text.replace("\r\n", "\n") != expected.replace("\r\n", "\n"):
+                    violations.append(
+                        Violation(
+                            rule_id=self.rule_id,
+                            line_number=cl["line_number"],
+                            message=f"Align the multiline {keyword} clause one indentation level below its keyword.",
+                            offending_lines=[lines[cl["line_number"] - 1] if cl["line_number"] - 1 < len(lines) else ""],
+                            is_fixable=True,
+                        )
+                    )
+                continue
             
             if total_len <= max_length:
                 # Expect single-line format
@@ -633,7 +674,13 @@ class ColumnLayoutRule(BaseRule):
             base_indent_spaces = 0
             
         clauses = self._parse_clauses(content)
-        top_level_clauses = [cl for cl in clauses if not cl.get("is_nested", False)]
+        dynamic_offsets = sorted(rule_config.get("mybatis_dynamic_offsets", set()))
+        top_level_clauses = [
+            cl
+            for cl in clauses
+            if not cl.get("is_nested", False)
+            and not self._crosses_dynamic_content(cl, dynamic_offsets)
+        ]
         if not top_level_clauses:
             return content
             
@@ -649,12 +696,19 @@ class ColumnLayoutRule(BaseRule):
             
             if not expressions:
                 continue
+
+            current_clause_text = content[cl["keyword_start"]:cl["list_end"]]
+            embedded_reindent_only = "mybatis_dynamic_offsets" in rule_config
+            if embedded_reindent_only and "\n" not in current_clause_text:
+                fixed_chunks.append(content[last_idx:cl["list_end"]])
+                last_idx = cl["list_end"]
+                continue
                 
             # Recursively format nested expressions (subqueries) first
             recursively_formatted_expressions = []
             recursively_formatted_indices = set()
             for idx, (expr, orig_indent) in enumerate(zip(expressions, cl.get("expression_indents", [""] * len(expressions)))):
-                if any(k in expr.lower() for k in ("select", "group by", "order by")):
+                if not embedded_reindent_only and any(k in expr.lower() for k in ("select", "group by", "order by")):
                     normalized_expr = self._reindent_multiline(expr, "", orig_indent)
                     recursively_formatted_expressions.append(self.fix(normalized_expr, file_path, rule_config))
                     recursively_formatted_indices.add(idx)
@@ -669,7 +723,11 @@ class ColumnLayoutRule(BaseRule):
             effective_indent_len = max(0, len(indentation) - base_indent_spaces)
             total_len = effective_indent_len + len(single_line_clause)
             
-            if total_len <= max_length and not any("\n" in expr for expr in expressions):
+            if (
+                not embedded_reindent_only
+                and total_len <= max_length
+                and not any("\n" in expr for expr in expressions)
+            ):
                 formatted = single_line_clause
             else:
                 inner_indent = indentation + (" " * indent_size)

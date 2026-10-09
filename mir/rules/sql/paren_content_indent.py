@@ -1,6 +1,7 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren, get_token_depths, is_values_multi
+from mir.rules.sql.table_function_indent import table_function_parens
 
 class ParenContentIndentRule(BaseRule):
     rule_id = "IR-paren-content-indent"
@@ -42,8 +43,11 @@ class ParenContentIndentRule(BaseRule):
         
         # Find all multiline parentheses that are NOT subqueries
         multiline_parens = []
+        table_function_openings = table_function_parens(tokens)
         for i, tok in enumerate(tokens):
             if tok["type"] == "PAREN" and tok["value"] == "(":
+                if i in table_function_openings:
+                    continue
                 next_active = None
                 for idx in range(i + 1, n):
                     if tokens[idx]["type"] == "WHITESPACE":

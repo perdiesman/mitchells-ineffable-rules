@@ -6,7 +6,7 @@ On select, order by, group by, if all the columns fit on one line then put them 
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
 - **Commit Profile**: Yes
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: Yes
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
