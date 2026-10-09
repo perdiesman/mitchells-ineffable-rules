@@ -78,6 +78,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-union-layout`](rules/queries/IR-union-layout.md) | Enforce that set operators (UNION, UNION ALL, INTERSECT, EXCEPT) are on their own line, aligned with the query block. | Yes | [View Details](rules/queries/IR-union-layout.md) |
 | [`IR-where-multi`](rules/queries/IR-where-multi.md) | Keep a multi-condition WHERE clause inline when it fits; otherwise put each condition on its own indented line. | Yes | [View Details](rules/queries/IR-where-multi.md) |
 | [`IR-where-single`](rules/queries/IR-where-single.md) | Keep a single WHERE condition inline when it fits; otherwise place the condition on the next indented line. | Yes | [View Details](rules/queries/IR-where-single.md) |
+| [`IR-window-layout`](rules/queries/IR-window-layout.md) | Multiline window expressions should indent OVER clauses, place each PARTITION BY field on its own line, and align wrapper arguments. | Yes | [View Details](rules/queries/IR-window-layout.md) |
 
 ## Schema Definition Rules
 

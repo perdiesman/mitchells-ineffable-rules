@@ -41,9 +41,9 @@ class CaseWhenWrapRule(BaseRule):
             ),
             "correct": (
                 "CASE\n"
-                "                WHEN a_very_long_condition_name = :condition_value\n"
-                "                    AND another_long_condition_name = :other_value\n"
-                "                    THEN calculate_a_very_long_result_name(:result_value)\n"
+                "    WHEN a_very_long_condition_name = :condition_value\n"
+                "        AND another_long_condition_name = :other_value\n"
+                "        THEN calculate_a_very_long_result_name(:result_value)\n"
                 "    ELSE 0\n"
                 "END"
             ),
@@ -64,6 +64,64 @@ class CaseWhenWrapRule(BaseRule):
         depths = get_token_depths(tokens)
         lines = content.splitlines()
         edits = []
+        case_inner_indents: Dict[int, str] = {}
+
+        case_stack = []
+        case_blocks = []
+        for token_index, current in enumerate(tokens):
+            if current["type"] != "KEYWORD":
+                continue
+            value = current["value"].upper()
+            if value == "CASE":
+                case_stack.append(token_index)
+            elif value == "END" and case_stack:
+                case_blocks.append((case_stack.pop(), token_index))
+
+        for case_index, end_index in case_blocks:
+            case_token = tokens[case_index]
+            end_token = tokens[end_index]
+            if case_token["line"] == end_token["line"]:
+                continue
+            case_line = lines[case_token["line"] - 1]
+            case_indent = case_line[: len(case_line) - len(case_line.lstrip(" \t"))]
+            inner_indent = case_indent + "    "
+            nested_depth = 0
+            for token_index in range(case_index + 1, end_index + 1):
+                current = tokens[token_index]
+                if current["type"] != "KEYWORD":
+                    continue
+                value = current["value"].upper()
+                if value == "CASE":
+                    nested_depth += 1
+                    continue
+                if value == "END" and nested_depth:
+                    nested_depth -= 1
+                    continue
+                if nested_depth or value not in {"WHEN", "ELSE", "END"}:
+                    continue
+                if value == "WHEN":
+                    case_inner_indents[token_index] = inner_indent
+                whitespace = (
+                    tokens[token_index - 1]
+                    if token_index > 0
+                    and tokens[token_index - 1]["type"] == "WHITESPACE"
+                    else None
+                )
+                replacement = "\n" + (
+                    case_indent if value == "END" else inner_indent
+                )
+                start = whitespace["start"] if whitespace else current["start"]
+                end = whitespace["end"] if whitespace else current["start"]
+                if content[start:end] != replacement:
+                    edits.append(
+                        {
+                            "token": current,
+                            "start": start,
+                            "end": end,
+                            "replacement": replacement,
+                        }
+                    )
+
         for index, token in enumerate(tokens):
             if token["type"] != "KEYWORD" or token["value"].upper() != "WHEN":
                 continue
@@ -94,7 +152,11 @@ class CaseWhenWrapRule(BaseRule):
                 continue
             line_start = content.rfind("\n", 0, token["start"]) + 1
             prefix = content[line_start : token["start"]]
-            indent = prefix[: len(prefix) - len(prefix.lstrip(" \t"))] + "    "
+            when_indent = case_inner_indents.get(
+                index,
+                prefix[: len(prefix) - len(prefix.lstrip(" \t"))],
+            )
+            indent = when_indent + "    "
             condition_line = content[line_start:then_token["start"]].rstrip()
             if source_text_length(condition_line, rule_config) > max_length:
                 for boolean_index in find_boolean_operator_indices(

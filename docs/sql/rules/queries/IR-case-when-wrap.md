@@ -23,9 +23,9 @@ END
 ####  Correct Example
 ```sql
 CASE
-                WHEN a_very_long_condition_name = :condition_value
-                    AND another_long_condition_name = :other_value
-                    THEN calculate_a_very_long_result_name(:result_value)
+    WHEN a_very_long_condition_name = :condition_value
+        AND another_long_condition_name = :other_value
+        THEN calculate_a_very_long_result_name(:result_value)
     ELSE 0
 END
 ```

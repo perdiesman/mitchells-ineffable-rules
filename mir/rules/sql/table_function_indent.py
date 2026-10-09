@@ -88,7 +88,27 @@ class TableFunctionIndentRule(BaseRule):
             opening_line = lines[opening["line"] - 1]
             opening_indent = opening_line[: len(opening_line) - len(opening_line.lstrip())]
             continuation_indent = opening_indent + (unit if source_keyword == "JOIN" else "")
-            ranges.append((open_index, opening, closing, continuation_indent))
+            case_adjustments: Dict[int, int] = {}
+            case_depth = 0
+            seen_lines = set()
+            for token_index in range(open_index + 1, close_index):
+                token = tokens[token_index]
+                if token["type"] in {"WHITESPACE", "COMMENT"}:
+                    continue
+                value = token["value"].upper()
+                if token["line"] not in seen_lines:
+                    adjustment = case_depth
+                    if token["type"] == "KEYWORD" and value == "END":
+                        adjustment = max(0, adjustment - 1)
+                    case_adjustments[token["line"]] = adjustment
+                    seen_lines.add(token["line"])
+                if token["type"] == "KEYWORD" and value == "CASE":
+                    case_depth += 1
+                elif token["type"] == "KEYWORD" and value == "END":
+                    case_depth = max(0, case_depth - 1)
+            ranges.append(
+                (open_index, opening, closing, continuation_indent, case_adjustments)
+            )
 
         expected: Dict[int, str] = {}
         for line_number, line in enumerate(lines, 1):
@@ -99,11 +119,15 @@ class TableFunctionIndentRule(BaseRule):
             ]
             if not active or not line.strip():
                 continue
-            _, _, closing, continuation_indent = max(active, key=lambda item: item[0])
+            _, _, closing, continuation_indent, case_adjustments = max(
+                active, key=lambda item: item[0]
+            )
             expected[line_number] = (
                 continuation_indent
                 if line_number == closing["line"] and line.lstrip().startswith(")")
-                else continuation_indent + unit
+                else continuation_indent
+                + unit
+                + unit * case_adjustments.get(line_number, 0)
             )
         return expected
 

@@ -20,12 +20,39 @@ from mir.rules.sql.parenthesized_expression_wrap import ParenthesizedExpressionW
 from mir.rules.sql.sql_utils import _tokenize_sql_impl, protected_sql_signature, tokenize_sql
 from mir.rules.sql.statement_semicolon import StatementSemicolonRule
 from mir.rules.sql.subquery_indent import SubqueryIndentRule
+from mir.rules.sql.table_function_indent import TableFunctionIndentRule
 from mir.rules.sql.trailing_semicolon import TrailingSemicolonRule
 from mir.rules.sql.unresolved_alias import UnresolvedAliasRule
 from mir.rules.sql.where_multi import WhereMultiRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_table_function_preserves_case_nesting(self):
+        source = (
+            "FROM generate_series(\n"
+            "    :start_time,\n"
+            "    CASE\n"
+            "    WHEN :hours > 0 THEN :hours\n"
+            "    ELSE 1\n"
+            "    END\n"
+            ") AS generated_time"
+        )
+        expected = (
+            "FROM generate_series(\n"
+            "    :start_time,\n"
+            "    CASE\n"
+            "        WHEN :hours > 0 THEN :hours\n"
+            "        ELSE 1\n"
+            "    END\n"
+            ") AS generated_time"
+        )
+
+        rule = TableFunctionIndentRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+
     def test_explicit_window_order_direction_is_preserved(self):
         source = (
             "SELECT lag(item_count) OVER (PARTITION BY item_type "
@@ -136,6 +163,26 @@ class TestSqlCompatibility(unittest.TestCase):
         )
 
         self.assertEqual(CaseWhenWrapRule().fix(source, "generic.sql", {}), expected)
+
+    def test_multiline_case_keywords_follow_the_case_indent(self):
+        source = (
+            "        CASE\n"
+            "        WHEN interval_hours > 0 THEN interval_hours\n"
+            "        ELSE 1\n"
+            "        END"
+        )
+        expected = (
+            "        CASE\n"
+            "            WHEN interval_hours > 0 THEN interval_hours\n"
+            "            ELSE 1\n"
+            "        END"
+        )
+
+        rule = CaseWhenWrapRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
 
     def test_line_length_expands_the_last_call_in_a_filter_expression(self):
         source = (

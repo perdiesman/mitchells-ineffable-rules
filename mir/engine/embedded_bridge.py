@@ -264,6 +264,7 @@ def fix_embedded_content(
             "IR-where-multi": 1,
             "IR-column-layout": 2,
             "IR-case-when-wrap": 3,
+            "IR-window-layout": 4,
             "IR-parenthesized-expression-wrap": 4,
             "IR-line-length": 5,
         }
