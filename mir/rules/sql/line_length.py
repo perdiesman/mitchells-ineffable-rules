@@ -124,9 +124,65 @@ class LineLengthRule(BaseRule):
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
         max_length = rule_config.get("max_length", self.default_config["max_length"])
+
+        # Prefer a semantic range boundary over splitting the function calls
+        # used as BETWEEN bounds. Only take the break when both resulting
+        # physical lines fit the configured limit.
+        from mir.rules.sql.sql_utils import (
+            find_between_delimiter_indices,
+            get_token_depths,
+            tokenize_sql,
+        )
+        range_tokens = tokenize_sql(content)
+        range_depths = get_token_depths(range_tokens)
+        range_edits = []
+        content_lines = content.splitlines()
+        delimiter_indices = sorted({
+            index
+            for depth in set(range_depths)
+            for index in find_between_delimiter_indices(
+                range_tokens, range_depths, depth
+            )
+        })
+        for delimiter_index in delimiter_indices:
+            delimiter = range_tokens[delimiter_index]
+            line_index = delimiter["line"] - 1
+            if line_index >= len(content_lines):
+                continue
+            line = content_lines[line_index]
+            if len(line) <= max_length:
+                continue
+            whitespace = (
+                range_tokens[delimiter_index - 1]
+                if delimiter_index > 0
+                and range_tokens[delimiter_index - 1]["type"] == "WHITESPACE"
+                else None
+            )
+            if whitespace is None or "\n" in whitespace["value"]:
+                continue
+            line_start = content.rfind("\n", 0, delimiter["start"]) + 1
+            line_end = content.find("\n", delimiter["start"])
+            if line_end == -1:
+                line_end = len(content)
+            indent = line[: len(line) - len(line.lstrip())]
+            first_line = content[line_start:whitespace["start"]].rstrip()
+            second_line = indent + "    " + content[delimiter["start"]:line_end].lstrip()
+            if len(first_line) <= max_length and len(second_line) <= max_length:
+                range_edits.append(
+                    (
+                        whitespace["start"],
+                        whitespace["end"],
+                        "\n" + indent + "    ",
+                    )
+                )
+        if range_edits:
+            chars = list(content)
+            for start, end, replacement in sorted(range_edits, reverse=True):
+                chars[start:end] = list(replacement)
+            content = "".join(chars)
         
         # 1. Run function call splitting on SQL code lines
-        from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren
+        from mir.rules.sql.sql_utils import find_matching_paren
         try:
             tokens = tokenize_sql(content)
             lines = content.splitlines()

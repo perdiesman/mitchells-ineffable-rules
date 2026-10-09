@@ -107,6 +107,13 @@ class WhereMultiRule(BaseRule):
                     for index in boolean_indices
                     if tokens[index]["start"] in mybatis_dynamic_offsets
                 }
+                from mir.rules.sql.line_length import LineLengthRule
+                max_len = self.get_config_value(
+                    rule_config,
+                    "max_line_length",
+                    100,
+                    fallbacks=[(LineLengthRule, "max_length")],
+                )
                 for delimiter_idx in find_between_delimiter_indices(
                     tokens, depths, outer_depth, i + 1, clause_end
                 ):
@@ -118,12 +125,29 @@ class WhereMultiRule(BaseRule):
                         if delimiter_idx and tokens[delimiter_idx - 1]["type"] == "WHITESPACE"
                         else None
                     )
-                    if not ws_before or ws_before["value"] != " ":
+                    condition_start = max(
+                        (index + 1 for index in boolean_indices if index < delimiter_idx),
+                        default=i + 1,
+                    )
+                    condition_end = min(
+                        (index for index in boolean_indices if index > delimiter_idx),
+                        default=clause_end,
+                    )
+                    condition_single = "".join(
+                        " " if token["type"] == "WHITESPACE" else token["value"]
+                        for token in tokens[condition_start:condition_end]
+                    ).strip()
+                    expected_delimiter_ws = (
+                        " "
+                        if len(expected_indent) + len(condition_single) <= max_len
+                        else "\n" + expected_indent + "    "
+                    )
+                    if not ws_before or ws_before["value"] != expected_delimiter_ws:
                         violations.append({
                             "token": delimiter,
                             "ws_start": ws_before["start"] if ws_before else delimiter["start"],
                             "ws_end": delimiter["start"],
-                            "replacement": " ",
+                            "replacement": expected_delimiter_ws,
                         })
                 has_multi = bool(boolean_indices)
                         
@@ -134,9 +158,6 @@ class WhereMultiRule(BaseRule):
                         for t in where_clause_tokens
                     )
                     estimated_line_len = len(where_indent) + len(where_clause_single)
-                    
-                    from mir.rules.sql.line_length import LineLengthRule
-                    max_len = self.get_config_value(rule_config, "max_line_length", 100, fallbacks=[(LineLengthRule, "max_length")])
                     
                     if estimated_line_len <= max_len and not dynamic_boolean_indices:
                         # A short predicate has one canonical compact form. Only

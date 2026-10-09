@@ -73,7 +73,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-table-function-indent`](rules/queries/IR-table-function-indent.md) | Indent multiline table-function arguments as table continuations, with joined functions nested beneath the JOIN. | Yes | [View Details](rules/queries/IR-table-function-indent.md) |
 | [`IR-union-layout`](rules/queries/IR-union-layout.md) | Enforce that set operators (UNION, UNION ALL, INTERSECT, EXCEPT) are on their own line, aligned with the query block. | Yes | [View Details](rules/queries/IR-union-layout.md) |
 | [`IR-where-multi`](rules/queries/IR-where-multi.md) | Keep a multi-condition WHERE clause inline when it fits; otherwise put each condition on its own indented line. | Yes | [View Details](rules/queries/IR-where-multi.md) |
-| [`IR-where-single`](rules/queries/IR-where-single.md) | Single WHERE condition should be on the same line as the WHERE keyword. | Yes | [View Details](rules/queries/IR-where-single.md) |
+| [`IR-where-single`](rules/queries/IR-where-single.md) | Keep a single WHERE condition inline when it fits; otherwise place the condition on the next indented line. | Yes | [View Details](rules/queries/IR-where-single.md) |
 
 ## Schema Definition Rules
 
