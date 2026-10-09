@@ -910,6 +910,38 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertIn("includeHidden == true", first.content)
         self.assertIn("SELECT enabled = TRUE AS enabled_flag", first.content)
 
+    def test_xml_mybatis_commit_profile_removes_statement_boundary_blank_lines(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '\n'
+            '        SELECT item_id\n'
+            '\n'
+            '\n'
+            '        FROM sample_item\n'
+            '\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+
     def test_xml_mybatis_formats_text_beside_inline_tags(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
