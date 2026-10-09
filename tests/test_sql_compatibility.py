@@ -24,6 +24,42 @@ from mir.rules.sql.where_multi import WhereMultiRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_short_where_compacts_independently_of_the_previous_from_line(self):
+        source = (
+            "FROM outage_data.materialized_zip_additional_information\n"
+            "WHERE\n"
+            "    :states = 'All'\n"
+            "    OR state_abbreviation = ANY(:states)"
+        )
+        expected = (
+            "FROM outage_data.materialized_zip_additional_information\n"
+            "WHERE :states = 'All' OR state_abbreviation = ANY(:states)"
+        )
+
+        rule = WhereMultiRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+
+    def test_medium_where_wraps_after_a_long_from_line(self):
+        source = (
+            "FROM notification.vw_additional_timeslider_events\n"
+            "WHERE timeslider_event_type = :type AND timeslider_event_created_at "
+            "BETWEEN :start_date AND :end_date"
+        )
+        expected = (
+            "FROM notification.vw_additional_timeslider_events\n"
+            "WHERE\n"
+            "    timeslider_event_type = :type\n"
+            "    AND timeslider_event_created_at BETWEEN :start_date AND :end_date"
+        )
+
+        rule = WhereMultiRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+
     def test_case_arm_stays_inline_within_its_line_length_limit(self):
         source = (
             "                        WHEN u.active AND coalesce(su.active, true) "
@@ -104,6 +140,36 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.check(fixed, "generic.sql", {"max_line_length": 100}), [])
+
+    def test_long_join_between_wraps_only_the_range_delimiter(self):
+        source = (
+            "    JOIN sample_override override ON override.item_id = item.id\n"
+            "        AND override.recorded_at BETWEEN :long_interval_start_value "
+            "AND :long_interval_end_value"
+        )
+        expected = (
+            "    JOIN sample_override override ON override.item_id = item.id\n"
+            "        AND override.recorded_at BETWEEN :long_interval_start_value\n"
+            "            AND :long_interval_end_value"
+        )
+
+        rule = JoinOnMultiRule()
+        fixed = rule.fix(source, "generic.sql", {"max_line_length": 80})
+
+        self.assertEqual(fixed, expected)
+
+    def test_line_length_compacts_a_simple_call_when_expression_fits(self):
+        source = (
+            "    (sum(\n"
+            "        outage_count\n"
+            "    ) * county_percent)::INTEGER AS override_count"
+        )
+        expected = "    (sum(outage_count) * county_percent)::INTEGER AS override_count"
+
+        self.assertEqual(
+            LineLengthRule().fix(source, "generic.sql", {"max_length": 100}),
+            expected,
+        )
 
     def test_comma_style_removes_space_before_trailing_comma(self):
         source = "SELECT coalesce(item_count::NUMERIC , 0::NUMERIC) FROM sample_item;"

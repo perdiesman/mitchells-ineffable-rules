@@ -176,8 +176,13 @@ class WhereMultiRule(BaseRule):
                         previous_line = content[
                             previous_line_start:previous_line_end
                         ].rstrip()
-                        if previous_line.lstrip().upper().startswith(
-                            ("DELETE ", "FROM ")
+                        previous_upper = previous_line.lstrip().upper()
+                        if (
+                            previous_upper.startswith("DELETE ")
+                            or (
+                                previous_upper.startswith("FROM ")
+                                and estimated_line_len > min(max_len, 100)
+                            )
                         ):
                             estimated_line_len = max(
                                 estimated_line_len,
@@ -186,7 +191,6 @@ class WhereMultiRule(BaseRule):
                                     rule_config,
                                 ),
                             )
-                    
                     if estimated_line_len <= max_len and not dynamic_boolean_indices:
                         # A short predicate has one canonical compact form. Only
                         # edit whitespace tokens so strings and parameters stay

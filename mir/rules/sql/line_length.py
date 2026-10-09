@@ -130,13 +130,82 @@ class LineLengthRule(BaseRule):
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
         max_length = rule_config.get("max_length", self.default_config["max_length"])
 
+        # Collapse a simple one-argument call when its surrounding expression
+        # fits after compaction. This also repairs calls expanded during an
+        # earlier pass before their enclosing SELECT layout had stabilized.
+        from mir.rules.sql.sql_utils import find_matching_paren, tokenize_sql
+        from mir.rules.sql.table_function_indent import table_function_parens
+        compact_tokens = tokenize_sql(content)
+        table_function_openings = table_function_parens(compact_tokens)
+        compact_edits = []
+        for index, token in enumerate(compact_tokens):
+            if token["type"] not in ("IDENTIFIER", "KEYWORD"):
+                continue
+            open_index = next(
+                (
+                    candidate
+                    for candidate in range(index + 1, len(compact_tokens))
+                    if compact_tokens[candidate]["type"]
+                    not in ("WHITESPACE", "COMMENT")
+                ),
+                None,
+            )
+            if (
+                open_index is None
+                or open_index in table_function_openings
+                or compact_tokens[open_index]["type"] != "PAREN"
+                or compact_tokens[open_index]["value"] != "("
+            ):
+                continue
+            close_index = find_matching_paren(compact_tokens, open_index)
+            if close_index is None:
+                continue
+            open_token = compact_tokens[open_index]
+            close_token = compact_tokens[close_index]
+            call_text = content[open_token["start"]:close_token["end"]]
+            if "\n" not in call_text:
+                continue
+            inner_tokens = compact_tokens[open_index + 1:close_index]
+            active_inner = [
+                item
+                for item in inner_tokens
+                if item["type"] not in ("WHITESPACE", "COMMENT")
+            ]
+            if (
+                not active_inner
+                or any(item["type"] == "COMMENT" for item in inner_tokens)
+                or any(item["type"] in ("COMMA", "PAREN") for item in active_inner)
+            ):
+                continue
+            compact_call = "(" + "".join(
+                " " if item["type"] == "WHITESPACE" else item["value"]
+                for item in inner_tokens
+            ).strip() + ")"
+            line_start = content.rfind("\n", 0, token["start"]) + 1
+            line_end = content.find("\n", close_token["end"])
+            if line_end == -1:
+                line_end = len(content)
+            candidate_line = (
+                content[line_start:open_token["start"]]
+                + compact_call
+                + content[close_token["end"]:line_end]
+            )
+            if "\n" not in candidate_line and len(candidate_line) <= max_length:
+                compact_edits.append(
+                    (open_token["start"], close_token["end"], compact_call)
+                )
+        if compact_edits:
+            chars = list(content)
+            for start, end, replacement in sorted(compact_edits, reverse=True):
+                chars[start:end] = list(replacement)
+            content = "".join(chars)
+
         # Prefer a semantic range boundary over splitting the function calls
         # used as BETWEEN bounds. Only take the break when both resulting
         # physical lines fit the configured limit.
         from mir.rules.sql.sql_utils import (
             find_between_delimiter_indices,
             get_token_depths,
-            tokenize_sql,
         )
         range_tokens = tokenize_sql(content)
         range_depths = get_token_depths(range_tokens)
@@ -187,7 +256,6 @@ class LineLengthRule(BaseRule):
             content = "".join(chars)
         
         # 1. Run function call splitting on SQL code lines
-        from mir.rules.sql.sql_utils import find_matching_paren
         try:
             tokens = tokenize_sql(content)
             lines = content.splitlines()

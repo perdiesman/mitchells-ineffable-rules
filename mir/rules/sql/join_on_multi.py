@@ -301,12 +301,32 @@ class JoinOnMultiRule(BaseRule):
                         if delimiter_idx and tokens[delimiter_idx - 1]["type"] == "WHITESPACE"
                         else None
                     )
-                    if not ws_before or ws_before["value"] != " ":
+                    condition_start = max(
+                        (index + 1 for index in boolean_indices if index < delimiter_idx),
+                        default=i + 1,
+                    )
+                    condition_end = min(
+                        (index for index in boolean_indices if index > delimiter_idx),
+                        default=clause_end,
+                    )
+                    condition_single = "".join(
+                        " " if token["type"] == "WHITESPACE" else token["value"]
+                        for token in tokens[condition_start:condition_end]
+                    ).strip()
+                    expected_delimiter_ws = (
+                        " "
+                        if len(expected_indent) + len(condition_single) <= max_len
+                        else "\n" + expected_indent + "    "
+                    )
+                    if (
+                        not ws_before
+                        or ws_before["value"] != expected_delimiter_ws
+                    ):
                         violations.append({
                             "token": delimiter,
                             "ws_start": ws_before["start"] if ws_before else delimiter["start"],
                             "ws_end": delimiter["start"],
-                            "replacement": " ",
+                            "replacement": expected_delimiter_ws,
                         })
                 
                 if (

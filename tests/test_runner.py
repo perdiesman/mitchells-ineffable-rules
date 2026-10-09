@@ -1151,7 +1151,10 @@ class TestRunnerIntegration(unittest.TestCase):
             first.content,
         )
         self.assertIn("            ),\n        </if>", first.content)
-        self.assertIn("                        AND ready", first.content)
+        self.assertIn(
+            "            SELECT CASE WHEN enabled AND ready THEN 'ready' ELSE 'waiting' END AS status",
+            first.content,
+        )
 
     def test_xml_mybatis_dynamic_range_compacts_after_between_rewrite(self):
         xml_content = (
@@ -1403,9 +1406,7 @@ class TestRunnerIntegration(unittest.TestCase):
             '    <select id="events">\n'
             '        SELECT event_id\n'
             '        FROM sample_data.additional_processing_events\n'
-            '        WHERE\n'
-            '            event_type = #{type}\n'
-            '            AND event_created_at BETWEEN #{startDate} AND #{endDate}\n'
+            '        WHERE event_type = #{type} AND event_created_at BETWEEN #{startDate} AND #{endDate}\n'
             '    </select>\n'
             '</mapper>'
         )
