@@ -1454,6 +1454,29 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_commit_profile_expands_datatype_aliases(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="types">\n'
+            '        SELECT NULL::INT, NULL::INT8, NULL::BOOL, NULL::FLOAT8, NULL::TIMETZ;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            "NULL::INT, NULL::INT8, NULL::BOOL, NULL::FLOAT8, NULL::TIMETZ",
+            "NULL::INTEGER, NULL::BIGINT, NULL::BOOLEAN, NULL::DOUBLE PRECISION, NULL::TIME WITH TIME ZONE",
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_sql_line_mapping(self):
         # XML file with a self-comparison on line 5
         xml_content = (

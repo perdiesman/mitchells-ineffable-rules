@@ -1,11 +1,12 @@
 # IR-datatype-format
 
-Standardize SQL data types to use their long format (character varying instead of varchar, timestamp with time zone instead of timestamptz).
+Standardize PostgreSQL data type aliases to their canonical long forms.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
 - **Commit Profile**: Yes
+- **Intentional Semantic Rewrite**: Yes
 - **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
@@ -13,12 +14,12 @@ Standardize SQL data types to use their long format (character varying instead o
 
 #### ❌ Violating Example
 ```sql
-SELECT 1::varchar, '2026-07-11'::timestamptz;
+SELECT 1::varchar, '2026-07-11'::timestamptz, 1::int;
 ```
 
 ####  Correct Example
 ```sql
-SELECT 1::character varying, '2026-07-11'::timestamp with time zone;
+SELECT 1::character varying, '2026-07-11'::timestamp with time zone, 1::integer;
 ```
 
 #### Additional Validations

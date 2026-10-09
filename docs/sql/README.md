@@ -44,7 +44,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-count-star`](rules/queries/IR-count-star.md) | Standardize COUNT(1) or row-counting expressions to COUNT(*). | Yes | [View Details](rules/queries/IR-count-star.md) |
 | [`IR-cte-format`](rules/queries/IR-cte-format.md) | Format layout of CTE WITH blocks: align subquery aliases, parenthesis and the final query block. | Yes | [View Details](rules/queries/IR-cte-format.md) |
 | [`IR-datatype-case`](rules/queries/IR-datatype-case.md) | Standardize SQL data types to be uppercase. | Yes | [View Details](rules/queries/IR-datatype-case.md) |
-| [`IR-datatype-format`](rules/queries/IR-datatype-format.md) | Standardize SQL data types to use their long format (character varying instead of varchar, timestamp with time zone instead of timestamptz). | Yes | [View Details](rules/queries/IR-datatype-format.md) |
+| [`IR-datatype-format`](rules/queries/IR-datatype-format.md) | Standardize PostgreSQL data type aliases to their canonical long forms. | Yes | [View Details](rules/queries/IR-datatype-format.md) |
 | [`IR-distinct-parentheses`](rules/queries/IR-distinct-parentheses.md) | Remove redundant parentheses around DISTINCT arguments, preserving DISTINCT ON (col) syntax. | Yes | [View Details](rules/queries/IR-distinct-parentheses.md) |
 | [`IR-dollar-quote-alignment`](rules/queries/IR-dollar-quote-alignment.md) | Align the closing dollar quote ($function$, $$, etc.) with its opening tag. | Yes | [View Details](rules/queries/IR-dollar-quote-alignment.md) |
 | [`IR-empty-command`](rules/queries/IR-empty-command.md) | Remove empty SQL commands, such as duplicate semicolons or leading semicolons. | Yes | [View Details](rules/queries/IR-empty-command.md) |

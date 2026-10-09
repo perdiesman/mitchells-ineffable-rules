@@ -141,6 +141,14 @@ def protected_sql_signature(content: str) -> tuple[tuple[str, str], ...]:
             cast_suffix += "[]"
             normalized_target = normalized_target[:-2]
         normalized_target = {
+            "bool": "boolean",
+            "float4": "real",
+            "float8": "doubleprecision",
+            "int": "integer",
+            "int2": "smallint",
+            "int4": "integer",
+            "int8": "bigint",
+            "timetz": "timewithtimezone",
             "timestamptz": "timestampwithtimezone",
             "varchar": "charactervarying",
         }.get(normalized_target, normalized_target) + cast_suffix
@@ -547,6 +555,7 @@ def find_datatype_token_groups(tokens: List[dict], content: str) -> List[List[di
         # Match single-word types
         single_types = {
             "timestamp", "timestamptz", "time", "timetz", "varchar", "integer", "int",
+            "int2", "int4", "int8", "float4", "float8",
             "bigint", "smallint", "text", "boolean", "bool", "numeric", "decimal",
             "json", "jsonb", "uuid", "date", "geometry", "real", "char", "character"
         }
