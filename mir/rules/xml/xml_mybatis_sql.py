@@ -615,6 +615,7 @@ class XmlMybatisSqlRule(BaseRule):
                     "base_indent": base_indent,
                     "tag_ranges": tag_ranges,
                     "original_xml": content,
+                    "source_range": (el["start_offset"], el["end_offset"]),
                     "applied_rules": applied_rules,
                 }
                 from mir.engine.embedded_bridge import fix_embedded_content
@@ -642,13 +643,17 @@ class XmlMybatisSqlRule(BaseRule):
                         ),
                         None,
                     )
-                    if candidate_signature != bridge_state["expected_protected_signature"]:
+                    allowed_signatures = {
+                        bridge_state["original_protected_signature"],
+                        bridge_state["expected_protected_signature"],
+                    }
+                    if candidate_signature not in allowed_signatures:
                         # A repeated predicate on opposite sides of a dynamic
                         # tag can make a text diff ambiguous. Reject the whole
                         # statement edit instead of applying only part of it.
                         continue
                     expected_signature_updates[(el["tag"], el["attrs"]["id"])] = (
-                        bridge_state["expected_protected_signature"]
+                        candidate_signature
                     )
                     all_xml_edits.extend(edits)
                     rules_fixed_set = rule_config.get("rules_fixed")

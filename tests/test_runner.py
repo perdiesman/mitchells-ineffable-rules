@@ -766,6 +766,30 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertIn('SELECT count(*) <include refid="from" />', result.content)
         self.assertNotIn("IR-function-case", [item[0].rule_id for item in result.violations])
 
+    def test_xml_mybatis_include_consumers_do_not_edit_shared_fragment_sources(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="fromFragment">from sample_table where created_at::TIMESTAMPTZ &gt; #{start}</sql>\n'
+            '    <select id="first">SELECT COUNT(*) <include refid="fromFragment" /></select>\n'
+            '    <select id="second">SELECT COUNT(*) <include refid="fromFragment" /></select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(
+            any("protected MyBatis SQL syntax changed" in item for item in first.diagnostics)
+        )
+        self.assertIn(
+            "FROM sample_table WHERE created_at::TIMESTAMP WITH TIME ZONE &gt; #{start}",
+            first.content,
+        )
+        self.assertEqual(first.content.count("SELECT count(*) <include"), 2)
+
     def test_xml_mybatis_does_not_move_commas_across_dynamic_tags(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

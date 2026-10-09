@@ -336,6 +336,9 @@ def fix_embedded_content(
     if extra_fix_args is not None:
         from mir.rules.sql.sql_utils import protected_sql_signature
 
+        extra_fix_args["original_protected_signature"] = protected_sql_signature(
+            guest_text
+        )
         extra_fix_args["expected_protected_signature"] = protected_sql_signature(fixed_text)
                 
     edits = []
@@ -508,6 +511,16 @@ def fix_embedded_content(
                                 skip = True
 
                     candidate_edit = (start_orig, end_orig, replacement)
+                    source_range = (
+                        extra_fix_args.get("source_range")
+                        if extra_fix_args
+                        else None
+                    )
+                    if source_range and not (
+                        source_range[0] <= start_orig
+                        and end_orig <= source_range[1]
+                    ):
+                        continue
                     if (
                         not skip
                         and (
