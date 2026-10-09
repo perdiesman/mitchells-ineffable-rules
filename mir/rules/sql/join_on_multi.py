@@ -223,7 +223,9 @@ class JoinOnMultiRule(BaseRule):
                         second_candidate = expected_indent + right
                         if (
                             right
-                            and len(first_candidate) <= max_len
+                            and len(right) > max_len // 3
+                            and len(first_candidate) + len(candidate["value"]) + 1
+                            <= max_len
                             and len(second_candidate) <= max_len
                             and len(first_candidate) + 1 + len(right) > max_len
                         ):

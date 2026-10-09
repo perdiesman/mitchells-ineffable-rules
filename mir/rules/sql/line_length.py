@@ -247,6 +247,16 @@ class LineLengthRule(BaseRule):
                 line_idx = call["name_token"]["line"] - 1
                 line = lines[line_idx] if line_idx < len(lines) else ""
                 if len(line) > max_length:
+                    if any(
+                        later["name_token"]["line"] == call["name_token"]["line"]
+                        and later["start"] > call["end"]
+                        for later in all_calls
+                    ):
+                        # Prefer the last call on a physical line. For
+                        # count(*) FILTER (...), expanding count(*) only
+                        # makes noise while the FILTER predicate remains the
+                        # actual wrapping opportunity.
+                        continue
                     # Parse arguments
                     args = []
                     current_arg = []

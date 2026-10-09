@@ -7,6 +7,7 @@ from mir.rules.sql.column_layout import ColumnLayoutRule
 from mir.rules.sql.comma_style import CommaStyleRule
 from mir.rules.sql.join_on_multi import JoinOnMultiRule
 from mir.rules.sql.keyword_case import KeywordCaseRule
+from mir.rules.sql.line_length import LineLengthRule
 from mir.rules.sql.named_parameters import NamedParametersRule
 from mir.rules.sql.operator_spacing import OperatorSpacingRule
 from mir.rules.sql.paren_content_indent import ParenContentIndentRule
@@ -22,6 +23,54 @@ from mir.rules.sql.where_multi import WhereMultiRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_line_length_expands_the_last_call_in_a_filter_expression(self):
+        source = (
+            "            count(*) FILTER (WHERE current_date = run_start_date "
+            "AND (needs_running OR is_running)) >= 1 AS calculating_today"
+        )
+        expected = (
+            "            count(*) FILTER (\n"
+            "                WHERE current_date = run_start_date AND (needs_running OR is_running)\n"
+            "            ) >= 1 AS calculating_today"
+        )
+
+        self.assertEqual(
+            LineLengthRule().fix(source, "generic.sql", {"max_length": 100}),
+            expected,
+        )
+
+    def test_join_wraps_before_on_when_the_predicate_fits_its_own_line(self):
+        source = (
+            "                LEFT JOIN outage_data.running_calculation_handlers rch_cuh "
+            "ON rch_cuh.handler_id = county_utility_handler"
+        )
+        expected = (
+            "                LEFT JOIN outage_data.running_calculation_handlers rch_cuh\n"
+            "                    ON rch_cuh.handler_id = county_utility_handler"
+        )
+
+        rule = JoinOnMultiRule()
+        fixed = rule.fix(source, "generic.sql", {"max_line_length": 100})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {"max_line_length": 100}), [])
+
+    def test_join_wraps_after_operator_when_the_left_side_still_fits(self):
+        source = (
+            "    JOIN outage_data.outage_summary_error_type oset ON oset.id = "
+            "outage_summary_error.outage_summary_error_type_id"
+        )
+        expected = (
+            "    JOIN outage_data.outage_summary_error_type oset ON oset.id =\n"
+            "        outage_summary_error.outage_summary_error_type_id"
+        )
+
+        rule = JoinOnMultiRule()
+        fixed = rule.fix(source, "generic.sql", {"max_line_length": 100})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {"max_line_length": 100}), [])
+
     def test_comma_style_removes_space_before_trailing_comma(self):
         source = "SELECT coalesce(item_count::NUMERIC , 0::NUMERIC) FROM sample_item;"
         expected = "SELECT coalesce(item_count::NUMERIC, 0::NUMERIC) FROM sample_item;"
