@@ -114,6 +114,7 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
     return target_indent
 
 class XmlIndentRule(BaseRule):
+    commit_profile = True
     rule_id = "IR-xml-indent"
     description = "Enforce correct tag nesting indentation in XML files."
     category = "general"
@@ -145,6 +146,34 @@ class XmlIndentRule(BaseRule):
         violations = []
         lines = content.splitlines()
         n = len(tokens)
+
+        from mir.rules.xml.xml_mybatis_sql import parse_xml_elements, get_all_elements_recursively
+
+        elements = get_all_elements_recursively(parse_xml_elements(tokens))
+        query_ranges = [
+            (el["start_offset"], el["end_offset"])
+            for el in elements
+            if el["tag"] in ("select", "insert", "update", "delete", "sql")
+        ]
+        for token in tokens:
+            if token["type"] != "TAG_OPEN_START" or token["value"][1:].lower() != "foreach":
+                continue
+            if not any(start < token["start"] < end for start, end in query_ranges):
+                continue
+            line_start = content.rfind("\n", 0, token["start"]) + 1
+            prefix = content[line_start:token["start"]]
+            sql_prefix = prefix.rstrip(" \t")
+            if not sql_prefix or sql_prefix.split()[-1].upper() != "IN":
+                continue
+            gap_start = line_start + len(sql_prefix)
+            line_indent = prefix[: len(prefix) - len(prefix.lstrip(" \t"))]
+            violations.append({
+                "line": token["line"],
+                "start_offset": gap_start,
+                "end_offset": token["start"],
+                "replacement": "\n" + line_indent + " " * indent_size,
+                "message": "MyBatis foreach continuation should start on the line after IN.",
+            })
 
         # Build line starts mapping
         line_starts = [0]
@@ -313,10 +342,7 @@ class XmlIndentRule(BaseRule):
                     })
                     
         # Check for collapsable elements that can fit on a single line under 120 chars
-        from mir.rules.xml.xml_mybatis_sql import parse_xml_elements, get_all_elements_recursively
         try:
-            root_elements = parse_xml_elements(tokens)
-            elements = get_all_elements_recursively(root_elements)
             for el in elements:
                 if el["tag"] in ("mapper", "select", "insert", "update", "delete", "sql"):
                     continue

@@ -447,6 +447,15 @@ class TestSqlCompatibility(unittest.TestCase):
             protected_sql_signature(standard_changed),
         )
 
+        aliases = "SELECT :start::timestamptz, :label::varchar[];"
+        canonical = (
+            "SELECT :start::TIMESTAMP WITH TIME ZONE, "
+            ":label::CHARACTER VARYING[];"
+        )
+        self.assertEqual(
+            protected_sql_signature(aliases), protected_sql_signature(canonical)
+        )
+
     def test_foreign_schema_limit_list_is_not_a_function_call(self):
         content = (
             "IMPORT FOREIGN SCHEMA sample_remote LIMIT TO (sample_table) "

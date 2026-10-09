@@ -118,6 +118,17 @@ def protected_sql_signature(content: str) -> tuple[tuple[str, str], ...]:
             else token["value"]
             for token in group
         )
+        # PostgreSQL aliases expanded by IR-datatype-format are the same cast
+        # targets semantically. The commit guard must distinguish type changes
+        # without rejecting those documented canonical spellings.
+        cast_suffix = ""
+        while normalized_target.endswith("[]"):
+            cast_suffix += "[]"
+            normalized_target = normalized_target[:-2]
+        normalized_target = {
+            "timestamptz": "timestampwithtimezone",
+            "varchar": "charactervarying",
+        }.get(normalized_target, normalized_target) + cast_suffix
         protected.append(
             ("CAST_TARGET", normalized_target)
         )

@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.xml.xml_utils import tokenize_xml
 
 class XmlLineLengthRule(BaseRule):
+    commit_profile = True
     rule_id = "IR-xml-line-length"
     description = "XML lines must not exceed the configured maximum length."
     category = "general"
@@ -59,6 +60,46 @@ class XmlLineLengthRule(BaseRule):
             
         tokens = tokenize_xml(content)
         n = len(tokens)
+
+        from mir.rules.xml.xml_mybatis_sql import parse_xml_elements, get_all_elements_recursively
+
+        elements = get_all_elements_recursively(parse_xml_elements(tokens))
+        block_edits = []
+        for element in elements:
+            if element["tag"] != "foreach" or not element["inner_tokens"]:
+                continue
+            if any(token["type"] == "TAG_OPEN_START" for token in element["inner_tokens"]):
+                continue
+            start_line = content.count("\n", 0, element["start_offset"])
+            end_line = content.count("\n", 0, element["end_offset"])
+            if start_line != end_line or start_line >= len(lines) or len(lines[start_line]) <= max_length:
+                continue
+            first_inner = element["inner_tokens"][0]["start"]
+            last_inner = element["inner_tokens"][-1]["end"]
+            opening = content[element["start_offset"]:first_inner]
+            inner = content[first_inner:last_inner]
+            closing = content[last_inner:element["end_offset"]]
+            if "\n" in opening or not inner.strip():
+                continue
+            line = lines[start_line]
+            indent = line[: len(line) - len(line.lstrip(" \t"))]
+            replacement = (
+                opening.rstrip()
+                + "\n"
+                + indent
+                + "    "
+                + inner.strip()
+                + "\n"
+                + indent
+                + closing.lstrip()
+            )
+            block_edits.append((element["start_offset"], element["end_offset"], replacement))
+
+        if block_edits:
+            chars = list(content)
+            for start, end, replacement in sorted(block_edits, reverse=True):
+                chars[start:end] = list(replacement)
+            return "".join(chars)
         
         tag_declarations = []
         i = 0

@@ -3,6 +3,8 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 
 class FromSingleRule(BaseRule):
+    commit_profile = True
+    embedded_safe = True
     rule_id = "IR-from-single"
     description = "Single FROM entry should be on the same line as the FROM keyword."
     category = "queries"

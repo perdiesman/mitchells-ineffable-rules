@@ -5,7 +5,7 @@ XML lines must not exceed the configured maximum length.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: General Rules
-- **Commit Profile**: No
+- **Commit Profile**: Yes
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `max_length` (Default: `120`): Maximum line length limit.

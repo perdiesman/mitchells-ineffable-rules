@@ -713,6 +713,35 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertNotIn("#{END}", result.content)
         self.assertNotIn("#{LIMIT}", result.content)
 
+    def test_xml_mybatis_repeated_dynamic_predicates_are_mapped_atomically(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="search">\n'
+            '        select item_id from sample_item\n'
+            '        where\n'
+            '            <if test="start != null and end != null">\n'
+            "                recorded_at between timezone('utc', '${start}') and timezone('utc', '${end}') and\n"
+            '            </if>\n'
+            '            <if test="start != null and end == null">\n'
+            "                recorded_at &gt;= timezone('utc', '${start}') and\n"
+            '            </if>\n'
+            '            active = true\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.fix = True
+
+        result = process_document(config, xml_content, "generic.xml", "xml")
+
+        self.assertEqual(
+            get_mybatis_protected_signatures(result.content),
+            get_mybatis_protected_signatures(xml_content),
+        )
+        self.assertFalse(
+            any("protected MyBatis SQL syntax changed" in item for item in result.diagnostics)
+        )
+
     def test_xml_mybatis_formats_text_beside_inline_tags(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
@@ -998,6 +1027,51 @@ class TestRunnerIntegration(unittest.TestCase):
                 '        <if test="ids != null">\n'
                 '            <foreach collection="ids" item="id" open="(" close=")" separator=",">#{id}</foreach>\n'
                 '        </if>\n'
+                '    </select>\n'
+                '</mapper>'
+            )
+            self.assertEqual(f.read(), expected)
+
+        self.assertEqual(run_linter(config), 0)
+
+    def test_xml_mybatis_formats_dynamic_where_and_table_function(self):
+        xml_content = (
+            '<mapper namespace="MyMapper">\n'
+            '    <select id="features">\n'
+            '        SELECT feature_id\n'
+            '        FROM\n'
+            '            outage_data.state_outages_for_run_start_time(#{runStartTime}::TIMESTAMPTZ - INTERVAL \'15 minute\') sofrst\n'
+            '               WHERE st_intersects(sofrst.geom, st_geomfromgeojson(#{geomStr}))\n'
+            '                <if test="stateAbbreviations != null">\n'
+            '                AND sofrst.state_abbreviation IN <foreach collection="stateAbbreviations"  item="abbr" open="(" close=")" separator=",">#{abbr}</foreach>\n'
+            '                </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        path = self.write_temp_file("test_mybatis_dynamic_where.xml", xml_content)
+
+        config = Config()
+        config.paths = [path]
+        config.profile = "commit"
+        config.fix = True
+
+        self.assertEqual(run_linter(config), 0)
+        with open(path, "r") as f:
+            expected = (
+                '<mapper namespace="MyMapper">\n'
+                '    <select id="features">\n'
+                '        SELECT feature_id\n'
+                '        FROM outage_data.state_outages_for_run_start_time(\n'
+                '            #{runStartTime}::TIMESTAMP WITH TIME ZONE - INTERVAL \'15 minute\'\n'
+                '        ) sofrst\n'
+                '        WHERE\n'
+                '            st_intersects(sofrst.geom, st_geomfromgeojson(#{geomStr}))\n'
+                '            <if test="stateAbbreviations != null">\n'
+                '                AND sofrst.state_abbreviation IN\n'
+                '                    <foreach collection="stateAbbreviations"  item="abbr" open="(" close=")" separator=",">\n'
+                '                        #{abbr}\n'
+                '                    </foreach>\n'
+                '            </if>\n'
                 '    </select>\n'
                 '</mapper>'
             )

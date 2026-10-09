@@ -3,8 +3,8 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class ClauseAlignmentRule(BaseRule):
+    commit_profile = True
     embedded_safe = True
-    trellis_safe = True
     rule_id = "IR-clause-alignment"
     description = "Main query clause keywords (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT) must have the exact same indentation within the same query block when the query spans multiple lines."
     category = "queries"

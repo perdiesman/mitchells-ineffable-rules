@@ -6,7 +6,7 @@ Keep a multi-condition WHERE clause inline when it fits; otherwise put each cond
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
 - **Commit Profile**: Yes
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: Yes
 - **Configuration Options**:
   - `enabled`: `true`

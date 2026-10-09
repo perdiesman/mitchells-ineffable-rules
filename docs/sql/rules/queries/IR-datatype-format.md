@@ -5,7 +5,7 @@ Standardize SQL data types to use their long format (character varying instead o
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
-- **Commit Profile**: No
+- **Commit Profile**: Yes
 - **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:

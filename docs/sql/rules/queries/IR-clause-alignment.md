@@ -5,9 +5,9 @@ Main query clause keywords (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIM
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
-- **Commit Profile**: No
+- **Commit Profile**: Yes
 - **MyBatis Safe**: Yes
-- **Trellis Safe**: Yes
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 

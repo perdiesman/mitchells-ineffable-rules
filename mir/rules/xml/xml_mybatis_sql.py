@@ -448,6 +448,9 @@ class XmlMybatisSqlRule(BaseRule):
                     require_embedded_safe=True,
                     extra_check_args={
                         "ignored_comma_offsets": ignored_comma_offsets,
+                        "mybatis_dynamic_offsets": {
+                            idx for idx, after_tag in enumerate(is_after_tag) if after_tag
+                        },
                         "base_indent": base_indent,
                         "tag_ranges": tag_ranges,
                         "original_xml": content
@@ -525,6 +528,7 @@ class XmlMybatisSqlRule(BaseRule):
 
         target_tags = {"select", "insert", "update", "delete", "sql"}
         all_xml_edits = []
+        expected_signature_updates = {}
         lines_filter = rule_config.get("_lines")
 
         for el in elements:
@@ -562,6 +566,16 @@ class XmlMybatisSqlRule(BaseRule):
                     del inner_config["_lines"]
 
                 applied_rules = set()
+                bridge_state = {
+                    "ignored_comma_offsets": ignored_comma_offsets,
+                    "mybatis_dynamic_offsets": {
+                        idx for idx, after_tag in enumerate(is_after_tag) if after_tag
+                    },
+                    "base_indent": base_indent,
+                    "tag_ranges": tag_ranges,
+                    "original_xml": content,
+                    "applied_rules": applied_rules,
+                }
                 from mir.engine.embedded_bridge import fix_embedded_content
                 edits = fix_embedded_content(
                     guest_language="sql",
@@ -570,15 +584,31 @@ class XmlMybatisSqlRule(BaseRule):
                     file_path=file_path,
                     rule_config=inner_config,
                     require_embedded_safe=True,
-                    extra_fix_args={
-                        "ignored_comma_offsets": ignored_comma_offsets,
-                        "base_indent": base_indent,
-                        "tag_ranges": tag_ranges,
-                        "original_xml": content,
-                        "applied_rules": applied_rules
-                    }
+                    extra_fix_args=bridge_state,
                 )
                 if edits:
+                    candidate_chars = list(content)
+                    for start, end, replacement in sorted(edits, reverse=True):
+                        candidate_chars[start:end] = list(replacement)
+                    candidate_signatures = get_mybatis_protected_signatures(
+                        "".join(candidate_chars)
+                    )
+                    candidate_signature = next(
+                        (
+                            signature
+                            for tag, statement_id, signature in candidate_signatures
+                            if tag == el["tag"] and statement_id == el["attrs"]["id"]
+                        ),
+                        None,
+                    )
+                    if candidate_signature != bridge_state["expected_protected_signature"]:
+                        # A repeated predicate on opposite sides of a dynamic
+                        # tag can make a text diff ambiguous. Reject the whole
+                        # statement edit instead of applying only part of it.
+                        continue
+                    expected_signature_updates[(el["tag"], el["attrs"]["id"])] = (
+                        bridge_state["expected_protected_signature"]
+                    )
                     all_xml_edits.extend(edits)
                     rules_fixed_set = rule_config.get("rules_fixed")
                     if rules_fixed_set is not None:
@@ -614,10 +644,27 @@ class XmlMybatisSqlRule(BaseRule):
             chars[start:end] = list(new_text)
 
         fixed_content = "".join(chars)
-        if (
-            rule_config.get("_profile") == "commit"
-            and get_mybatis_protected_signatures(fixed_content)
-            != get_mybatis_protected_signatures(content)
-        ):
-            raise ValueError("protected MyBatis SQL syntax changed after source mapping")
+        original_signatures = get_mybatis_protected_signatures(content)
+        expected_signatures = tuple(
+            (
+                tag,
+                statement_id,
+                expected_signature_updates.get((tag, statement_id), signature),
+            )
+            for tag, statement_id, signature in original_signatures
+        )
+        actual_signatures = get_mybatis_protected_signatures(fixed_content)
+        if actual_signatures != expected_signatures:
+            mismatch = next(
+                (
+                    actual[:2]
+                    for actual, expected in zip(actual_signatures, expected_signatures)
+                    if actual != expected
+                ),
+                ("statement", "unknown"),
+            )
+            raise ValueError(
+                "protected MyBatis SQL syntax changed after source mapping for "
+                f"<{mismatch[0]}> id={mismatch[1]!r}"
+            )
         return fixed_content

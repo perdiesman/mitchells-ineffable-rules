@@ -5,7 +5,7 @@ Lines must not exceed the configured maximum length.
 - **Auto-Fixable**: Sometimes
 - **Enabled by Default**: Yes
 - **Category**: General Rules
-- **Commit Profile**: No
+- **Commit Profile**: Yes
 - **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:

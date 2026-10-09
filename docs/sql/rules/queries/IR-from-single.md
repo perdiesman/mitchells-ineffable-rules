@@ -5,8 +5,8 @@ Single FROM entry should be on the same line as the FROM keyword.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
-- **Commit Profile**: No
-- **MyBatis Safe**: No
+- **Commit Profile**: Yes
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`

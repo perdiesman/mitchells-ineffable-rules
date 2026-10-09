@@ -242,15 +242,27 @@ def fix_embedded_content(
                 
             prev_text = fixed_text
             fixed_text = rule.fix(fixed_text, file_path, guest_rule_config)
-            if rule_config.get("_profile") == "commit" and fixed_text != prev_text:
+            if fixed_text != prev_text:
                 from mir.rules.sql.sql_utils import protected_sql_signature
 
                 if protected_sql_signature(fixed_text) != protected_sql_signature(prev_text):
-                    raise ValueError(
-                        f"unsafe embedded fix from {rule.rule_id}: protected SQL syntax changed"
-                    )
+                    if rule_config.get("_profile") == "commit":
+                        raise ValueError(
+                            f"unsafe embedded fix from {rule.rule_id}: protected SQL syntax changed"
+                        )
+                    # Formatting embedded SQL must be all-or-nothing for
+                    # protected tokens. Dynamic XML tags can make only part of
+                    # a semantic rewrite source-mappable, so leave that rule's
+                    # violation for review instead of applying a partial fix.
+                    fixed_text = prev_text
+                    continue
             if fixed_text != prev_text and extra_fix_args and "applied_rules" in extra_fix_args:
                 extra_fix_args["applied_rules"].add(rule.rule_id)
+
+    if extra_fix_args is not None:
+        from mir.rules.sql.sql_utils import protected_sql_signature
+
+        extra_fix_args["expected_protected_signature"] = protected_sql_signature(fixed_text)
                 
     edits = []
     if fixed_text != guest_text:
@@ -270,47 +282,30 @@ def fix_embedded_content(
         for tag, i1, i2, j1, j2 in sm.get_opcodes():
             if tag in ("replace", "delete", "insert"):
                 sub_ops = []
-                if tag == "replace" and (i2 - i1 == j2 - j1):
-                    for k in range(i2 - i1):
-                        guest_line = guest_text.splitlines(keepends=True)[i1 + k]
-                        fixed_line = fixed_text.splitlines(keepends=True)[j1 + k]
-                        char_matcher = difflib.SequenceMatcher(
-                            None, guest_line, fixed_line, autojunk=False
-                        )
-                        for char_tag, ci1, ci2, cj1, cj2 in char_matcher.get_opcodes():
-                            if char_tag == "equal":
-                                continue
-                            sub_ops.append((
-                                char_tag,
-                                i1 + k,
-                                i1 + k,
-                                j1 + k,
-                                j1 + k,
-                                ci1,
-                                ci2,
-                                cj1,
-                                cj2,
-                            ))
+                if tag == "replace":
+                    guest_block_start = guest_line_offsets[i1]
+                    guest_block_end = guest_line_offsets[i2]
+                    guest_block = guest_text[guest_block_start:guest_block_end]
+                    fixed_block = "".join(fixed_text.splitlines(keepends=True)[j1:j2])
+                    char_matcher = difflib.SequenceMatcher(
+                        None, guest_block, fixed_block, autojunk=False
+                    )
+                    for char_tag, ci1, ci2, cj1, cj2 in char_matcher.get_opcodes():
+                        if char_tag == "equal":
+                            continue
+                        sub_ops.append((
+                            guest_block_start + ci1,
+                            guest_block_start + ci2,
+                            fixed_block[cj1:cj2],
+                        ))
                 else:
-                    sub_ops.append((tag, i1, i2, j1, j2, None, None, None, None))
+                    g_start_char = guest_line_offsets[i1]
+                    g_end_char = guest_line_offsets[i2]
+                    replacement = "".join(fixed_text.splitlines(keepends=True)[j1:j2])
+                    sub_ops.append((g_start_char, g_end_char, replacement))
                     
                 block_edits = []
-                block_valid = True
-                for (
-                    sub_tag, sub_i1, sub_i2, sub_j1, sub_j2,
-                    char_i1, char_i2, char_j1, char_j2,
-                ) in sub_ops:
-                    if char_i1 is None:
-                        g_start_char = guest_line_offsets[sub_i1]
-                        g_end_char = guest_line_offsets[sub_i2]
-                        block_fixed_lines = fixed_text.splitlines(keepends=True)[sub_j1:sub_j2]
-                        replacement = "".join(block_fixed_lines)
-                    else:
-                        g_start_char = guest_line_offsets[sub_i1] + char_i1
-                        g_end_char = guest_line_offsets[sub_i1] + char_i2
-                        fixed_line = fixed_text.splitlines(keepends=True)[sub_j1]
-                        replacement = fixed_line[char_j1:char_j2]
-
+                for g_start_char, g_end_char, replacement in sub_ops:
                     is_contiguous = True
                     start_orig = mapping[g_start_char] if g_start_char < len(mapping) else (mapping[-1] + 1 if mapping else 0)
                     end_orig = (
@@ -340,8 +335,7 @@ def fix_embedded_content(
                                     break
 
                     if not is_contiguous:
-                        block_valid = False
-                        break
+                        continue
 
                     if file_path.endswith(".xml"):
                         replacement = xml_encode(replacement)
@@ -356,8 +350,7 @@ def fix_embedded_content(
                     if not skip:
                         block_edits.append((start_orig, end_orig, replacement))
 
-                if block_valid:
-                    edits.extend(block_edits)
+                edits.extend(block_edits)
 
     if edits and extra_fix_args and "original_xml" in extra_fix_args and "tag_ranges" in extra_fix_args:
         original_xml = extra_fix_args["original_xml"]

@@ -9,6 +9,7 @@ from mir.rules.sql.sql_utils import (
 
 class WhereMultiRule(BaseRule):
     commit_profile = True
+    embedded_safe = True
     trellis_safe = True
     rule_id = "IR-where-multi"
     description = "Keep a multi-condition WHERE clause inline when it fits; otherwise put each condition on its own indented line."
@@ -43,6 +44,7 @@ class WhereMultiRule(BaseRule):
         violations = []
         n = len(tokens)
         trellis_ranges = []
+        mybatis_dynamic_offsets = rule_config.get("mybatis_dynamic_offsets", set())
         if rule_config.get("_template_dialect") == "trellis":
             from mir.rules.sql.trellis_utils import analyze_trellis
 
@@ -63,7 +65,14 @@ class WhereMultiRule(BaseRule):
                         where_indent += char
                     else:
                         break
-                        
+
+                base_indent = rule_config.get("base_indent")
+                if (
+                    "mybatis_dynamic_offsets" in rule_config
+                    and isinstance(base_indent, str)
+                ):
+                    where_indent = base_indent
+
                 expected_indent = where_indent + "    "
                 
                 clause_end = n
@@ -93,6 +102,11 @@ class WhereMultiRule(BaseRule):
                 boolean_indices = [
                     index for index in boolean_indices if not is_trellis_controlled(tokens[index])
                 ]
+                dynamic_boolean_indices = {
+                    index
+                    for index in boolean_indices
+                    if tokens[index]["start"] in mybatis_dynamic_offsets
+                }
                 for delimiter_idx in find_between_delimiter_indices(
                     tokens, depths, outer_depth, i + 1, clause_end
                 ):
@@ -124,7 +138,7 @@ class WhereMultiRule(BaseRule):
                     from mir.rules.sql.line_length import LineLengthRule
                     max_len = self.get_config_value(rule_config, "max_line_length", 100, fallbacks=[(LineLengthRule, "max_length")])
                     
-                    if estimated_line_len <= max_len:
+                    if estimated_line_len <= max_len and not dynamic_boolean_indices:
                         # A short predicate has one canonical compact form. Only
                         # edit whitespace tokens so strings and parameters stay
                         # byte-for-byte intact, and leave the separator before
@@ -176,8 +190,21 @@ class WhereMultiRule(BaseRule):
                         if actual_idx - 1 >= 0 and tokens[actual_idx - 1]["type"] == "WHITESPACE":
                             ws_tok = tokens[actual_idx - 1]
 
-                        expected_replacement = "\n" + expected_indent
-                        if not ws_tok or ws_tok["value"] != expected_replacement:
+                        boolean_indent = expected_indent
+                        if actual_idx in dynamic_boolean_indices:
+                            boolean_indent += "    "
+                        expected_replacement = "\n" + boolean_indent
+                        whitespace_matches = bool(
+                            ws_tok
+                            and (
+                                ws_tok["value"] == expected_replacement
+                                or (
+                                    actual_idx in dynamic_boolean_indices
+                                    and ws_tok["value"].endswith(expected_replacement)
+                                )
+                            )
+                        )
+                        if not whitespace_matches:
                             violations.append({
                                 "token": t,
                                 "ws_start": ws_tok["start"] if ws_tok else t["start"],
