@@ -1,12 +1,12 @@
 # IR-join-on-multi
 
-Split AND or OR conditions in JOIN ON clauses to separate lines, indented 4 spaces.
+Keep JOIN ON conditions inline when they fit; otherwise split AND or OR conditions onto aligned continuation lines.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
 - **Commit Profile**: Yes
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: Yes
 - **Configuration Options**:
   - `enabled`: `true`
@@ -33,6 +33,17 @@ SELECT item.id FROM sample_item item JOIN sample_window window ON item.created_a
 SELECT item.id FROM sample_item item JOIN sample_window window
     ON item.created_at BETWEEN window.start_at AND window.end_at
     AND item.organization_identifier = window.organization_identifier;
+```
+
+#### ❌ Violating Example #3
+```sql
+SELECT item.id FROM sample_item item JOIN sample_owner owner ON owner.id = item.owner_id
+    AND owner.active;
+```
+
+####  Correct Example #3
+```sql
+SELECT item.id FROM sample_item item JOIN sample_owner owner ON owner.id = item.owner_id AND owner.active;
 ```
 
 #### Additional Validations

@@ -6,7 +6,7 @@ Multi-table or JOINed FROM entries should be formatted with one entry per line, 
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
 - **Commit Profile**: Yes
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: Yes
 - **Configuration Options**:
   - `enabled`: `true`

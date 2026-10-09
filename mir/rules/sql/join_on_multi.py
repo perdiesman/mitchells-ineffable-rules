@@ -10,9 +10,13 @@ from mir.rules.sql.sql_utils import (
 
 class JoinOnMultiRule(BaseRule):
     commit_profile = True
+    embedded_safe = True
     trellis_safe = True
     rule_id = "IR-join-on-multi"
-    description = "Split AND or OR conditions in JOIN ON clauses to separate lines, indented 4 spaces."
+    description = (
+        "Keep JOIN ON conditions inline when they fit; otherwise split AND or OR "
+        "conditions onto aligned continuation lines."
+    )
     category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
@@ -28,6 +32,10 @@ class JoinOnMultiRule(BaseRule):
         {
             "violating": "SELECT item.id FROM sample_item item JOIN sample_window window ON item.created_at BETWEEN window.start_at\n    AND window.end_at AND item.organization_identifier = window.organization_identifier;",
             "correct": "SELECT item.id FROM sample_item item JOIN sample_window window\n    ON item.created_at BETWEEN window.start_at AND window.end_at\n    AND item.organization_identifier = window.organization_identifier;"
+        },
+        {
+            "violating": "SELECT item.id FROM sample_item item JOIN sample_owner owner ON owner.id = item.owner_id\n    AND owner.active;",
+            "correct": "SELECT item.id FROM sample_item item JOIN sample_owner owner ON owner.id = item.owner_id AND owner.active;"
         }
     ]
     additional_validations = [
@@ -43,6 +51,7 @@ class JoinOnMultiRule(BaseRule):
         depths = get_token_depths(tokens)
         violations = []
         n = len(tokens)
+        mybatis_dynamic_offsets = rule_config.get("mybatis_dynamic_offsets", set())
         
         for i, tok in enumerate(tokens):
             if tok["type"] == "KEYWORD" and tok["value"].upper() == "ON":
@@ -133,18 +142,24 @@ class JoinOnMultiRule(BaseRule):
                 boolean_indices = find_boolean_operator_indices(
                     tokens, depths, outer_depth, i + 1, clause_end
                 )
+                has_dynamic_boolean = any(
+                    tokens[index]["start"] in mybatis_dynamic_offsets
+                    for index in boolean_indices
+                )
                 between_delimiter_indices = find_between_delimiter_indices(
                     tokens, depths, outer_depth, i + 1, clause_end
                 )
                 
                 on_clause_tokens = tokens[i : clause_end]
-                on_clause_str = "".join(t["value"] for t in on_clause_tokens)
-                is_multiline = "\n" in on_clause_str
                 on_clause_single = "".join(
                     " " if t["type"] == "WHITESPACE" else t["value"]
                     for t in on_clause_tokens
                 )
-                estimated_line_len = len(on_indent) + len("JOIN ") + len(on_clause_single)
+                estimated_line_len = (
+                    len(join_prefix_for_on.rstrip())
+                    + 1
+                    + len(on_clause_single.strip())
+                )
                 
                 from mir.rules.sql.line_length import LineLengthRule
                 max_len = self.get_config_value(rule_config, "max_line_length", 100, fallbacks=[(LineLengthRule, "max_length")])
@@ -209,10 +224,32 @@ class JoinOnMultiRule(BaseRule):
                             "replacement": " ",
                         })
                 
-                # Preserve a deliberately multiline predicate and normalize its
-                # continuation indentation. Compact predicates that already fit
-                # remain on one line.
-                if estimated_line_len <= max_len and not is_multiline:
+                if estimated_line_len <= max_len and not has_dynamic_boolean:
+                    if not any(
+                        token["type"] == "COMMENT"
+                        for token in tokens[i + 1 : clause_end]
+                    ):
+                        last_active_idx = next(
+                            (
+                                index
+                                for index in range(clause_end - 1, i, -1)
+                                if tokens[index]["type"] not in ("WHITESPACE", "COMMENT")
+                            ),
+                            None,
+                        )
+                        if last_active_idx is not None:
+                            for index in range(i + 1, last_active_idx):
+                                whitespace = tokens[index]
+                                if (
+                                    whitespace["type"] == "WHITESPACE"
+                                    and whitespace["value"] != " "
+                                ):
+                                    violations.append({
+                                        "token": whitespace,
+                                        "ws_start": whitespace["start"],
+                                        "ws_end": whitespace["end"],
+                                        "replacement": " ",
+                                    })
                     continue
                     
                 for actual_idx in boolean_indices:

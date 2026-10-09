@@ -844,6 +844,10 @@ class TestRunnerIntegration(unittest.TestCase):
             '</mapper>'
         )
         expected = xml_content.replace(
+            '                FROM sample.item item\n',
+            '                FROM\n'
+            '                    sample.item item\n',
+        ).replace(
             '                    JOIN sample.items_for_period(\n'
             '                        #{start},\n'
             '                        #{end}\n'
@@ -866,6 +870,34 @@ class TestRunnerIntegration(unittest.TestCase):
             get_mybatis_protected_signatures(first.content),
             get_mybatis_protected_signatures(xml_content),
         )
+
+    def test_xml_mybatis_compacts_short_static_join_predicates(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="joinedItems">\n'
+            '        SELECT item.item_id\n'
+            '        FROM sample_item item\n'
+            '            JOIN sample_owner owner ON owner.owner_id = item.owner_id\n'
+            '                AND owner.active\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            'JOIN sample_owner owner ON owner.owner_id = item.owner_id\n'
+            '                AND owner.active',
+            'JOIN sample_owner owner ON owner.owner_id = item.owner_id AND owner.active',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-mybatis-sql", "IR-join-on-multi"]
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
 
     def test_xml_mybatis_commit_profile_applies_declared_boolean_rewrites(self):
         xml_content = (

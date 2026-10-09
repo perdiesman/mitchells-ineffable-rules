@@ -56,7 +56,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-in-exists`](rules/queries/IR-in-exists.md) | EXISTS is preferred over IN with a subquery. | No | [View Details](rules/queries/IR-in-exists.md) |
 | [`IR-insert-columns`](rules/queries/IR-insert-columns.md) | Ensure INSERT statements explicitly list target columns. | No | [View Details](rules/queries/IR-insert-columns.md) |
 | [`IR-is-null`](rules/queries/IR-is-null.md) | Standardize NULL comparison predicates to use IS NULL and IS NOT NULL operators. | Yes | [View Details](rules/queries/IR-is-null.md) |
-| [`IR-join-on-multi`](rules/queries/IR-join-on-multi.md) | Split AND or OR conditions in JOIN ON clauses to separate lines, indented 4 spaces. | Yes | [View Details](rules/queries/IR-join-on-multi.md) |
+| [`IR-join-on-multi`](rules/queries/IR-join-on-multi.md) | Keep JOIN ON conditions inline when they fit; otherwise split AND or OR conditions onto aligned continuation lines. | Yes | [View Details](rules/queries/IR-join-on-multi.md) |
 | [`IR-join-parens`](rules/queries/IR-join-parens.md) | Unnecessary parentheses around a JOIN clause should be removed. | Yes | [View Details](rules/queries/IR-join-parens.md) |
 | [`IR-like-no-wildcard`](rules/queries/IR-like-no-wildcard.md) | Simplify LIKE comparisons to standard = comparisons when the pattern contains no wildcard characters (% or _). | Yes | [View Details](rules/queries/IR-like-no-wildcard.md) |
 | [`IR-null-coalesce`](rules/queries/IR-null-coalesce.md) | Standardize nullable equality predicates to COALESCE(x, -1) form. | Yes | [View Details](rules/queries/IR-null-coalesce.md) |

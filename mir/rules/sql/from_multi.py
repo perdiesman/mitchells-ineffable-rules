@@ -4,6 +4,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 
 class FromMultiRule(BaseRule):
     commit_profile = True
+    embedded_safe = True
     trellis_safe = True
     rule_id = "IR-from-multi"
     description = "Multi-table or JOINed FROM entries should be formatted with one entry per line, indented at 4 spaces."
@@ -32,7 +33,10 @@ class FromMultiRule(BaseRule):
         'SELECT * FROM t1;'
     ]
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _find_violations(
+        self, content: str, rule_config: Dict[str, Any] | None = None
+    ) -> List[dict]:
+        rule_config = rule_config or {}
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
         violations = []
@@ -98,7 +102,12 @@ class FromMultiRule(BaseRule):
                     if d == outer_depth:
                         if t["type"] == "KEYWORD" and t["value"].upper() == "JOIN":
                             has_join = True
-                        elif t["type"] == "COMMA":
+                        elif (
+                            t["type"] == "COMMA"
+                            and t["start"] not in rule_config.get(
+                                "mybatis_dynamic_offsets", set()
+                            )
+                        ):
                             has_comma = True
                             
                 if has_join or has_comma:
@@ -219,7 +228,7 @@ class FromMultiRule(BaseRule):
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         
         for item in offending:
             tok = item["token"]
@@ -235,7 +244,7 @@ class FromMultiRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         if not offending:
             return content
             
