@@ -1560,6 +1560,69 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, xml_content)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_dynamic_distinct_on_uses_multiline_keys(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT DISTINCT ON (recorded_at, organization_id,\n'
+            '        <if test="includeRegion">region_id,</if>\n'
+            '            coalesce(category_id, -1))\n'
+            '            *\n'
+            '        FROM sample_item;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            DISTINCT ON (\n'
+            '                recorded_at,\n'
+            '                organization_id,\n'
+            '                <if test="includeRegion">region_id,</if>\n'
+            '                coalesce(category_id, -1)\n'
+            '            ) *\n'
+            '        FROM sample_item;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_preserves_reviewed_dynamic_distinct_layout(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            DISTINCT ON (\n'
+            '                recorded_at,\n'
+            '                organization_id,\n'
+            '                <if test="includeRegion">region_id,</if>\n'
+            '                coalesce(category_id, -1)\n'
+            '            ) *\n'
+            '        FROM sample_item;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_sql_line_mapping(self):
         # XML file with a self-comparison on line 5
         xml_content = (

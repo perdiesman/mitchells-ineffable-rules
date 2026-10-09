@@ -449,6 +449,11 @@ class XmlMybatisSqlRule(BaseRule):
                     in_tag = False
         root_elements = parse_xml_elements(tokens)
         elements = get_all_elements_recursively(root_elements)
+        foreach_ranges = [
+            (element["start_offset"], element["end_offset"])
+            for element in elements
+            if element["tag"] == "foreach"
+        ]
 
         sql_defs = {}
         for el in elements:
@@ -507,6 +512,14 @@ class XmlMybatisSqlRule(BaseRule):
                         "ignored_comma_offsets": ignored_comma_offsets,
                         "mybatis_dynamic_offsets": {
                             idx for idx, after_tag in enumerate(is_after_tag) if after_tag
+                        },
+                        "mybatis_foreach_offsets": {
+                            idx
+                            for idx, source_offset in enumerate(mapping)
+                            if any(
+                                start <= source_offset < end
+                                for start, end in foreach_ranges
+                            )
                         },
                         "base_indent": base_indent,
                         "tag_ranges": tag_ranges,
@@ -574,6 +587,11 @@ class XmlMybatisSqlRule(BaseRule):
 
         root_elements = parse_xml_elements(tokens)
         elements = get_all_elements_recursively(root_elements)
+        foreach_ranges = [
+            (element["start_offset"], element["end_offset"])
+            for element in elements
+            if element["tag"] == "foreach"
+        ]
         dynamic_indent_ranges = get_dynamic_indent_ranges(
             elements, content, rule_config
         )
@@ -630,6 +648,14 @@ class XmlMybatisSqlRule(BaseRule):
                     "ignored_comma_offsets": ignored_comma_offsets,
                     "mybatis_dynamic_offsets": {
                         idx for idx, after_tag in enumerate(is_after_tag) if after_tag
+                    },
+                    "mybatis_foreach_offsets": {
+                        idx
+                        for idx, source_offset in enumerate(mapping)
+                        if any(
+                            start <= source_offset < end
+                            for start, end in foreach_ranges
+                        )
                     },
                     "mybatis_dynamic_indent_ranges": [
                         item

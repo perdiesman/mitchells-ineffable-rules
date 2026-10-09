@@ -127,7 +127,7 @@ class WhereSingleRule(BaseRule):
                         > max_length
                     )
                     dynamic_offsets = rule_config.get(
-                        "mybatis_dynamic_offsets", set()
+                        "mybatis_foreach_offsets", set()
                     )
                     if any(
                         token["start"] in dynamic_offsets

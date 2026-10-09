@@ -262,6 +262,7 @@ def fix_embedded_content(
         offset_sensitive_order = {
             "IR-comma-style": 0,
             "IR-where-multi": 1,
+            "IR-column-layout": 2,
         }
         guest_rules.sort(
             key=lambda rule: (
@@ -269,7 +270,7 @@ def fix_embedded_content(
                 if rule.commit_semantic_rewrite
                 else offset_sensitive_order.get(
                     rule.rule_id,
-                    3 if rule.embedded_dynamic_indent_safe else 2,
+                    3 if rule.embedded_dynamic_indent_safe else 4,
                 )
             )
         )

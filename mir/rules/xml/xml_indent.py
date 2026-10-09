@@ -1,6 +1,7 @@
 import re
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
+from mir.rules.sql.sql_utils import tokenize_sql
 from mir.rules.xml.xml_utils import tokenize_xml
 def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines: List[str], indent_size: int) -> str:
     # 1. Find the query tag in active_parents
@@ -177,6 +178,136 @@ class XmlIndentRule(BaseRule):
                 "replacement": "\n" + indent,
                 "message": "MyBatis delete statements should place FROM on the next line.",
             })
+        for element in elements:
+            if element["tag"] not in {"select", "sql"}:
+                continue
+            body_start = tokens[element["open_end_idx"]]["end"]
+            body_end = tokens[element["end_idx"]]["start"]
+            body = content[body_start:body_end]
+            for match in re.finditer(
+                r"(?i)\bSELECT\s+DISTINCT\s+ON\s*\(", body
+            ):
+                select_start = body_start + match.start()
+                open_paren = body_start + match.end() - 1
+                depth = 1
+                quote = None
+                cursor = open_paren + 1
+                close_paren = None
+                while cursor < body_end:
+                    char = content[cursor]
+                    if char == "<":
+                        tag_end = content.find(">", cursor, body_end)
+                        if tag_end == -1:
+                            break
+                        cursor = tag_end + 1
+                        continue
+                    if quote:
+                        if char == quote:
+                            if cursor + 1 < body_end and content[cursor + 1] == quote:
+                                cursor += 2
+                                continue
+                            quote = None
+                    elif char in ("'", '"'):
+                        quote = char
+                    elif char == "(":
+                        depth += 1
+                    elif char == ")":
+                        depth -= 1
+                        if depth == 0:
+                            close_paren = cursor
+                            break
+                    cursor += 1
+                if close_paren is None:
+                    continue
+                inner = content[open_paren + 1:close_paren]
+                if "<if" not in inner.lower():
+                    continue
+                suffix = re.match(r"\s*\*", content[close_paren + 1:body_end])
+                if suffix is None:
+                    continue
+                projection_end = close_paren + 1 + suffix.end()
+
+                parts = []
+                segment_start = 0
+                inner_depth = 0
+                inner_quote = None
+                index = 0
+                while index < len(inner):
+                    char = inner[index]
+                    if char == "<" and inner[index:index + 3].lower() == "<if":
+                        if inner[segment_start:index].strip():
+                            parts.append((inner[segment_start:index], False))
+                        close_tag = inner.lower().find("</if>", index)
+                        if close_tag == -1:
+                            break
+                        close_tag += len("</if>")
+                        parts.append((inner[index:close_tag], False))
+                        index = close_tag
+                        segment_start = index
+                        continue
+                    if inner_quote:
+                        if char == inner_quote:
+                            if index + 1 < len(inner) and inner[index + 1] == inner_quote:
+                                index += 2
+                                continue
+                            inner_quote = None
+                    elif char in ("'", '"'):
+                        inner_quote = char
+                    elif char == "(":
+                        inner_depth += 1
+                    elif char == ")":
+                        inner_depth -= 1
+                    elif char == "," and inner_depth == 0:
+                        parts.append((inner[segment_start:index], True))
+                        segment_start = index + 1
+                    index += 1
+                if inner[segment_start:].strip():
+                    parts.append((inner[segment_start:], False))
+
+                normalized_parts = []
+                for part, had_comma in parts:
+                    stripped = part.strip()
+                    if not stripped:
+                        continue
+                    if stripped.startswith("<"):
+                        normalized = re.sub(r">\s+", ">", stripped)
+                        normalized = re.sub(r"\s+<", "<", normalized)
+                    else:
+                        sql_tokens = tokenize_sql(stripped)
+                        normalized = "".join(
+                            " " if item["type"] == "WHITESPACE" else item["value"]
+                            for item in sql_tokens
+                        ).strip()
+                    if had_comma:
+                        normalized += ","
+                    normalized_parts.append(normalized)
+                if not normalized_parts:
+                    continue
+
+                line_start = content.rfind("\n", 0, select_start) + 1
+                prefix = content[line_start:select_start]
+                indent = prefix[: len(prefix) - len(prefix.lstrip(" \t"))]
+                distinct_indent = indent + " " * indent_size
+                inner_indent = distinct_indent + " " * indent_size
+                expected = (
+                    "SELECT\n"
+                    + distinct_indent
+                    + "DISTINCT ON (\n"
+                    + "\n".join(inner_indent + part for part in normalized_parts)
+                    + "\n"
+                    + distinct_indent
+                    + ") *"
+                )
+                original = content[select_start:projection_end]
+                if original != expected:
+                    violations.append({
+                        "line": content.count("\n", 0, select_start) + 1,
+                        "start_offset": select_start,
+                        "end_offset": projection_end,
+                        "replacement": expected,
+                        "message": "Dynamic DISTINCT ON keys should use multiline column layout.",
+                        "structural": True,
+                    })
         for token_index, token in enumerate(tokens):
             if token["type"] != "TAG_OPEN_START" or token["value"][1:].lower() != "include":
                 continue
@@ -574,6 +705,21 @@ class XmlIndentRule(BaseRule):
                     filtered_violations.append(v)
             violations = filtered_violations
             
+        structural_spans = [
+            (item["start_offset"], item["end_offset"])
+            for item in violations
+            if item.get("structural")
+        ]
+        if structural_spans:
+            violations = [
+                item
+                for item in violations
+                if item.get("structural")
+                or not any(
+                    start <= item["start_offset"] < end
+                    for start, end in structural_spans
+                )
+            ]
         return violations
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
