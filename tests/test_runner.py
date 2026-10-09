@@ -7,7 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from mir.engine.config import Config
-from mir.engine.runner import process_document, run_linter
+from mir.engine.runner import process_document, remap_selected_lines, run_linter
 from mir.rules.xml.xml_mybatis_sql import get_mybatis_protected_signatures
 
 class TestRunnerIntegration(unittest.TestCase):
@@ -22,6 +22,12 @@ class TestRunnerIntegration(unittest.TestCase):
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
         return filepath
+
+    def test_selected_lines_follow_inserted_formatter_output(self):
+        original = "SELECT value\nFROM sample\nWHERE enabled = true\n"
+        fixed = "SELECT value\nFROM\n    sample\nWHERE enabled = true\n"
+
+        self.assertEqual(remap_selected_lines(original, fixed, {2, 3}), {2, 3, 4})
 
     def test_runner_check_mode(self):
         path = self.write_temp_file("test.sql", "select * from t;")
@@ -1053,6 +1059,7 @@ class TestRunnerIntegration(unittest.TestCase):
         config = Config()
         config.paths = [path]
         config.profile = "commit"
+        config.lines = [3]
         config.fix = True
 
         self.assertEqual(run_linter(config), 0)

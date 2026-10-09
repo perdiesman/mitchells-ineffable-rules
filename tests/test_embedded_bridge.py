@@ -67,6 +67,27 @@ class TestEmbeddedBridgeSafety(unittest.TestCase):
     def test_overlapping_edits_are_rejected(self):
         self.assertFalse(is_fixed_text_xml_safe("plain text", [], [(0, 5, "a"), (4, 6, "b")]))
 
+    def test_edit_cannot_join_sql_text_to_a_mybatis_tag(self):
+        content = "<select>\n    SELECT item_id\n    <if test=\"enabled\">\n"
+        tag_start = content.index("<if")
+        tag_end = content.index(">", tag_start) + 1
+        edit_start = content.index("SELECT")
+
+        self.assertFalse(
+            is_fixed_text_xml_safe(
+                content,
+                [(0, len("<select>")), (tag_start, tag_end)],
+                [(edit_start, tag_start, "SELECT item_id ")],
+            )
+        )
+        self.assertTrue(
+            is_fixed_text_xml_safe(
+                content,
+                [(0, len("<select>")), (tag_start, tag_end)],
+                [(edit_start, tag_start, "SELECT item_id\n    ")],
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -229,6 +229,39 @@ class XmlIndentRule(BaseRule):
                                 break
                     line_min_parent_indent[l] = min_parent_indent
 
+            if t["type"] == "TEXT" and t["value"].strip():
+                dynamic_parent = next(
+                    (
+                        parent
+                        for parent in reversed(tag_stack)
+                        if parent["tag"] in {
+                            "if", "foreach", "choose", "when", "otherwise",
+                            "trim", "where", "set",
+                        }
+                    ),
+                    None,
+                )
+                if dynamic_parent is not None:
+                    parent_indent = dynamic_parent.get("resolved_indent")
+                    if parent_indent is None:
+                        parent_line = lines[dynamic_parent["token"]["line"] - 1]
+                        parent_indent = parent_line[: len(parent_line) - len(parent_line.lstrip(" \t"))]
+                    minimum_indent = parent_indent + " " * indent_size
+                    for text_line in range(line, end_line + 1):
+                        if text_line < 1 or text_line > len(lines):
+                            continue
+                        line_text = lines[text_line - 1]
+                        if not line_text.strip() or line_text.lstrip().startswith("<"):
+                            continue
+                        actual_indent = line_text[: len(line_text) - len(line_text.lstrip(" \t"))]
+                        first_word = line_text.strip().split(None, 1)[0].upper()
+                        is_dynamic_continuation = (
+                            first_word in {"AND", "OR"}
+                            or line_text.strip().startswith(("#{", "${", ":"))
+                        )
+                        if is_dynamic_continuation or len(actual_indent) < len(minimum_indent):
+                            explicit_expected_indent[text_line] = minimum_indent
+
             # Track depth transitions
             if t["type"] == "TAG_OPEN_START":
                 tag_name = t["value"][1:].lower()

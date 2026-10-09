@@ -157,6 +157,38 @@ def apply_filtered_fixes(original: str, fixed: str, target_lines: Set[int]) -> s
     return "".join(result)
 
 
+def remap_selected_lines(
+    original: str, fixed: str, target_lines: Set[int]
+) -> Set[int]:
+    """Map an authorized line scope through an accepted formatting edit."""
+    if not target_lines or original == fixed:
+        return set(target_lines)
+
+    original_lines = original.splitlines(keepends=True)
+    fixed_lines = fixed.splitlines(keepends=True)
+    remapped: set[int] = set()
+    matcher = difflib.SequenceMatcher(None, original_lines, fixed_lines, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            for old_index in range(i1, i2):
+                if old_index + 1 in target_lines:
+                    remapped.add(j1 + (old_index - i1) + 1)
+            continue
+
+        affected = set(range(i1 + 1, i2 + 1))
+        if tag == "insert":
+            affected = {max(1, i1), i1 + 1}
+        if not affected.intersection(target_lines):
+            continue
+        if j1 < j2:
+            remapped.update(range(j1 + 1, j2 + 1))
+        elif fixed_lines:
+            remapped.add(min(len(fixed_lines), max(1, j1 + 1)))
+    if not remapped and fixed_lines:
+        remapped.add(min(len(fixed_lines), max(1, min(target_lines))))
+    return remapped
+
+
 def resolve_rule_config(
     config: Config,
     rule_id: str,
@@ -349,7 +381,8 @@ def process_document(
 ) -> DocumentResult:
     selection = selection or expand_selection(content, lang, config.lines)
     result = DocumentResult(path, content, content)
-    initial, diagnostics = _collect(config, content, path, lang, selection)
+    active_selection = selection
+    initial, diagnostics = _collect(config, content, path, lang, active_selection)
     result.diagnostics.extend(diagnostics)
 
     if config.fix or config.dry_run:
@@ -376,7 +409,7 @@ def process_document(
                     rule.rule_id,
                     lang,
                     detect_base_indent(current),
-                    set(selection.allowed),
+                    set(active_selection.allowed),
                     template_dialect,
                 )
                 rule_config["rules_fixed"] = result.rules_fixed
@@ -385,8 +418,10 @@ def process_document(
                 except Exception as error:
                     result.diagnostics.append(f"Error fixing rule {rule.rule_id} on {path}: {error}")
                     continue
-                if selection.restricted:
-                    fixed = apply_filtered_fixes(current, fixed, set(selection.allowed))
+                if active_selection.restricted:
+                    fixed = apply_filtered_fixes(
+                        current, fixed, set(active_selection.allowed)
+                    )
                 if config.profile == "commit" and lang == "sql" and fixed != current:
                     from mir.rules.sql.sql_utils import protected_sql_signature
 
@@ -407,11 +442,24 @@ def process_document(
                             continue
                 if fixed != current:
                     result.rules_fixed.add(rule.rule_id)
+                    if active_selection.restricted:
+                        active_selection = LineSelection(
+                            active_selection.changed,
+                            frozenset(
+                                remap_selected_lines(
+                                    current,
+                                    fixed,
+                                    set(active_selection.allowed),
+                                )
+                            ),
+                        )
                     current = fixed
             if current == before_pass:
                 break
             cycle_detected = current in seen
-            violations, pass_diagnostics = _collect(config, current, path, lang, selection)
+            violations, pass_diagnostics = _collect(
+                config, current, path, lang, active_selection
+            )
             result.diagnostics.extend(pass_diagnostics)
             if cycle_detected:
                 result.diagnostics.append(f"Formatter did not converge for {path}; a formatting cycle was detected")

@@ -144,7 +144,33 @@ def check_embedded_content(
             
     return violations
 
-def is_fixed_text_xml_safe(original_xml: str, tag_ranges: List[Tuple[int, int]], edits: List[Tuple[int, int, str]]) -> bool:
+def _build_xml_safety_context(
+    original_xml: str, tag_ranges: List[Tuple[int, int]]
+) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]]]:
+    sorted_ranges = sorted(tag_ranges)
+    newline_gaps = []
+    for tag_start, tag_end in sorted_ranges:
+        before = tag_start
+        while before > 0 and original_xml[before - 1].isspace():
+            before -= 1
+        if "\n" in original_xml[before:tag_start]:
+            newline_gaps.append((before, tag_start))
+
+        after = tag_end
+        while after < len(original_xml) and original_xml[after].isspace():
+            after += 1
+        if "\n" in original_xml[tag_end:after]:
+            newline_gaps.append((tag_end, after))
+    newline_gaps.sort()
+    return sorted_ranges, newline_gaps
+
+
+def is_fixed_text_xml_safe(
+    original_xml: str,
+    tag_ranges: List[Tuple[int, int]],
+    edits: List[Tuple[int, int, str]],
+    safety_context: Tuple[List[Tuple[int, int]], List[Tuple[int, int]]] = None,
+) -> bool:
     """Return whether source-mapped edits leave every XML tag untouched.
 
     SQL edits may freely change structural SQL characters in text nodes.  The
@@ -162,9 +188,12 @@ def is_fixed_text_xml_safe(original_xml: str, tag_ranges: List[Tuple[int, int]],
             return False
         previous_end = max(previous_end, end)
 
-    sorted_ranges = sorted(tag_ranges)
+    if safety_context is None:
+        safety_context = _build_xml_safety_context(original_xml, tag_ranges)
+    sorted_ranges, newline_gaps = safety_context
+
     range_index = 0
-    for start, end, _ in sorted_edits:
+    for start, end, replacement in sorted_edits:
         while range_index < len(sorted_ranges) and sorted_ranges[range_index][1] <= start:
             range_index += 1
         if range_index >= len(sorted_ranges):
@@ -178,6 +207,15 @@ def is_fixed_text_xml_safe(original_xml: str, tag_ranges: List[Tuple[int, int]],
                 return False
         elif start < tag_end and end > tag_start:
             return False
+
+        for gap_start, gap_end in newline_gaps:
+            if gap_start >= end:
+                break
+            if gap_end <= start:
+                continue
+            consumed = original_xml[max(start, gap_start):min(end, gap_end)]
+            if "\n" in consumed and "\n" not in replacement:
+                return False
     return True
 
 def fix_embedded_content(
@@ -197,6 +235,15 @@ def fix_embedded_content(
         require_embedded_safe,
     )
     fixed_text = guest_text
+    xml_safety_context = None
+    if (
+        extra_fix_args
+        and "original_xml" in extra_fix_args
+        and "tag_ranges" in extra_fix_args
+    ):
+        xml_safety_context = _build_xml_safety_context(
+            extra_fix_args["original_xml"], extra_fix_args["tag_ranges"]
+        )
     
     all_configs = rule_config.get("_all_configs", {})
     
@@ -347,15 +394,31 @@ def fix_embedded_content(
                             if not (extra_fix_args and "base_indent" in extra_fix_args):
                                 skip = True
 
-                    if not skip:
-                        block_edits.append((start_orig, end_orig, replacement))
+                    candidate_edit = (start_orig, end_orig, replacement)
+                    if (
+                        not skip
+                        and (
+                            not extra_fix_args
+                            or "original_xml" not in extra_fix_args
+                            or "tag_ranges" not in extra_fix_args
+                            or is_fixed_text_xml_safe(
+                                extra_fix_args["original_xml"],
+                                extra_fix_args["tag_ranges"],
+                                [candidate_edit],
+                                xml_safety_context,
+                            )
+                        )
+                    ):
+                        block_edits.append(candidate_edit)
 
                 edits.extend(block_edits)
 
     if edits and extra_fix_args and "original_xml" in extra_fix_args and "tag_ranges" in extra_fix_args:
         original_xml = extra_fix_args["original_xml"]
         tag_ranges = extra_fix_args["tag_ranges"]
-        if not is_fixed_text_xml_safe(original_xml, tag_ranges, edits):
+        if not is_fixed_text_xml_safe(
+            original_xml, tag_ranges, edits, xml_safety_context
+        ):
             return []
 
     return edits
