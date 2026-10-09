@@ -1685,6 +1685,35 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, xml_content)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_from_layout_does_not_cross_choose_boundary(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM (\n'
+            '            <choose>\n'
+            '                <when test="county">SELECT item_id, owner_id FROM sample_county_item</when>\n'
+            '                <otherwise>SELECT item_id, owner_id FROM sample_state_item</otherwise>\n'
+            '            </choose>\n'
+            '        ) item\n'
+            '        LEFT JOIN sample_owner owner ON owner.owner_id = item.owner_id\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertIn(
+            "        LEFT JOIN sample_owner owner ON owner.owner_id = item.owner_id",
+            first.content,
+        )
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_sql_line_mapping(self):
         # XML file with a self-comparison on line 5
         xml_content = (

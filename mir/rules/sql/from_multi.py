@@ -41,6 +41,9 @@ class FromMultiRule(BaseRule):
         depths = get_token_depths(tokens)
         violations = []
         n = len(tokens)
+        mybatis_boundary_offsets = sorted(
+            rule_config.get("mybatis_boundary_offsets", set())
+        )
         
         for i, tok in enumerate(tokens):
             if tok["type"] == "KEYWORD" and tok["value"].upper() == "FROM":
@@ -77,9 +80,20 @@ class FromMultiRule(BaseRule):
                 
                 # Find FROM range
                 clause_end = n
+                next_boundary = next(
+                    (
+                        offset
+                        for offset in mybatis_boundary_offsets
+                        if offset > tok["end"]
+                    ),
+                    None,
+                )
                 for idx in range(i + 1, n):
                     t = tokens[idx]
                     d = depths[idx]
+                    if next_boundary is not None and t["end"] > next_boundary:
+                        clause_end = idx
+                        break
                     if d < outer_depth:
                         clause_end = idx
                         break
@@ -95,7 +109,6 @@ class FromMultiRule(BaseRule):
                             
                 clause_tokens = tokens[i + 1:clause_end]
                 clause_depths = depths[i + 1:clause_end]
-                
                 has_join = False
                 has_comma = False
                 for t, d in zip(clause_tokens, clause_depths):
@@ -223,6 +236,16 @@ class FromMultiRule(BaseRule):
                                             "replacement": expected_replacement
                                         })
                                         
+        if mybatis_boundary_offsets:
+            violations = [
+                item
+                for item in violations
+                if not any(
+                    item["ws_start"] <= boundary <= item["ws_end"]
+                    for boundary in mybatis_boundary_offsets
+                )
+            ]
+
         return violations
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
