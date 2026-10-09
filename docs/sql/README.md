@@ -17,7 +17,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | :--- | :--- | :---: | :---: |
 | [`IR-as-spacing`](rules/general/IR-as-spacing.md) | The AS keyword must be preceded by exactly one space. | Yes | [View Details](rules/general/IR-as-spacing.md) |
 | [`IR-blank-lines`](rules/general/IR-blank-lines.md) | Limit consecutive blank lines to a configurable maximum. | Yes | [View Details](rules/general/IR-blank-lines.md) |
-| [`IR-comma-style`](rules/general/IR-comma-style.md) | Enforce trailing commas in multiline listings and forbid leading commas. | Yes | [View Details](rules/general/IR-comma-style.md) |
+| [`IR-comma-style`](rules/general/IR-comma-style.md) | Enforce trailing commas in multiline listings and forbid whitespace before commas. | Yes | [View Details](rules/general/IR-comma-style.md) |
 | [`IR-comment-spacing`](rules/general/IR-comment-spacing.md) | Enforce a single space after the double-dash comment prefix. | Yes | [View Details](rules/general/IR-comment-spacing.md) |
 | [`IR-eof-newline`](rules/general/IR-eof-newline.md) | Enforce that every SQL file ends with exactly one newline character. | Yes | [View Details](rules/general/IR-eof-newline.md) |
 | [`IR-indent`](rules/general/IR-indent.md) | Indent should be equal amounts of spaces (default 4). | Yes | [View Details](rules/general/IR-indent.md) |
@@ -34,10 +34,12 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
+| [`IR-additive-wrap`](rules/queries/IR-additive-wrap.md) | Long additive expressions should wrap before an operator, with all continuation operators aligned one indentation level in. | Yes | [View Details](rules/queries/IR-additive-wrap.md) |
 | [`IR-alias-as`](rules/queries/IR-alias-as.md) | Column aliases must use the AS keyword. | Yes | [View Details](rules/queries/IR-alias-as.md) |
 | [`IR-between`](rules/queries/IR-between.md) | Standardize range predicate check of form 'a >= b AND a <= c' to 'a BETWEEN b AND c'. | Yes | [View Details](rules/queries/IR-between.md) |
 | [`IR-boolean-comparison`](rules/queries/IR-boolean-comparison.md) | Standardize boolean comparison predicates to use idiomatic boolean predicates. | Yes | [View Details](rules/queries/IR-boolean-comparison.md) |
 | [`IR-case`](rules/queries/IR-case.md) | CASE statements should be formatted with WHEN/THEN on separate lines unless the block is simple (exactly one WHEN condition and an optional ELSE clause) and fits on a single line within length constraints. | Yes | [View Details](rules/queries/IR-case.md) |
+| [`IR-case-when-wrap`](rules/queries/IR-case-when-wrap.md) | Keep WHEN and THEN on one line when they fit; otherwise put THEN on an indented continuation line. | Yes | [View Details](rules/queries/IR-case-when-wrap.md) |
 | [`IR-clause-alignment`](rules/queries/IR-clause-alignment.md) | Main query clause keywords (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT) must have the exact same indentation within the same query block when the query spans multiple lines. | Yes | [View Details](rules/queries/IR-clause-alignment.md) |
 | [`IR-coalesce-standard`](rules/queries/IR-coalesce-standard.md) | Use standard COALESCE instead of dialect-specific null-handling functions like NVL, IFNULL, or ISNULL. | Yes | [View Details](rules/queries/IR-coalesce-standard.md) |
 | [`IR-column-layout`](rules/queries/IR-column-layout.md) | On select, order by, group by, if all the columns fit on one line then put them on one line, otherwise wrap one per line. | Yes | [View Details](rules/queries/IR-column-layout.md) |

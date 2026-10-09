@@ -140,7 +140,8 @@ class TestGitStaged(unittest.TestCase):
 
         self.assertEqual(
             self.git("show", ":queries.sql"),
-            "SELECT item_id FROM sample_item WHERE\n"
+            "SELECT item_id FROM sample_item\n"
+            "WHERE\n"
             "    recorded_at BETWEEN :start AND :end\n"
             "    AND owning_organization_identifier_for_processed_sample_record = :new_organization;\n",
         )

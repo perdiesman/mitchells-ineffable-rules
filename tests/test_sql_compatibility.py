@@ -4,6 +4,7 @@ from mir.rules.sql.function_case import FunctionCaseRule
 from mir.rules.sql.from_multi import FromMultiRule
 from mir.rules.sql.clause_alignment import ClauseAlignmentRule
 from mir.rules.sql.column_layout import ColumnLayoutRule
+from mir.rules.sql.comma_style import CommaStyleRule
 from mir.rules.sql.join_on_multi import JoinOnMultiRule
 from mir.rules.sql.keyword_case import KeywordCaseRule
 from mir.rules.sql.named_parameters import NamedParametersRule
@@ -21,6 +22,15 @@ from mir.rules.sql.where_multi import WhereMultiRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_comma_style_removes_space_before_trailing_comma(self):
+        source = "SELECT coalesce(item_count::NUMERIC , 0::NUMERIC) FROM sample_item;"
+        expected = "SELECT coalesce(item_count::NUMERIC, 0::NUMERIC) FROM sample_item;"
+
+        rule = CommaStyleRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(expected, "generic.sql", {}), [])
+
     def test_template_parameters_are_opaque_tokens(self):
         content = (
             "SELECT item_id FROM ${schemaName}.sample_table "
