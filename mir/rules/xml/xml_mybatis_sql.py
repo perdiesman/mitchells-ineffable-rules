@@ -421,6 +421,40 @@ def get_mybatis_protected_signatures(
     return tuple(signatures)
 
 
+def get_mybatis_fragment_protected_signature(
+    fragment: str,
+    sql_defs: Dict[str, List[dict]],
+    target: tuple[str, str],
+):
+    """Return one statement signature without reparsing its whole mapper."""
+    from mir.rules.sql.sql_utils import protected_sql_signature
+
+    tokens = tokenize_xml(fragment)
+    elements = get_all_elements_recursively(parse_xml_elements(tokens))
+    target_tag, target_id = target
+    element = next(
+        (
+            item
+            for item in elements
+            if item["tag"] == target_tag and item["attrs"].get("id") == target_id
+        ),
+        None,
+    )
+    if element is None:
+        return None
+    expanded_chars = []
+    mapping = []
+    is_after_tag = []
+    expand_tokens(
+        element["inner_tokens"],
+        sql_defs,
+        expanded_chars,
+        mapping,
+        is_after_tag,
+    )
+    return protected_sql_signature("".join(expanded_chars))
+
+
 class XmlMybatisSqlRule(BaseRule):
     commit_profile = True
     rule_id = "IR-xml-mybatis-sql"
@@ -641,6 +675,7 @@ class XmlMybatisSqlRule(BaseRule):
         target_tags = {"select", "insert", "update", "delete", "sql"}
         all_xml_edits = []
         expected_signature_updates = {}
+        original_signature_map = {}
         lines_filter = rule_config.get("_lines")
 
         for el in elements:
@@ -711,21 +746,27 @@ class XmlMybatisSqlRule(BaseRule):
                     require_embedded_safe=True,
                     extra_fix_args=bridge_state,
                 )
+                statement_key = (el["tag"], el["attrs"]["id"])
+                original_signature_map[statement_key] = bridge_state[
+                    "original_protected_signature"
+                ]
                 if edits:
-                    candidate_chars = list(content)
-                    for start, end, replacement in sorted(edits, reverse=True):
-                        candidate_chars[start:end] = list(replacement)
-                    statement_key = (el["tag"], el["attrs"]["id"])
-                    candidate_signatures = get_mybatis_protected_signatures(
-                        "".join(candidate_chars), target=statement_key
-                    )
-                    candidate_signature = next(
-                        (
-                            signature
-                            for tag, statement_id, signature in candidate_signatures
-                            if tag == el["tag"] and statement_id == el["attrs"]["id"]
-                        ),
-                        None,
+                    fragment_start = el["start_offset"]
+                    fragment_end = el["end_offset"]
+                    fragment_chars = list(content[fragment_start:fragment_end])
+                    fragment_edits = [
+                        (start, end, replacement)
+                        for start, end, replacement in edits
+                        if fragment_start <= start <= end <= fragment_end
+                    ]
+                    if len(fragment_edits) != len(edits):
+                        continue
+                    for start, end, replacement in sorted(fragment_edits, reverse=True):
+                        relative_start = start - fragment_start
+                        relative_end = end - fragment_start
+                        fragment_chars[relative_start:relative_end] = list(replacement)
+                    candidate_signature = get_mybatis_fragment_protected_signature(
+                        "".join(fragment_chars), sql_defs, statement_key
                     )
                     allowed_signatures = {
                         bridge_state["original_protected_signature"],
@@ -774,11 +815,19 @@ class XmlMybatisSqlRule(BaseRule):
             chars[start:end] = list(new_text)
 
         fixed_content = "".join(chars)
-        original_signatures = get_mybatis_protected_signatures(content)
-        original_signature_map = {
-            (tag, statement_id): signature
-            for tag, statement_id, signature in original_signatures
-        }
+        if lines_filter:
+            # A line-restricted pass expands only selected statements above,
+            # but final safety validation still covers the entire mapper.
+            original_signatures = get_mybatis_protected_signatures(content)
+            original_signature_map = {
+                (tag, statement_id): signature
+                for tag, statement_id, signature in original_signatures
+            }
+        else:
+            original_signatures = tuple(
+                (tag, statement_id, signature)
+                for (tag, statement_id), signature in original_signature_map.items()
+            )
         expected_signatures = tuple(
             (
                 tag,
