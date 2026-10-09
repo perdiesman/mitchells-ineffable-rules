@@ -126,6 +126,15 @@ class WhereSingleRule(BaseRule):
                         source_text_length(where_indent + clause_single, rule_config)
                         > max_length
                     )
+                    dynamic_offsets = rule_config.get(
+                        "mybatis_dynamic_offsets", set()
+                    )
+                    if any(
+                        token["start"] in dynamic_offsets
+                        for token in clause_tokens
+                        if token["type"] not in ("WHITESPACE", "COMMENT")
+                    ):
+                        should_wrap = True
                     prefix_before_where = content[line_start:tok["start"]].rstrip()
                     if prefix_before_where.strip():
                         should_wrap = (

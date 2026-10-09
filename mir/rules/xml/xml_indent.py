@@ -234,17 +234,52 @@ class XmlIndentRule(BaseRule):
             line_start = content.rfind("\n", 0, token["start"]) + 1
             prefix = content[line_start:token["start"]]
             sql_prefix = prefix.rstrip(" \t")
-            if not sql_prefix or sql_prefix.split()[-1].upper() != "IN":
+            same_line = bool(sql_prefix)
+            if same_line:
+                in_line = sql_prefix
+                gap_start = line_start + len(sql_prefix)
+                gap_replacement_prefix = "\n"
+            else:
+                previous_line_end = line_start - 1
+                previous_line_start = content.rfind(
+                    "\n", 0, previous_line_end
+                ) + 1
+                in_line = content[previous_line_start:previous_line_end].rstrip(
+                    " \t"
+                )
+                gap_start = line_start
+                gap_replacement_prefix = ""
+            if not in_line or in_line.split()[-1].upper() != "IN":
                 continue
-            gap_start = line_start + len(sql_prefix)
-            line_indent = prefix[: len(prefix) - len(prefix.lstrip(" \t"))]
-            violations.append({
-                "line": token["line"],
-                "start_offset": gap_start,
-                "end_offset": token["start"],
-                "replacement": "\n" + line_indent + " " * indent_size,
-                "message": "MyBatis foreach continuation should start on the line after IN.",
-            })
+            line_indent = in_line[: len(in_line) - len(in_line.lstrip(" \t"))]
+            foreach_indent = line_indent + " " * indent_size
+            inline_where = re.match(
+                r"(?i)^([ \t]*)WHERE([ \t]+)(.+\bIN)$", in_line
+            )
+            if inline_where is not None:
+                in_line_start = line_start if same_line else previous_line_start
+                where_gap_start = in_line_start + inline_where.start(2)
+                where_gap_end = in_line_start + inline_where.end(2)
+                condition_indent = line_indent + " " * indent_size
+                where_replacement = "\n" + condition_indent
+                if content[where_gap_start:where_gap_end] != where_replacement:
+                    violations.append({
+                        "line": token["line"],
+                        "start_offset": where_gap_start,
+                        "end_offset": where_gap_end,
+                        "replacement": where_replacement,
+                        "message": "A WHERE condition continued by foreach should start on its own line.",
+                    })
+                foreach_indent = condition_indent + " " * indent_size
+            foreach_replacement = gap_replacement_prefix + foreach_indent
+            if content[gap_start:token["start"]] != foreach_replacement:
+                violations.append({
+                    "line": token["line"],
+                    "start_offset": gap_start,
+                    "end_offset": token["start"],
+                    "replacement": foreach_replacement,
+                    "message": "MyBatis foreach continuation should start on the line after IN.",
+                })
 
         # Build line starts mapping
         line_starts = [0]
@@ -558,9 +593,14 @@ class XmlIndentRule(BaseRule):
         if not offending:
             return content
             
-        edits = []
+        edits_by_range = {}
         for item in offending:
-            edits.append((item["start_offset"], item["end_offset"], item["replacement"]))
+            key = (item["start_offset"], item["end_offset"])
+            edits_by_range.setdefault(key, item["replacement"])
+        edits = [
+            (start, end, replacement)
+            for (start, end), replacement in edits_by_range.items()
+        ]
             
         edits.sort(key=lambda x: x[0], reverse=True)
         chars = list(content)
