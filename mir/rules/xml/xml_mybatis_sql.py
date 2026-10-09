@@ -635,6 +635,8 @@ class XmlMybatisSqlRule(BaseRule):
                         if el["start_offset"] < item[0] < item[1] < el["end_offset"]
                     ],
                     "base_indent": base_indent,
+                    "mybatis_element_tag": el["tag"],
+                    "mybatis_element_id": el["attrs"]["id"],
                     "tag_ranges": tag_ranges,
                     "original_xml": content,
                     "source_range": (el["start_offset"], el["end_offset"]),

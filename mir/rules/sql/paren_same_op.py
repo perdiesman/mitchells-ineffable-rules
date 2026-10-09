@@ -8,6 +8,8 @@ from mir.rules.sql.sql_utils import (
 )
 
 class ParenSameOpRule(BaseRule):
+    commit_profile = True
+    commit_semantic_rewrite = True
     embedded_safe = True
     rule_id = "IR-paren-same-op"
     description = "Unnecessary parentheses around homogeneous logical conditions should be removed."
@@ -30,7 +32,11 @@ class ParenSameOpRule(BaseRule):
         "SELECT id FROM users WHERE (active = true);"  # Checked by IR-paren-single, skip here
     ]
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _find_violations(
+        self, content: str, rule_config: Dict[str, Any] | None = None
+    ) -> List[dict]:
+        if (rule_config or {}).get("mybatis_element_tag") == "sql":
+            return []
         tokens = tokenize_sql(content)
         violations = []
         n = len(tokens)
@@ -160,7 +166,7 @@ class ParenSameOpRule(BaseRule):
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending_pairs = self._find_violations(content)
+        offending_pairs = self._find_violations(content, rule_config)
         
         for pair in offending_pairs:
             tok = pair["open_tok"]
@@ -176,7 +182,7 @@ class ParenSameOpRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        offending_pairs = self._find_violations(content)
+        offending_pairs = self._find_violations(content, rule_config)
         if not offending_pairs:
             return content
             

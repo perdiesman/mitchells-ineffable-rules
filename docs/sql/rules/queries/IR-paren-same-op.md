@@ -5,7 +5,8 @@ Unnecessary parentheses around homogeneous logical conditions should be removed.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
-- **Commit Profile**: No
+- **Commit Profile**: Yes
+- **Intentional Semantic Rewrite**: Yes
 - **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:

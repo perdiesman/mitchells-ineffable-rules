@@ -1039,6 +1039,34 @@ class TestRunnerIntegration(unittest.TestCase):
             any("protected MyBatis SQL syntax changed" in item for item in first.diagnostics)
         )
 
+    def test_xml_mybatis_preserves_fragment_grouping_but_simplifies_complete_statement(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="optionalScope">WHERE (primary_scope OR fallback_scope)</sql>\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        WHERE ((missing_owner OR missing_group) AND enabled)\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            'WHERE ((missing_owner OR missing_group) AND enabled)',
+            'WHERE (missing_owner OR missing_group) AND enabled',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-mybatis-sql", "IR-paren-same-op"]
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertIn("WHERE (primary_scope OR fallback_scope)", first.content)
+
     def test_xml_mybatis_does_not_move_commas_across_dynamic_tags(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
