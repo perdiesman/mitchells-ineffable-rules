@@ -15,6 +15,7 @@ from mir.rules.sql.paren_content_indent import ParenContentIndentRule
 from mir.rules.sql.paren_multi import ParenMultiRule
 from mir.rules.sql.paren_same_op import ParenSameOpRule
 from mir.rules.sql.paren_single import ParenSingleRule
+from mir.rules.sql.parenthesized_expression_wrap import ParenthesizedExpressionWrapRule
 from mir.rules.sql.sql_utils import _tokenize_sql_impl, protected_sql_signature, tokenize_sql
 from mir.rules.sql.statement_semicolon import StatementSemicolonRule
 from mir.rules.sql.subquery_indent import SubqueryIndentRule
@@ -24,6 +25,32 @@ from mir.rules.sql.where_multi import WhereMultiRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_parenthesized_ratio_wrap_is_exact_and_idempotent(self):
+        source = (
+            "    (coalesce(max(current_outage), 0)::NUMERIC / "
+            "greatest(coalesce(sum(normal_value * county_percent), 1)::INTEGER, 1)) "
+            "- 1 AS outage_count"
+        )
+        expected = (
+            "    (\n"
+            "        coalesce(max(current_outage), 0)::NUMERIC\n"
+            "        / greatest(\n"
+            "            coalesce(\n"
+            "                sum(normal_value * county_percent),\n"
+            "                1\n"
+            "            )::INTEGER,\n"
+            "            1\n"
+            "        )\n"
+            "    ) - 1 AS outage_count"
+        )
+        rule = ParenthesizedExpressionWrapRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+
     def test_short_where_compacts_independently_of_the_previous_from_line(self):
         source = (
             "FROM outage_data.materialized_zip_additional_information\n"
