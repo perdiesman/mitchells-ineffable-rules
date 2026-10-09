@@ -76,3 +76,7 @@ SELECT (covered_count::NUMERIC / total_count) - 1 FROM sample_item;
 ```sql
 INSERT INTO sample_item (item_id) VALUES (:item_id) ON CONFLICT (item_id) DO NOTHING;
 ```
+
+```sql
+SELECT item_id FROM sample_item WHERE NOT (enabled AND visible);
+```

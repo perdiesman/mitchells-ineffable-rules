@@ -31,6 +31,7 @@ class ParenSameOpRule(BaseRule):
         "SELECT id FROM users WHERE active = true AND (type = 'admin' OR age > 21);",
         "SELECT id FROM users WHERE (active = true);",  # Checked by IR-paren-single, skip here
         "SELECT count(*) FILTER (WHERE active AND visible) FROM users;",
+        "SELECT id FROM users WHERE NOT (active AND visible);",
     ]
 
     def _find_violations(
@@ -79,7 +80,7 @@ class ParenSameOpRule(BaseRule):
                                 break
                         if prev_prev and prev_prev["value"].upper() == "DISTINCT":
                             is_special = True
-                    elif val_upper == "OVER":
+                    elif val_upper in {"OVER", "NOT"}:
                         is_special = True
                     elif prev_active["type"] == "IDENTIFIER":
                         is_special = True

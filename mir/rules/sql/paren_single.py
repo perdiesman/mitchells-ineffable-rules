@@ -42,6 +42,7 @@ class ParenSingleRule(BaseRule):
         "SELECT item_id FROM sample_item JOIN sample_owner USING (owner_id);",
         "SELECT (covered_count::NUMERIC / total_count) - 1 FROM sample_item;",
         "INSERT INTO sample_item (item_id) VALUES (:item_id) ON CONFLICT (item_id) DO NOTHING;",
+        "SELECT item_id FROM sample_item WHERE NOT (enabled AND visible);",
     ]
 
     def _is_simple_atom(self, tokens: List[dict]) -> bool:
@@ -99,7 +100,7 @@ class ParenSingleRule(BaseRule):
                                 break
                         if prev_prev and prev_prev["value"].upper() == "DISTINCT":
                             is_special = True
-                    elif val_upper == "OVER":
+                    elif val_upper in {"OVER", "NOT"}:
                         is_special = True
                     elif prev_active["type"] == "IDENTIFIER":
                         is_special = True

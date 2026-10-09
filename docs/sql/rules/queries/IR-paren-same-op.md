@@ -38,3 +38,7 @@ SELECT id FROM users WHERE (active = true);
 ```sql
 SELECT count(*) FILTER (WHERE active AND visible) FROM users;
 ```
+
+```sql
+SELECT id FROM users WHERE NOT (active AND visible);
+```
