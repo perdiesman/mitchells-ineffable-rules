@@ -339,8 +339,15 @@ def get_dynamic_indent_ranges(
     return ranges
 
 
-def get_mybatis_protected_signatures(content: str) -> tuple:
-    """Describe protected SQL syntax for every embedded MyBatis statement."""
+def get_mybatis_protected_signatures(
+    content: str, target: tuple[str, str] | None = None
+) -> tuple:
+    """Describe protected SQL syntax for embedded MyBatis statements.
+
+    ``target`` limits expansion to one ``(tag, id)`` pair.  Source-mapping
+    validation calls this once per changed statement; expanding every other
+    mapper statement there made large files effectively quadratic.
+    """
     from mir.rules.sql.sql_utils import protected_sql_signature
 
     tokens = tokenize_xml(content)
@@ -357,6 +364,9 @@ def get_mybatis_protected_signatures(content: str) -> tuple:
     target_tags = {"select", "insert", "update", "delete", "sql"}
     for element in elements:
         if element["tag"] not in target_tags or "id" not in element["attrs"]:
+            continue
+        statement_key = (element["tag"], element["attrs"]["id"])
+        if target is not None and statement_key != target:
             continue
         expanded_chars = []
         mapping = []
@@ -644,8 +654,9 @@ class XmlMybatisSqlRule(BaseRule):
                     candidate_chars = list(content)
                     for start, end, replacement in sorted(edits, reverse=True):
                         candidate_chars[start:end] = list(replacement)
+                    statement_key = (el["tag"], el["attrs"]["id"])
                     candidate_signatures = get_mybatis_protected_signatures(
-                        "".join(candidate_chars)
+                        "".join(candidate_chars), target=statement_key
                     )
                     candidate_signature = next(
                         (
