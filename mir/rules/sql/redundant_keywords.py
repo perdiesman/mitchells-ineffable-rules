@@ -7,7 +7,9 @@ class RedundantKeywordsRule(BaseRule):
     commit_semantic_rewrite = True
     embedded_safe = True
     rule_id = "IR-redundant-keywords"
-    description = "Remove redundant implied keywords like INNER, OUTER, and ASC."
+    description = (
+        "Remove redundant implied keywords like INNER, OUTER, and non-window ASC."
+    )
     category = "general"
     is_fixable = "yes"
     enabled_by_default = True
@@ -27,6 +29,14 @@ class RedundantKeywordsRule(BaseRule):
         tokens = tokenize_sql(content)
         violations = []
         n = len(tokens)
+        enclosing_parentheses = {}
+        parenthesis_stack = []
+        for token_index, token in enumerate(tokens):
+            enclosing_parentheses[token_index] = tuple(parenthesis_stack)
+            if token["type"] == "PAREN" and token["value"] == "(":
+                parenthesis_stack.append(token_index)
+            elif token["type"] == "PAREN" and token["value"] == ")" and parenthesis_stack:
+                parenthesis_stack.pop()
         
         def next_active(start_idx: int) -> int:
             for idx in range(start_idx, n):
@@ -77,6 +87,27 @@ class RedundantKeywordsRule(BaseRule):
                         
             # 3. ASC -> empty
             if val_upper == "ASC":
+                inside_window = False
+                for open_index in reversed(enclosing_parentheses.get(idx, ())):
+                    previous = next(
+                        (
+                            candidate
+                            for candidate in range(open_index - 1, -1, -1)
+                            if tokens[candidate]["type"]
+                            not in ("WHITESPACE", "COMMENT")
+                        ),
+                        None,
+                    )
+                    if (
+                        previous is not None
+                        and tokens[previous]["type"] == "KEYWORD"
+                        and tokens[previous]["value"].upper() == "OVER"
+                    ):
+                        inside_window = True
+                        break
+                if inside_window:
+                    idx += 1
+                    continue
                 ws_before = None
                 if idx - 1 >= 0 and tokens[idx - 1]["type"] == "WHITESPACE":
                     ws_before = tokens[idx - 1]

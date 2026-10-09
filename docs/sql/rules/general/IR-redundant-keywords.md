@@ -1,6 +1,6 @@
 # IR-redundant-keywords
 
-Remove redundant implied keywords like INNER, OUTER, and ASC.
+Remove redundant implied keywords like INNER, OUTER, and non-window ASC.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes

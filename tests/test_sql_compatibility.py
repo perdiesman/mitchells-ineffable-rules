@@ -15,6 +15,7 @@ from mir.rules.sql.paren_content_indent import ParenContentIndentRule
 from mir.rules.sql.paren_multi import ParenMultiRule
 from mir.rules.sql.paren_same_op import ParenSameOpRule
 from mir.rules.sql.paren_single import ParenSingleRule
+from mir.rules.sql.redundant_keywords import RedundantKeywordsRule
 from mir.rules.sql.parenthesized_expression_wrap import ParenthesizedExpressionWrapRule
 from mir.rules.sql.sql_utils import _tokenize_sql_impl, protected_sql_signature, tokenize_sql
 from mir.rules.sql.statement_semicolon import StatementSemicolonRule
@@ -25,6 +26,22 @@ from mir.rules.sql.where_multi import WhereMultiRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_explicit_window_order_direction_is_preserved(self):
+        source = (
+            "SELECT lag(item_count) OVER (PARTITION BY item_type "
+            "ORDER BY recorded_at ASC) FROM sample_item ORDER BY item_type ASC;"
+        )
+        expected = (
+            "SELECT lag(item_count) OVER (PARTITION BY item_type "
+            "ORDER BY recorded_at ASC) FROM sample_item ORDER BY item_type;"
+        )
+
+        rule = RedundantKeywordsRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+
     def test_parenthesized_ratio_wrap_is_exact_and_idempotent(self):
         source = (
             "    (coalesce(max(current_outage), 0)::NUMERIC / "
