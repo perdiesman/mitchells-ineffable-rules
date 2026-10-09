@@ -264,9 +264,13 @@ def fix_embedded_content(
             "IR-where-multi": 1,
         }
         guest_rules.sort(
-            key=lambda rule: offset_sensitive_order.get(rule.rule_id, 2)
+            key=lambda rule: offset_sensitive_order.get(
+                rule.rule_id,
+                3 if rule.embedded_dynamic_indent_safe else 2,
+            )
         )
     fixed_text = guest_text
+    dynamic_indent_safe_lines: set[int] = set()
     xml_safety_context = None
     if (
         extra_fix_args
@@ -335,6 +339,24 @@ def fix_embedded_content(
                     # violation for review instead of applying a partial fix.
                     fixed_text = prev_text
                     continue
+            if fixed_text != prev_text and rule.embedded_dynamic_indent_safe:
+                previous_lines = prev_text.splitlines()
+                current_lines = fixed_text.splitlines()
+                if len(previous_lines) == len(current_lines):
+                    for line_index, (previous_line, current_line) in enumerate(
+                        zip(previous_lines, current_lines)
+                    ):
+                        previous_indent = len(previous_line) - len(
+                            previous_line.lstrip(" \t")
+                        )
+                        current_indent = len(current_line) - len(
+                            current_line.lstrip(" \t")
+                        )
+                        if (
+                            previous_line.lstrip(" \t") == current_line.lstrip(" \t")
+                            and current_indent > previous_indent
+                        ):
+                            dynamic_indent_safe_lines.add(line_index)
             if fixed_text != prev_text and extra_fix_args and "applied_rules" in extra_fix_args:
                 extra_fix_args["applied_rules"].add(rule.rule_id)
 
@@ -391,6 +413,7 @@ def fix_embedded_content(
                                 guest_line_offsets[old_index],
                                 guest_line_offsets[old_index] + guest_indent,
                                 fixed_line[:fixed_indent],
+                                new_index in dynamic_indent_safe_lines,
                             ))
                 elif tag == "replace":
                     guest_block_start = guest_line_offsets[i1]
@@ -404,8 +427,8 @@ def fix_embedded_content(
                         and len(guest_block_lines) == len(fixed_block_lines)
                     ):
                         line_offset = guest_block_start
-                        for guest_line, fixed_line in zip(
-                            guest_block_lines, fixed_block_lines
+                        for relative_line, (guest_line, fixed_line) in enumerate(
+                            zip(guest_block_lines, fixed_block_lines)
                         ):
                             guest_indent = len(guest_line) - len(guest_line.lstrip(" \t"))
                             fixed_indent = len(fixed_line) - len(fixed_line.lstrip(" \t"))
@@ -414,6 +437,7 @@ def fix_embedded_content(
                                     line_offset,
                                     line_offset + guest_indent,
                                     fixed_line[:fixed_indent],
+                                    j1 + relative_line in dynamic_indent_safe_lines,
                                 ))
                             guest_body = guest_line[guest_indent:]
                             fixed_body = fixed_line[fixed_indent:]
@@ -427,6 +451,7 @@ def fix_embedded_content(
                                     line_offset + guest_indent + ci1,
                                     line_offset + guest_indent + ci2,
                                     fixed_body[cj1:cj2],
+                                    False,
                                 ))
                             line_offset += len(guest_line)
                     else:
@@ -440,15 +465,16 @@ def fix_embedded_content(
                                 guest_block_start + ci1,
                                 guest_block_start + ci2,
                                 fixed_block[cj1:cj2],
+                                False,
                             ))
                 else:
                     g_start_char = guest_line_offsets[i1]
                     g_end_char = guest_line_offsets[i2]
                     replacement = "".join(fixed_lines[j1:j2])
-                    sub_ops.append((g_start_char, g_end_char, replacement))
+                    sub_ops.append((g_start_char, g_end_char, replacement, False))
                     
                 block_edits = []
-                for g_start_char, g_end_char, replacement in sub_ops:
+                for g_start_char, g_end_char, replacement, dynamic_indent_safe in sub_ops:
                     is_contiguous = True
                     start_orig = mapping[g_start_char] if g_start_char < len(mapping) else (mapping[-1] + 1 if mapping else 0)
                     end_orig = (
@@ -511,9 +537,10 @@ def fix_embedded_content(
                             ):
                                 # Dynamic XML nesting contributes indentation
                                 # that is invisible in the expanded SQL view.
-                                # XML indentation has already normalized the
-                                # line, so keep its leading whitespace atomic.
-                                skip = True
+                                # Keep it atomic unless the responsible rule
+                                # explicitly allows a deeper continuation.
+                                if not dynamic_indent_safe:
+                                    skip = True
 
                     candidate_edit = (start_orig, end_orig, replacement)
                     source_range = (

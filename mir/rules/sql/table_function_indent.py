@@ -5,15 +5,15 @@ from mir.rules.sql.indent import IndentRule
 from mir.rules.sql.sql_utils import find_matching_paren, tokenize_sql
 
 
-def table_function_parens(tokens: List[dict]) -> set[int]:
-    """Return opening parentheses for qualified functions used as table sources."""
+def table_function_parens(tokens: List[dict]) -> Dict[int, str]:
+    """Return table-function opening parentheses and their source keywords."""
     active = [
         index
         for index, token in enumerate(tokens)
         if token["type"] not in {"WHITESPACE", "COMMENT"}
     ]
     active_position = {token_index: position for position, token_index in enumerate(active)}
-    matches: set[int] = set()
+    matches: Dict[int, str] = {}
     for token_index in active:
         token = tokens[token_index]
         if token["type"] != "PAREN" or token["value"] != "(":
@@ -29,18 +29,19 @@ def table_function_parens(tokens: List[dict]) -> set[int]:
         if position >= 0 and tokens[active[position]]["value"].upper() == "LATERAL":
             position -= 1
         if position >= 0 and tokens[active[position]]["value"].upper() in {"FROM", "JOIN"}:
-            matches.add(token_index)
+            matches[token_index] = tokens[active[position]]["value"].upper()
     return matches
 
 
 class TableFunctionIndentRule(BaseRule):
     commit_profile = True
     embedded_safe = True
+    embedded_dynamic_indent_safe = True
     trellis_safe = True
     rule_id = "IR-table-function-indent"
     description = (
-        "Indent multiline table-function arguments one level below FROM or JOIN "
-        "and align the closing parenthesis with the function call."
+        "Indent multiline table-function arguments as table continuations, with "
+        "joined functions nested beneath the JOIN."
     )
     category = "queries"
     is_fixable = "yes"
@@ -58,18 +59,25 @@ class TableFunctionIndentRule(BaseRule):
     additional_validations = []
     cases = [
         RuleCase(
-            "multiline table function",
+            "multiline FROM table function",
             "FROM sample.items_for_period(\n        :period\n    ) AS item",
             "fixed",
             "FROM sample.items_for_period(\n    :period\n) AS item",
-        )
+        ),
+        RuleCase(
+            "multiline JOIN table function",
+            "    JOIN sample.items_for_period(\n        :period\n    ) AS item ON TRUE",
+            "fixed",
+            "    JOIN sample.items_for_period(\n            :period\n        ) AS item ON TRUE",
+        ),
     ]
 
     def _expected_indents(self, content: str, indent_size: int) -> Dict[int, str]:
         tokens = tokenize_sql(content)
         lines = content.splitlines()
         ranges = []
-        for open_index in table_function_parens(tokens):
+        unit = " " * indent_size
+        for open_index, source_keyword in table_function_parens(tokens).items():
             close_index = find_matching_paren(tokens, open_index)
             if close_index is None:
                 continue
@@ -79,10 +87,10 @@ class TableFunctionIndentRule(BaseRule):
                 continue
             opening_line = lines[opening["line"] - 1]
             opening_indent = opening_line[: len(opening_line) - len(opening_line.lstrip())]
-            ranges.append((open_index, opening, closing, opening_indent))
+            continuation_indent = opening_indent + (unit if source_keyword == "JOIN" else "")
+            ranges.append((open_index, opening, closing, continuation_indent))
 
         expected: Dict[int, str] = {}
-        unit = " " * indent_size
         for line_number, line in enumerate(lines, 1):
             active = [
                 item
@@ -91,11 +99,11 @@ class TableFunctionIndentRule(BaseRule):
             ]
             if not active or not line.strip():
                 continue
-            _, _, closing, opening_indent = max(active, key=lambda item: item[0])
+            _, _, closing, continuation_indent = max(active, key=lambda item: item[0])
             expected[line_number] = (
-                opening_indent
+                continuation_indent
                 if line_number == closing["line"] and line.lstrip().startswith(")")
-                else opening_indent + unit
+                else continuation_indent + unit
             )
         return expected
 

@@ -1,6 +1,6 @@
 # IR-table-function-indent
 
-Indent multiline table-function arguments one level below FROM or JOIN and align the closing parenthesis with the function call.
+Indent multiline table-function arguments as table continuations, with joined functions nested beneath the JOIN.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
@@ -13,7 +13,7 @@ Indent multiline table-function arguments one level below FROM or JOIN and align
   - `indent_size` (Default: `4`): Spaces added inside a multiline table-function call. *Note: Value dynamically inherited from rule [`IR-indent`](../general/IR-indent.md) -> `indent_size` if not configured.*
 
 #### Executable Cases
-##### multiline table function — Fixed
+##### multiline FROM table function — Fixed
 ```sql
 FROM sample.items_for_period(
         :period
@@ -25,4 +25,18 @@ Expected fixed output:
 FROM sample.items_for_period(
     :period
 ) AS item
+```
+
+##### multiline JOIN table function — Fixed
+```sql
+    JOIN sample.items_for_period(
+        :period
+    ) AS item ON TRUE
+```
+
+Expected fixed output:
+```sql
+    JOIN sample.items_for_period(
+            :period
+        ) AS item ON TRUE
 ```

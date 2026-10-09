@@ -49,6 +49,7 @@ class BaseRule:
     cases: List[RuleCase] = []
     commit_profile: bool = False
     embedded_safe: bool = False
+    embedded_dynamic_indent_safe: bool = False
     trellis_safe: bool = False
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:

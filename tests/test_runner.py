@@ -824,6 +824,47 @@ class TestRunnerIntegration(unittest.TestCase):
             get_mybatis_protected_signatures(xml_content),
         )
 
+    def test_xml_mybatis_dynamic_joined_table_function_keeps_sql_indentation(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="joinedFunction">\n'
+            '        <choose>\n'
+            '            <when test="usePeriod">\n'
+            '                SELECT item.id\n'
+            '                FROM sample.item item\n'
+            '                    JOIN sample.items_for_period(\n'
+            '                        #{start},\n'
+            '                        #{end}\n'
+            '                    ) period_item ON period_item.id = item.id\n'
+            '            </when>\n'
+            '        </choose>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '                    JOIN sample.items_for_period(\n'
+            '                        #{start},\n'
+            '                        #{end}\n'
+            '                    ) period_item ON period_item.id = item.id',
+            '                    JOIN sample.items_for_period(\n'
+            '                            #{start},\n'
+            '                            #{end}\n'
+            '                        ) period_item ON period_item.id = item.id',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertEqual(
+            get_mybatis_protected_signatures(first.content),
+            get_mybatis_protected_signatures(xml_content),
+        )
+
     def test_xml_mybatis_formats_text_beside_inline_tags(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
