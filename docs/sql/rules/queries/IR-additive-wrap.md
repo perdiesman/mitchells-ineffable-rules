@@ -12,15 +12,28 @@ Long additive expressions should wrap before an operator, with all continuation 
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `max_line_length` (Default: `100`): Line length threshold for wrapping additive expressions.
 
-#### ❌ Violating Example
+#### ❌ Violating Example #1
 ```sql
                             first_measure + second_measure + third_measure + fourth_measure + fifth_measure_with_a_long_name,
 ```
 
-####  Correct Example
+####  Correct Example #1
 ```sql
                             first_measure + second_measure + third_measure + fourth_measure
                                 + fifth_measure_with_a_long_name,
+```
+
+#### ❌ Violating Example #2
+```sql
+    first_measure + second_measure
+           + third_measure +
+                 fourth_measure
+```
+
+####  Correct Example #2
+```sql
+    first_measure + second_measure
+        + third_measure + fourth_measure
 ```
 
 #### Additional Validations

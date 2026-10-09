@@ -1,5 +1,6 @@
 import unittest
 
+from mir.rules.sql.additive_wrap import AdditiveWrapRule
 from mir.rules.sql.function_case import FunctionCaseRule
 from mir.rules.sql.from_multi import FromMultiRule
 from mir.rules.sql.clause_alignment import ClauseAlignmentRule
@@ -27,6 +28,24 @@ from mir.rules.sql.where_multi import WhereMultiRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_additive_continuations_align_and_join_a_stranded_operand(self):
+        source = (
+            "    first_value + second_value\n"
+            "           + third_value +\n"
+            "                 fourth_value"
+        )
+        expected = (
+            "    first_value + second_value\n"
+            "        + third_value + fourth_value"
+        )
+
+        rule = AdditiveWrapRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+
     def test_table_function_preserves_case_nesting(self):
         source = (
             "FROM generate_series(\n"
