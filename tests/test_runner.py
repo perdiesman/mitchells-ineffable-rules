@@ -1215,6 +1215,41 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_commit_profile_removes_implied_keywords(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT sample_item.item_id\n'
+            '        FROM sample_item\n'
+            '        INNER JOIN sample_state ON sample_state.state_id = sample_item.state_id\n'
+            '        LEFT OUTER JOIN sample_detail ON sample_detail.item_id = sample_item.item_id\n'
+            '        ORDER BY sample_item.item_id ASC;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT sample_item.item_id\n'
+            '        FROM\n'
+            '            sample_item\n'
+            '            JOIN sample_state ON sample_state.state_id = sample_item.state_id\n'
+            '            LEFT JOIN sample_detail ON sample_detail.item_id = sample_item.item_id\n'
+            '        ORDER BY sample_item.item_id;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_sql_line_mapping(self):
         # XML file with a self-comparison on line 5
         xml_content = (

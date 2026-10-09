@@ -3,6 +3,8 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class RedundantKeywordsRule(BaseRule):
+    commit_profile = True
+    commit_semantic_rewrite = True
     embedded_safe = True
     rule_id = "IR-redundant-keywords"
     description = "Remove redundant implied keywords like INNER, OUTER, and ASC."
