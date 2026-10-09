@@ -1477,6 +1477,33 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_conflict_update_formats_set_assignments(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="saveState">\n'
+            '        INSERT INTO sample_state (state_key, state_value, updated_at)\n'
+            '        VALUES (#{key}, #{value}, now())\n'
+            '        ON CONFLICT (state_key) DO UPDATE\n'
+            '        SET state_value = excluded.state_value,\n'
+            '            updated_at = excluded.updated_at\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            "        SET state_value = excluded.state_value,",
+            "        SET\n            state_value = excluded.state_value,",
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_sql_line_mapping(self):
         # XML file with a self-comparison on line 5
         xml_content = (

@@ -88,6 +88,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
+| [`IR-set-multi`](rules/data-modification/IR-set-multi.md) | Put each assignment in a multiline SET clause on its own indented line. | Yes | [View Details](rules/data-modification/IR-set-multi.md) |
 | [`IR-truncate-table`](rules/data-modification/IR-truncate-table.md) | Prefer TRUNCATE table_name over DELETE FROM table_name with no conditions. | No | [View Details](rules/data-modification/IR-truncate-table.md) |
 | [`IR-update-layout`](rules/data-modification/IR-update-layout.md) | Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent assignments. | Yes | [View Details](rules/data-modification/IR-update-layout.md) |
 
