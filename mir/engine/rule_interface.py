@@ -48,6 +48,7 @@ class BaseRule:
     additional_validations: List[str] = []
     cases: List[RuleCase] = []
     commit_profile: bool = False
+    commit_semantic_rewrite: bool = False
     embedded_safe: bool = False
     embedded_dynamic_indent_safe: bool = False
     trellis_safe: bool = False

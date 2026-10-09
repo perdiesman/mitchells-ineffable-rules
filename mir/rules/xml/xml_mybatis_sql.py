@@ -714,6 +714,10 @@ class XmlMybatisSqlRule(BaseRule):
 
         fixed_content = "".join(chars)
         original_signatures = get_mybatis_protected_signatures(content)
+        original_signature_map = {
+            (tag, statement_id): signature
+            for tag, statement_id, signature in original_signatures
+        }
         expected_signatures = tuple(
             (
                 tag,
@@ -723,14 +727,74 @@ class XmlMybatisSqlRule(BaseRule):
             for tag, statement_id, signature in original_signatures
         )
         actual_signatures = get_mybatis_protected_signatures(fixed_content)
-        if actual_signatures != expected_signatures:
-            mismatch = next(
-                (
-                    actual[:2]
-                    for actual, expected in zip(actual_signatures, expected_signatures)
-                    if actual != expected
-                ),
-                ("statement", "unknown"),
+
+        changed_fragment_ids = {
+            statement_id
+            for (tag, statement_id), signature in expected_signature_updates.items()
+            if tag == "sql"
+            and signature != original_signature_map.get((tag, statement_id))
+        }
+
+        def included_fragment_ids(element: dict) -> set[str]:
+            references = set()
+            inner_tokens = element.get("inner_tokens", [])
+            for index, token in enumerate(inner_tokens):
+                if token["type"] != "ATTR_NAME" or token["value"] != "refid":
+                    continue
+                tag_index = index - 1
+                while tag_index >= 0 and inner_tokens[tag_index]["type"] == "WHITESPACE":
+                    tag_index -= 1
+                if tag_index < 0 or inner_tokens[tag_index]["type"] != "TAG_OPEN_START":
+                    continue
+                if inner_tokens[tag_index]["value"].lower() != "<include":
+                    continue
+                value_index = index + 2
+                if (
+                    value_index < len(inner_tokens)
+                    and inner_tokens[index + 1]["type"] == "EQUAL"
+                    and inner_tokens[value_index]["type"] == "ATTR_VALUE"
+                ):
+                    value = inner_tokens[value_index]["value"].strip("'\"")
+                    references.add(value)
+                    references.add(value.split(".")[-1])
+            return references
+
+        # A validated edit to a reusable SQL fragment necessarily changes the
+        # expanded signature of its include consumers. Propagate that trust
+        # only through explicit include dependencies; unrelated statements
+        # must still match their independently validated signatures exactly.
+        impacted_statement_keys = set()
+        if changed_fragment_ids:
+            changed_aliases = set(changed_fragment_ids)
+            changed_aliases.update(item.split(".")[-1] for item in changed_fragment_ids)
+            expanded = True
+            while expanded:
+                expanded = False
+                for element in elements:
+                    if element["tag"] != "sql" or "id" not in element["attrs"]:
+                        continue
+                    if included_fragment_ids(element).intersection(changed_aliases):
+                        fragment_id = element["attrs"]["id"]
+                        if fragment_id not in changed_aliases:
+                            changed_aliases.add(fragment_id)
+                            changed_aliases.add(fragment_id.split(".")[-1])
+                            expanded = True
+            for element in elements:
+                if "id" in element["attrs"] and included_fragment_ids(element).intersection(
+                    changed_aliases
+                ):
+                    impacted_statement_keys.add((element["tag"], element["attrs"]["id"]))
+
+        mismatches = [
+            (actual, expected)
+            for actual, expected in zip(actual_signatures, expected_signatures)
+            if actual != expected and actual[:2] not in impacted_statement_keys
+        ]
+        if len(actual_signatures) != len(expected_signatures) or mismatches:
+            mismatch = (
+                mismatches[0][0][:2]
+                if mismatches
+                else ("statement", "unknown")
             )
             raise ValueError(
                 "protected MyBatis SQL syntax changed after source mapping for "

@@ -264,9 +264,13 @@ def fix_embedded_content(
             "IR-where-multi": 1,
         }
         guest_rules.sort(
-            key=lambda rule: offset_sensitive_order.get(
-                rule.rule_id,
-                3 if rule.embedded_dynamic_indent_safe else 2,
+            key=lambda rule: (
+                -1
+                if rule.commit_semantic_rewrite
+                else offset_sensitive_order.get(
+                    rule.rule_id,
+                    3 if rule.embedded_dynamic_indent_safe else 2,
+                )
             )
         )
     fixed_text = guest_text
@@ -328,7 +332,10 @@ def fix_embedded_content(
             if fixed_text != prev_text:
                 from mir.rules.sql.sql_utils import protected_sql_signature
 
-                if protected_sql_signature(fixed_text) != protected_sql_signature(prev_text):
+                if (
+                    protected_sql_signature(fixed_text) != protected_sql_signature(prev_text)
+                    and not rule.commit_semantic_rewrite
+                ):
                     if rule_config.get("_profile") == "commit":
                         raise ValueError(
                             f"unsafe embedded fix from {rule.rule_id}: protected SQL syntax changed"
@@ -359,6 +366,11 @@ def fix_embedded_content(
                             dynamic_indent_safe_lines.add(line_index)
             if fixed_text != prev_text and extra_fix_args and "applied_rules" in extra_fix_args:
                 extra_fix_args["applied_rules"].add(rule.rule_id)
+            if fixed_text != prev_text and rule.commit_semantic_rewrite:
+                # Keep deliberate token rewrites separate from line-moving
+                # formatting. This makes their XML source mapping unambiguous;
+                # the host convergence loop applies layout on the next pass.
+                break
 
     if extra_fix_args is not None:
         from mir.rules.sql.sql_utils import protected_sql_signature

@@ -742,7 +742,9 @@ class TestRunnerIntegration(unittest.TestCase):
 
         self.assertEqual(
             get_mybatis_protected_signatures(result.content),
-            get_mybatis_protected_signatures(xml_content),
+            get_mybatis_protected_signatures(
+                xml_content.replace("active = true", "active")
+            ),
         )
         self.assertFalse(
             any("protected MyBatis SQL syntax changed" in item for item in result.diagnostics)
@@ -808,7 +810,7 @@ class TestRunnerIntegration(unittest.TestCase):
             '        <if test="activeOnly">\n'
             '            WHERE active = TRUE\n'
             '        </if>',
-            '        <if test="activeOnly">WHERE active = TRUE</if>',
+            '        <if test="activeOnly">WHERE active</if>',
         )
         config = Config()
         config.profile = "commit"
@@ -821,7 +823,7 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertEqual(
             get_mybatis_protected_signatures(first.content),
-            get_mybatis_protected_signatures(xml_content),
+            get_mybatis_protected_signatures(expected),
         )
 
     def test_xml_mybatis_dynamic_joined_table_function_keeps_sql_indentation(self):
@@ -865,6 +867,41 @@ class TestRunnerIntegration(unittest.TestCase):
             get_mybatis_protected_signatures(xml_content),
         )
 
+    def test_xml_mybatis_commit_profile_applies_declared_boolean_rewrites(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="booleanPredicates">\n'
+            '        SELECT enabled = TRUE AS enabled_flag\n'
+            '        FROM sample_item\n'
+            '        WHERE coalesce(enabled, FALSE) = TRUE\n'
+            '        <if test="includeHidden == true">\n'
+            '            AND #{showHidden} = FALSE\n'
+            '        </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '        WHERE coalesce(enabled, FALSE) = TRUE\n',
+            '        WHERE coalesce(enabled, FALSE)\n',
+        ).replace(
+            '            AND #{showHidden} = FALSE\n',
+            '            AND NOT #{showHidden}\n',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-mybatis-sql", "IR-boolean-comparison"]
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertNotIn("unsafe embedded fix", "\n".join(first.diagnostics))
+        self.assertIn("includeHidden == true", first.content)
+        self.assertIn("SELECT enabled = TRUE AS enabled_flag", first.content)
+
     def test_xml_mybatis_formats_text_beside_inline_tags(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
@@ -906,6 +943,29 @@ class TestRunnerIntegration(unittest.TestCase):
             first.content,
         )
         self.assertEqual(first.content.count("SELECT count(*) <include"), 2)
+
+    def test_xml_mybatis_fragment_semantic_rewrite_updates_consumer_signatures(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="activeFragment">FROM sample_item WHERE enabled = TRUE</sql>\n'
+            '    <select id="first">SELECT item_id <include refid="activeFragment" /></select>\n'
+            '    <select id="second">SELECT count(*) <include refid="activeFragment" /></select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-mybatis-sql", "IR-boolean-comparison"]
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content.replace("enabled = TRUE", "enabled"))
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(
+            any("protected MyBatis SQL syntax changed" in item for item in first.diagnostics)
+        )
 
     def test_xml_mybatis_does_not_move_commas_across_dynamic_tags(self):
         xml_content = (

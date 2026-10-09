@@ -41,7 +41,13 @@ def validate_rule_class(rule_class: Type[BaseRule]) -> None:
             f"Rule '{rule_id}' (class {rule_class.__name__}) 'is_fixable' must be 'yes', 'no', or 'sometimes'."
         )
 
-    for metadata_name in ("commit_profile", "embedded_safe", "trellis_safe"):
+    for metadata_name in (
+        "commit_profile",
+        "commit_semantic_rewrite",
+        "embedded_safe",
+        "embedded_dynamic_indent_safe",
+        "trellis_safe",
+    ):
         metadata_value = getattr(rule_class, metadata_name, None)
         if not isinstance(metadata_value, bool):
             raise RuleValidationError(

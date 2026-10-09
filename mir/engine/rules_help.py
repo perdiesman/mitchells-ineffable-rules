@@ -223,6 +223,8 @@ def generate_docs_to_path(
                 rule_md.append(f"- **Category**: {get_category_title(r.category, lang, include_dirs)}")
                 rule_md.append(f"- **Commit Profile**: {'Yes' if r.commit_profile else 'No'}")
                 if lang == "sql":
+                    if r.commit_semantic_rewrite:
+                        rule_md.append("- **Intentional Semantic Rewrite**: Yes")
                     rule_md.append(f"- **MyBatis Safe**: {'Yes' if r.embedded_safe else 'No'}")
                     rule_md.append(f"- **Trellis Safe**: {'Yes' if r.trellis_safe else 'No'}")
                 
@@ -456,6 +458,9 @@ def print_rule_details(lang: str, rule, include_dirs: Optional[List[str]] = None
     print(f"Enabled:      {enabled_str} (by default)")
     print(f"Commit:       {'Yes' if rule.commit_profile else 'No'}")
     if lang == "sql":
+        print(
+            f"Semantic fix: {'Yes' if rule.commit_semantic_rewrite else 'No'}"
+        )
         print(f"MyBatis safe: {'Yes' if rule.embedded_safe else 'No'}")
         print(f"Trellis safe: {'Yes' if rule.trellis_safe else 'No'}")
     print(f"Description:  {rule.description}")

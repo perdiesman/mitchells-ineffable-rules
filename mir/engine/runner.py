@@ -119,7 +119,11 @@ def run_rule_fix_recursively(
         if rule_config.get("_profile") == "commit":
             from mir.rules.sql.sql_utils import protected_sql_signature
 
-            if protected_sql_signature(fixed) != protected_sql_signature(body_info["body"]):
+            if (
+                protected_sql_signature(fixed)
+                != protected_sql_signature(body_info["body"])
+                and not rule.commit_semantic_rewrite
+            ):
                 raise ValueError("protected SQL syntax changed inside a dollar-quoted body")
         token = body_info["token"]
         replacement = body_info["tag"] + fixed + body_info["tag"]
@@ -425,7 +429,10 @@ def process_document(
                 if config.profile == "commit" and lang == "sql" and fixed != current:
                     from mir.rules.sql.sql_utils import protected_sql_signature
 
-                    if protected_sql_signature(fixed) != protected_sql_signature(current):
+                    if (
+                        protected_sql_signature(fixed) != protected_sql_signature(current)
+                        and not rule.commit_semantic_rewrite
+                    ):
                         result.diagnostics.append(
                             f"Unsafe fix rejected for {rule.rule_id} on {path}: "
                             "protected SQL syntax changed"
