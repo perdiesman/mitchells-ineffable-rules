@@ -4,6 +4,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren, get_token
 
 class SubqueryIndentRule(BaseRule):
     commit_profile = True
+    embedded_safe = True
     trellis_safe = True
     rule_id = "IR-subquery-indent"
     description = "Subqueries should be indented 4 spaces relative to their opening parenthesis."
@@ -106,7 +107,6 @@ class SubqueryIndentRule(BaseRule):
                             
                     # Scan backward on the same line to find the nearest preceding token
                     is_from_join = False
-                    is_from_join_at_start = False
                     for idx in range(i - 1, -1, -1):
                         if tokens[idx]["line"] != tok["line"]:
                             break
@@ -122,19 +122,10 @@ class SubqueryIndentRule(BaseRule):
                                 continue
                             if tokens[idx]["type"] == "KEYWORD" and tokens[idx]["value"].upper() in ("FROM", "JOIN"):
                                 is_from_join = True
-                                has_prev_active = False
-                                for prev_idx in range(idx - 1, -1, -1):
-                                    if tokens[prev_idx]["line"] != tok["line"]:
-                                        break
-                                    if tokens[prev_idx]["type"] not in ("WHITESPACE", "COMMENT"):
-                                        has_prev_active = True
-                                        break
-                                if not has_prev_active:
-                                    is_from_join_at_start = True
                             break
                             
                     if is_from_join:
-                        expected_close_indent = open_indent if is_from_join_at_start else open_indent + "    "
+                        expected_close_indent = open_indent + "    "
                     else:
                         expected_close_indent = open_indent
                     expected_content_indent = expected_close_indent + "    "

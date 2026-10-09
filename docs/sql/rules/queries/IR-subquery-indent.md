@@ -6,7 +6,7 @@ Subqueries should be indented 4 spaces relative to their opening parenthesis.
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
 - **Commit Profile**: Yes
-- **MyBatis Safe**: No
+- **MyBatis Safe**: Yes
 - **Trellis Safe**: Yes
 - **Configuration Options**:
   - `enabled`: `true`
