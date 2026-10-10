@@ -121,6 +121,14 @@ class WhereMultiRule(BaseRule):
                     for index in boolean_indices
                     if tokens[index]["start"] in mybatis_dynamic_offsets
                 }
+                mybatis_foreach_offsets = rule_config.get(
+                    "mybatis_foreach_offsets", set()
+                )
+                has_mybatis_foreach = any(
+                    token["start"] in mybatis_foreach_offsets
+                    for token in clause_tokens
+                    if token["type"] not in {"WHITESPACE", "COMMENT"}
+                )
                 where_is_dynamic = tok["start"] in mybatis_dynamic_offsets
                 from mir.rules.sql.line_length import LineLengthRule
                 max_len = self.get_config_value(
@@ -225,7 +233,11 @@ class WhereMultiRule(BaseRule):
                                     rule_config,
                                 ),
                             )
-                    if estimated_line_len <= max_len and not dynamic_boolean_indices:
+                    if (
+                        estimated_line_len <= max_len
+                        and not dynamic_boolean_indices
+                        and not has_mybatis_foreach
+                    ):
                         # A short predicate has one canonical compact form. Only
                         # edit whitespace tokens so strings and parameters stay
                         # byte-for-byte intact, and leave the separator before

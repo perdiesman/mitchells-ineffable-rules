@@ -2225,6 +2225,41 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_foreach_keeps_multicondition_where_expanded(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        WHERE item_code IN\n'
+            '            <foreach open="(" close=")" collection="codes" item="code" separator=",">#{code}</foreach>\n'
+            '            AND enabled\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        WHERE\n'
+            '            item_code IN\n'
+            '                <foreach open="(" close=")" collection="codes" item="code" separator=",">#{code}</foreach>\n'
+            '            AND enabled\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_preserves_dynamic_in_subquery_layout(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
