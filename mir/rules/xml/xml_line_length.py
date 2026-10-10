@@ -5,7 +5,10 @@ from mir.rules.xml.xml_utils import tokenize_xml
 class XmlLineLengthRule(BaseRule):
     commit_profile = True
     rule_id = "IR-xml-line-length"
-    description = "XML lines must not exceed the configured maximum length."
+    description = (
+        "XML lines must not exceed the configured maximum length, and repeated "
+        "MyBatis foreach forms use the same expanded layout."
+    )
     category = "general"
     is_fixable = "yes"
     enabled_by_default = True
@@ -43,27 +46,80 @@ class XmlLineLengthRule(BaseRule):
                     offending_lines=[line],
                     is_fixable=True
                 ))
+        from mir.rules.xml.xml_mybatis_sql import (
+            get_all_elements_recursively,
+            parse_xml_elements,
+        )
+
+        elements = get_all_elements_recursively(
+            parse_xml_elements(tokenize_xml(content))
+        )
+        multiline_signatures = {
+            content[element["start_offset"]:element["inner_tokens"][0]["start"]].strip()
+            for element in elements
+            if element["tag"] == "foreach"
+            and element["inner_tokens"]
+            and content.count("\n", 0, element["start_offset"])
+            != content.count("\n", 0, element["end_offset"])
+        }
+        for element in elements:
+            if element["tag"] != "foreach" or not element["inner_tokens"]:
+                continue
+            line_index = content.count("\n", 0, element["start_offset"])
+            end_line = content.count("\n", 0, element["end_offset"])
+            signature = content[
+                element["start_offset"]:element["inner_tokens"][0]["start"]
+            ].strip()
+            if line_index == end_line and signature in multiline_signatures:
+                violations.append(Violation(
+                    rule_id=self.rule_id,
+                    line_number=line_index + 1,
+                    message=(
+                        "Repeated MyBatis foreach forms should use the same "
+                        "expanded layout."
+                    ),
+                    offending_lines=[lines[line_index]],
+                    is_fixable=True,
+                ))
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
         max_length = rule_config.get("max_length", self.default_config["max_length"])
         lines = content.splitlines()
         
-        any_violating = False
-        for line in lines:
-            if len(line) > max_length:
-                any_violating = True
-                break
-                
-        if not any_violating:
-            return content
-            
         tokens = tokenize_xml(content)
         n = len(tokens)
 
         from mir.rules.xml.xml_mybatis_sql import parse_xml_elements, get_all_elements_recursively
 
         elements = get_all_elements_recursively(parse_xml_elements(tokens))
+        multiline_foreach_signatures = set()
+        for element in elements:
+            if element["tag"] != "foreach" or not element["inner_tokens"]:
+                continue
+            start_line = content.count("\n", 0, element["start_offset"])
+            end_line = content.count("\n", 0, element["end_offset"])
+            if start_line == end_line:
+                continue
+            first_inner = element["inner_tokens"][0]["start"]
+            multiline_foreach_signatures.add(
+                content[element["start_offset"]:first_inner].strip()
+            )
+
+        any_violating = any(len(line) > max_length for line in lines)
+        has_inconsistent_foreach = any(
+            element["tag"] == "foreach"
+            and element["inner_tokens"]
+            and content.count("\n", 0, element["start_offset"])
+            == content.count("\n", 0, element["end_offset"])
+            and content[
+                element["start_offset"]:element["inner_tokens"][0]["start"]
+            ].strip() in multiline_foreach_signatures
+            for element in elements
+        )
+        if not any_violating and not has_inconsistent_foreach:
+            return content
+
         block_edits = []
         for element in elements:
             if element["tag"] != "foreach" or not element["inner_tokens"]:
@@ -72,9 +128,17 @@ class XmlLineLengthRule(BaseRule):
                 continue
             start_line = content.count("\n", 0, element["start_offset"])
             end_line = content.count("\n", 0, element["end_offset"])
-            if start_line != end_line or start_line >= len(lines) or len(lines[start_line]) <= max_length:
-                continue
             first_inner = element["inner_tokens"][0]["start"]
+            signature = content[element["start_offset"]:first_inner].strip()
+            if (
+                start_line != end_line
+                or start_line >= len(lines)
+                or (
+                    len(lines[start_line]) <= max_length
+                    and signature not in multiline_foreach_signatures
+                )
+            ):
+                continue
             last_inner = element["inner_tokens"][-1]["end"]
             opening = content[element["start_offset"]:first_inner]
             inner = content[first_inner:last_inner]

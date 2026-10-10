@@ -1693,6 +1693,39 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_repeated_foreach_uses_expanded_layout_consistently(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        WHERE primary_code IN\n'
+            '            <foreach collection="codes" item="code" open="(" close=")" separator=",">\n'
+            '                #{code}\n'
+            '            </foreach>\n'
+            '            OR secondary_code IN\n'
+            '            <foreach collection="codes" item="code" open="(" close=")" separator=",">#{code}</foreach>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '<foreach collection="codes" item="code" open="(" close=")" separator=",">#{code}</foreach>',
+            '<foreach collection="codes" item="code" open="(" close=")" separator=",">\n'
+            '                #{code}\n'
+            '            </foreach>',
+        )
+        config = Config()
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-line-length"]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_commit_profile_expands_datatype_aliases(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

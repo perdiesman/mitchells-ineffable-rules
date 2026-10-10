@@ -1,6 +1,6 @@
 # IR-xml-line-length
 
-XML lines must not exceed the configured maximum length.
+XML lines must not exceed the configured maximum length, and repeated MyBatis foreach forms use the same expanded layout.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
