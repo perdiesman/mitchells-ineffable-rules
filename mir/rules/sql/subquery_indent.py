@@ -64,6 +64,45 @@ class SubqueryIndentRule(BaseRule):
                         )
                     ):
                         continue
+                    immediate_prev_idx = i - 1
+                    while (
+                        immediate_prev_idx >= 0
+                        and tokens[immediate_prev_idx]["type"] in ("WHITESPACE", "COMMENT")
+                    ):
+                        immediate_prev_idx -= 1
+                    immediate_prev = (
+                        tokens[immediate_prev_idx]
+                        if immediate_prev_idx >= 0
+                        else None
+                    )
+                    whitespace_before_open = (
+                        tokens[i - 1]
+                        if i > 0 and tokens[i - 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    if (
+                        immediate_prev is not None
+                        and immediate_prev["type"] == "KEYWORD"
+                        and immediate_prev["value"].upper() == "JOIN"
+                        and whitespace_before_open is not None
+                        and "\n" in whitespace_before_open["value"]
+                        and all(
+                            token["type"] == "WHITESPACE"
+                            for token in tokens[immediate_prev_idx + 1 : i]
+                        )
+                    ):
+                        close_idx = find_matching_paren(tokens, i)
+                        if close_idx is not None:
+                            violations.append({
+                                "type": "compact_join_opener",
+                                "open_tok": tok,
+                                "open_line": tok["line"],
+                                "close_line": tokens[close_idx]["line"],
+                                "ws_start": whitespace_before_open["start"],
+                                "ws_end": whitespace_before_open["end"],
+                            })
+                            continue
+
                     # Skip if this parenthesis is preceded by AS (which indicates a CTE definition)
                     is_cte = False
                     prev_idx = i - 1
@@ -228,6 +267,13 @@ class SubqueryIndentRule(BaseRule):
         return violations
 
     def _fix_one(self, content: str, item: dict) -> str:
+        if item.get("type") == "compact_join_opener":
+            return (
+                content[: item["ws_start"]]
+                + " "
+                + content[item["ws_end"] :]
+            )
+
         first_sub_tok = item["first_sub_tok"]
         if first_sub_tok["line"] == item["open_tok"]["line"]:
             return (
@@ -278,7 +324,16 @@ class SubqueryIndentRule(BaseRule):
         processed = set()
         while True:
             offending = self._find_violations(content)
-            offending = [item for item in offending if (item["open_line"], item["close_line"]) not in processed]
+            offending = [
+                item
+                for item in offending
+                if (
+                    item.get("type"),
+                    item["open_line"],
+                    item["close_line"],
+                )
+                not in processed
+            ]
             if not offending:
                 break
                 
@@ -288,7 +343,11 @@ class SubqueryIndentRule(BaseRule):
             
             fixed = self._fix_one(content, target)
             if fixed == content:
-                processed.add((target["open_line"], target["close_line"]))
+                processed.add((
+                    target.get("type"),
+                    target["open_line"],
+                    target["close_line"],
+                ))
                 continue
 
             content = fixed

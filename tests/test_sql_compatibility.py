@@ -14,6 +14,7 @@ from mir.rules.sql.join_on_multi import JoinOnMultiRule
 from mir.rules.sql.keyword_case import KeywordCaseRule
 from mir.rules.sql.line_length import LineLengthRule
 from mir.rules.sql.named_parameters import NamedParametersRule
+from mir.rules.sql.null_coalesce import NullCoalesceRule
 from mir.rules.sql.operator_spacing import OperatorSpacingRule
 from mir.rules.sql.paren_content_indent import ParenContentIndentRule
 from mir.rules.sql.paren_multi import ParenMultiRule
@@ -31,6 +32,20 @@ from mir.rules.sql.where_multi import WhereMultiRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_nullable_equality_accepts_reversed_equality_operands(self):
+        source = (
+            "((left_item.owner_id IS NULL AND right_item.owner_id IS NULL) OR "
+            "right_item.owner_id = left_item.owner_id)"
+        )
+        expected = (
+            "(COALESCE(right_item.owner_id, -1) = "
+            "COALESCE(left_item.owner_id, -1))"
+        )
+
+        rule = NullCoalesceRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
+
     def test_short_alias_recombines_in_mybatis_sql(self):
         source = "    item_name\n                    AS display_name"
         expected = "    item_name AS display_name"
@@ -741,6 +756,33 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
+
+    def test_join_subquery_opener_stays_with_join_keyword(self):
+        source = (
+            "SELECT parent.item_id\n"
+            "FROM\n"
+            "    sample_parent parent\n"
+            "    LEFT JOIN\n"
+            "        (\n"
+            "            SELECT child.parent_id\n"
+            "            FROM sample_child child\n"
+            "        ) child ON true;"
+        )
+        expected = (
+            "SELECT parent.item_id\n"
+            "FROM\n"
+            "    sample_parent parent\n"
+            "    LEFT JOIN (\n"
+            "            SELECT child.parent_id\n"
+            "            FROM sample_child child\n"
+            "        ) child ON true;"
+        )
+
+        rule = SubqueryIndentRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
 
     def test_single_statement_file_does_not_require_semicolon(self):
         content = "SELECT item_id FROM sample_item\n"

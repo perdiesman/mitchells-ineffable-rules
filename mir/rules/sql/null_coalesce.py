@@ -3,6 +3,8 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class NullCoalesceRule(BaseRule):
+    commit_profile = True
+    commit_semantic_rewrite = True
     embedded_safe = True
     rule_id = "IR-null-coalesce"
     description = "Standardize nullable equality predicates to COALESCE(x, -1) form."
@@ -132,11 +134,22 @@ class NullCoalesceRule(BaseRule):
                                             t_or = active[end_idx]
                                             if t_or["type"] == "KEYWORD" and t_or["value"].upper() == "OR":
                                                 op1_check, next_check = parse_operand(end_idx + 1)
-                                                if op1_check and op1_check.lower() == op1_str.lower() and next_check < num_active:
+                                                if op1_check and next_check < num_active:
                                                     t_eq = active[next_check]
                                                     if t_eq["type"] == "OPERATOR" and t_eq["value"] == "=":
                                                         op2_check, next_check2 = parse_operand(next_check + 1)
-                                                        if op2_check and op2_check.lower() == op2_str.lower():
+                                                        equality_matches = (
+                                                            op2_check
+                                                            and {
+                                                                op1_check.lower(),
+                                                                op2_check.lower(),
+                                                            }
+                                                            == {
+                                                                op1_str.lower(),
+                                                                op2_str.lower(),
+                                                            }
+                                                        )
+                                                        if equality_matches:
                                                             violations.append({
                                                                 "start_offset": active[i]["start"],
                                                                 "end_offset": active[next_check2 - 1]["end"],

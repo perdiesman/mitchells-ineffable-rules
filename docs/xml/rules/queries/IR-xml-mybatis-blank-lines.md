@@ -34,3 +34,30 @@ Expected fixed output:
     </select>
 </mapper>
 ```
+
+##### blank line before SQL closing parenthesis — Fixed
+```xml
+<mapper namespace="Generic">
+    <select id="items">
+        SELECT *
+        FROM (
+            SELECT item_id
+            FROM sample_item
+
+        ) items
+    </select>
+</mapper>
+```
+
+Expected fixed output:
+```xml
+<mapper namespace="Generic">
+    <select id="items">
+        SELECT *
+        FROM (
+            SELECT item_id
+            FROM sample_item
+        ) items
+    </select>
+</mapper>
+```

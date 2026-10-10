@@ -44,7 +44,30 @@ class XmlMybatisBlankLinesRule(BaseRule):
             '        FROM sample_item\n'
             '    </select>\n'
             '</mapper>',
-        )
+        ),
+        RuleCase(
+            "blank line before SQL closing parenthesis",
+            '<mapper namespace="Generic">\n'
+            '    <select id="items">\n'
+            '        SELECT *\n'
+            '        FROM (\n'
+            '            SELECT item_id\n'
+            '            FROM sample_item\n'
+            '\n'
+            '        ) items\n'
+            '    </select>\n'
+            '</mapper>',
+            "fixed",
+            '<mapper namespace="Generic">\n'
+            '    <select id="items">\n'
+            '        SELECT *\n'
+            '        FROM (\n'
+            '            SELECT item_id\n'
+            '            FROM sample_item\n'
+            '        ) items\n'
+            '    </select>\n'
+            '</mapper>',
+        ),
     ]
 
     @staticmethod
@@ -83,6 +106,21 @@ class XmlMybatisBlankLinesRule(BaseRule):
                 if is_blank and previous_blank:
                     removed.add(line_number)
                 previous_blank = is_blank
+
+            for line_number in range(first_inner_line, closing_line):
+                if lines[line_number - 1].strip():
+                    continue
+                next_line_number = line_number + 1
+                while (
+                    next_line_number < closing_line
+                    and not lines[next_line_number - 1].strip()
+                ):
+                    next_line_number += 1
+                if (
+                    next_line_number < closing_line
+                    and lines[next_line_number - 1].lstrip().startswith(")")
+                ):
+                    removed.add(line_number)
 
         previous_blank = False
         for line_number, line in enumerate(lines, 1):
