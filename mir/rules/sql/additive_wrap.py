@@ -246,7 +246,7 @@ class AdditiveWrapRule(BaseRule):
             following_indices = active_by_line.get(line_number + 1)
             if (
                 trailing["type"] != "OPERATOR"
-                or trailing["value"] not in {"+", "||"}
+                or trailing["value"] not in {"+", "-", "||"}
                 or not following_indices
                 or depths[following_indices[0]] != depths[trailing_index]
             ):

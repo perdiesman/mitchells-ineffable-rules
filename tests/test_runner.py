@@ -3605,6 +3605,29 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_trailing_subtraction_operator_moves_to_the_continuation(self):
+        sql_content = (
+            "SELECT ((date_part('epoch', current_interval_start_timestamp_with_timezone_value) -\n"
+            "date_part('epoch', previous_interval_end_timestamp_with_timezone_value)) / 3600;\n"
+        )
+        expected = (
+            "SELECT\n"
+            "    ((date_part('epoch', current_interval_start_timestamp_with_timezone_value)\n"
+            "        - date_part('epoch', previous_interval_end_timestamp_with_timezone_value)) / 3600;\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_short_update_clauses_compact_when_expressions_are_single_line(self):
         sql_content = (
             "UPDATE sample_record\n"
