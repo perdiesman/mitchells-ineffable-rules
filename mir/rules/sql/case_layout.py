@@ -118,6 +118,14 @@ class CaseLayoutRule(BaseRule):
                 # inside a dynamic SQL string literal. Its contents are data,
                 # not layout owned by this rule.
                 continue
+            if any(
+                token["type"] == "SEMI"
+                for token in tokens[start_idx:end_idx + 1]
+            ):
+                # A CASE containing complete statements is a procedural
+                # PL/pgSQL control-flow block, not a scalar SQL expression.
+                # Its THEN bodies belong to the nested statement rules.
+                continue
             effective_max_len = max_len
             has_additive_expression = any(
                 token["type"] == "OPERATOR"

@@ -5,7 +5,7 @@ Parenthesized logical conditions stay inline when they fit; longer groups put ea
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
-- **Commit Profile**: No
+- **Commit Profile**: Yes
 - **MyBatis Safe**: No
 - **Trellis Safe**: No
 - **Configuration Options**:

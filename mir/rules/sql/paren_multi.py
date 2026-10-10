@@ -9,6 +9,7 @@ from mir.rules.sql.sql_utils import (
 )
 
 class ParenMultiRule(BaseRule):
+    commit_profile = True
     rule_id = "IR-paren-multi"
     description = "Parenthesized logical conditions stay inline when they fit; longer groups put each condition on its own indented line."
     category = "queries"

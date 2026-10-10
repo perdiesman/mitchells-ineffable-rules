@@ -3515,6 +3515,55 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, sql_content)
         self.assertFalse(first.diagnostics)
 
+    def test_case_layout_does_not_rebuild_procedural_statement_bodies(self):
+        sql_content = (
+            "CASE report_scope\n"
+            "    WHEN 'active' THEN\n"
+            "        RETURN QUERY\n"
+            "        SELECT id\n"
+            "        FROM sample_record\n"
+            "        WHERE enabled;\n"
+            "    ELSE\n"
+            "        RETURN QUERY\n"
+            "        SELECT id FROM sample_record;\n"
+            "END CASE;\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+        config.disable_all = True
+        config.rules_to_enable = ["IR-case"]
+
+        result = process_document(config, sql_content, "generic.sql", "sql")
+
+        self.assertEqual(result.content, sql_content)
+        self.assertFalse(result.diagnostics)
+
+    def test_commit_profile_aligns_parenthesized_where_predicates(self):
+        sql_content = (
+            "SELECT item_id\n"
+            "FROM sample_item\n"
+            "WHERE\n"
+            "    active\n"
+            "    AND (\n"
+            "        requested_owner_name ILIKE '%' || owner_filter || '%'\n"
+            "            OR requested_owner_identifier::TEXT ILIKE '%' || owner_filter || '%'\n"
+            "    );\n"
+        )
+        expected = sql_content.replace("            OR", "        OR")
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_multiline_update_is_not_recompacted_after_expression_wrap(self):
         sql_content = (
             "UPDATE sample_group\n"
