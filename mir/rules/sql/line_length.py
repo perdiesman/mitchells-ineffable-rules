@@ -172,6 +172,17 @@ class LineLengthRule(BaseRule):
                 if item["type"] not in ("WHITESPACE", "COMMENT")
             ]
             if (
+                token["type"] == "KEYWORD"
+                and token["value"].upper() == "IN"
+                and active_inner
+                and active_inner[0]["type"] == "KEYWORD"
+                and active_inner[0]["value"].upper() == "SELECT"
+            ):
+                # IN (SELECT ...) is a predicate subquery, not a function
+                # call. Preserve its deliberate multiline layout, especially
+                # when a MyBatis tag supplies part of the inner predicate.
+                continue
+            if (
                 not active_inner
                 or any(item["type"] == "COMMENT" for item in inner_tokens)
                 or any(item["type"] in ("COMMA", "PAREN") for item in active_inner)

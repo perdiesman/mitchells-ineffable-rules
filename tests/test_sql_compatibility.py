@@ -301,6 +301,21 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
         self.assertEqual(rule.check(source, "generic.sql", {}), [])
 
+    def test_line_length_does_not_compact_multiline_in_subquery(self):
+        source = (
+            "AND county_id IN (\n"
+            "    SELECT county_id\n"
+            "    FROM sample_county\n"
+            "    WHERE\n"
+            "        county_code IN\n"
+            "            #{code}\n"
+            ")"
+        )
+
+        rule = LineLengthRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+
     def test_additive_continuations_align_and_join_a_stranded_operand(self):
         source = (
             "    first_value + second_value\n"
