@@ -1032,6 +1032,59 @@ def function_case_source_edits(
     return list(dict.fromkeys(edits))
 
 
+def datatype_case_source_edits(
+    sql_text: str,
+    mapping: List[int],
+    content: str,
+    source_range: tuple[int, int],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Map cast datatype casing directly through dynamic XML boundaries."""
+    from mir.rules.sql.datatype_case import DataTypeCaseRule
+
+    disabled = rule_config.get("_rules_to_disable", set())
+    enabled = rule_config.get("_rules_to_enable", set())
+    if (
+        "IR-datatype-case" in disabled
+        or "sql:IR-datatype-case" in disabled
+        or (
+            rule_config.get("_disable_all", False)
+            and "IR-datatype-case" not in enabled
+            and "sql:IR-datatype-case" not in enabled
+        )
+    ):
+        return []
+    source_start, source_end = source_range
+    edits = []
+    for item in DataTypeCaseRule()._find_violations(sql_text):
+        for token in item["tokens"]:
+            value = token["value"]
+            if (
+                token["type"] not in {"IDENTIFIER", "KEYWORD"}
+                or not value.isalpha()
+                or value.isupper()
+            ):
+                continue
+            guest_start = token["start"]
+            guest_end = token["end"]
+            if not (0 <= guest_start < guest_end <= len(mapping)):
+                continue
+            if any(
+                mapping[index] - mapping[index - 1] != 1
+                for index in range(guest_start + 1, guest_end)
+            ):
+                continue
+            edit_start = mapping[guest_start]
+            edit_end = mapping[guest_end - 1] + 1
+            if not (
+                source_start <= edit_start < edit_end <= source_end
+                and content[edit_start:edit_end] == value
+            ):
+                continue
+            edits.append((edit_start, edit_end, value.upper()))
+    return list(dict.fromkeys(edits))
+
+
 def dynamic_subquery_source_edits(
     sql_text: str,
     mapping: List[int],
@@ -3214,6 +3267,13 @@ class XmlMybatisSqlRule(BaseRule):
                     (el["start_offset"], el["end_offset"]),
                     inner_config,
                 )
+                datatype_case_edits = datatype_case_source_edits(
+                    sql_text,
+                    mapping,
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
                 layout_edits = (
                     post_choose_edits
                     + join_case_edits
@@ -3222,6 +3282,7 @@ class XmlMybatisSqlRule(BaseRule):
                     + top_level_clause_edits
                     + keyword_case_edits
                     + function_case_edits
+                    + datatype_case_edits
                     + layout_edits
                 )
                 join_config = dict(inner_config)
@@ -3388,6 +3449,7 @@ class XmlMybatisSqlRule(BaseRule):
                     + dynamic_from_edits
                     + keyword_case_edits
                     + function_case_edits
+                    + datatype_case_edits
                 )
                 layout_edits = [
                     (start, end, replacement)
@@ -3418,6 +3480,9 @@ class XmlMybatisSqlRule(BaseRule):
                 if function_case_edits:
                     excluded_guest_rule_ids.add("IR-function-case")
                     applied_rules.add("IR-function-case")
+                if datatype_case_edits:
+                    excluded_guest_rule_ids.add("IR-datatype-case")
+                    applied_rules.add("IR-datatype-case")
                 if owns_runtime_where(el):
                     # MyBatis <where> owns prefix insertion/removal across
                     # mutually exclusive dynamic branches. Concatenating all
@@ -3512,7 +3577,9 @@ class XmlMybatisSqlRule(BaseRule):
                     if content[edit[0]:edit[1]] != edit[2]
                 ]
                 safe_layout_fallback_edits = set(
-                    keyword_case_edits + function_case_edits
+                    keyword_case_edits
+                    + function_case_edits
+                    + datatype_case_edits
                 ) | {
                     edit
                     for edit in layout_edits
@@ -3522,7 +3589,16 @@ class XmlMybatisSqlRule(BaseRule):
                     )
                 }
                 edits = layout_edits + edits
-                if null_source_edits:
+                if datatype_case_edits:
+                    # Cast casing is monotonic, but mixing it with a large
+                    # repetitive CASE/layout rewrite can let that rewrite
+                    # reintroduce the source spelling on the next pass.
+                    # Commit the exact token edits first and let layout
+                    # converge from the canonical datatype spelling.
+                    edits = datatype_case_edits
+                    applied_rules.clear()
+                    applied_rules.add("IR-datatype-case")
+                elif null_source_edits:
                     from mir.rules.sql.sql_utils import protected_sql_signature
 
                     edits = null_source_edits
@@ -3619,7 +3695,11 @@ class XmlMybatisSqlRule(BaseRule):
                             continue
                         edits = fallback_edits
                         applied_rules.intersection_update(
-                            {"IR-keyword-case", "IR-function-case"}
+                            {
+                                "IR-keyword-case",
+                                "IR-function-case",
+                                "IR-datatype-case",
+                            }
                         )
                     expected_signature_updates[(el["tag"], el["attrs"]["id"])] = (
                         candidate_signature

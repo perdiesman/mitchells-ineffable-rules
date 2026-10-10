@@ -2023,6 +2023,42 @@ class TestRunnerIntegration(unittest.TestCase):
 
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
+
+    def test_xml_mybatis_nested_join_owners_do_not_cycle(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT data.item_id\n'
+            '        FROM\n'
+            '            (\n'
+            '                SELECT item.item_id\n'
+            '                FROM\n'
+            '                    sample_item item\n'
+            '                    LEFT JOIN sample_owner owner ON owner.item_id = item.item_id\n'
+            '                        AND coalesce(owner.group_id, -1) = coalesce(\n'
+            '                            item.group_id,\n'
+            '                            -1\n'
+            '                        )\n'
+            '            ) data\n'
+            '            <if test="withTotals">\n'
+            '                LEFT JOIN (\n'
+            '                        SELECT item_id, count(*) AS item_count\n'
+            '                        FROM sample_detail\n'
+            '                        GROUP BY item_id\n'
+            '                    ) totals ON totals.item_id = data.item_id\n'
+            '            </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
         self.assertFalse(first.diagnostics)
 
     def test_xml_mybatis_keeps_optional_where_condition_in_its_tag(self):
@@ -3673,7 +3709,7 @@ class TestRunnerIntegration(unittest.TestCase):
             '            <include refid="External.Columns3" />,\n'
             '            <include refid="External.Columns4" />,\n'
             '            <include refid="External.Columns5" />,\n'
-            '        source.source_type_id as source_type_id,\n'
+            '        source.source_type_id::text as source_type_id,\n'
             '        st_asgeojson(st_makepoint(item.longitude, item.latitude)) as boundary\n'
             '        FROM sample.item item\n'
             '        LEFT JOIN sample.extra extra\n'
@@ -3713,7 +3749,10 @@ class TestRunnerIntegration(unittest.TestCase):
         first = process_document(config, xml_content, "generic.xml", "xml")
         second = process_document(config, first.content, "generic.xml", "xml")
 
-        self.assertIn('source.source_type_id AS source_type_id', first.content)
+        self.assertIn(
+            'source.source_type_id::TEXT AS source_type_id',
+            first.content,
+        )
         self.assertIn('st_makepoint(item.longitude, item.latitude)) AS boundary', first.content)
         self.assertEqual(second.content, first.content)
 
