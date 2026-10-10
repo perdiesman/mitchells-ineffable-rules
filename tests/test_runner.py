@@ -982,6 +982,64 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
 
+    def test_xml_indent_formats_generated_column_list_fragment(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="Base_Column_List">\n'
+            '    sample_item.item_id AS sample_item_id, sample_item.item_name AS sample_item_name,\n'
+            '    sample_item.owner_id AS sample_item_owner_id\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="Base_Column_List">\n'
+            '        sample_item.item_id AS sample_item_id,\n'
+            '        sample_item.item_name AS sample_item_name,\n'
+            '        sample_item.owner_id AS sample_item_owner_id\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.fix = True
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-indent"]
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+
+    def test_xml_mybatis_anchors_clauses_after_column_include(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="Base_Column_List">\n'
+            '        sample_item.item_id AS sample_item_id,\n'
+            '        sample_item.item_name AS sample_item_name\n'
+            '    </sql>\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            <include refid="Base_Column_List" />\n'
+            '    FROM sample_item\n'
+            '    WHERE sample_item.enabled\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '    FROM sample_item\n    WHERE sample_item.enabled',
+            '        FROM sample_item\n        WHERE sample_item.enabled',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+
     def test_xml_mybatis_commit_profile_applies_declared_boolean_rewrites(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

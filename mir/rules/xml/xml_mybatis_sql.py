@@ -717,6 +717,72 @@ def dynamic_sql_indent_source_edits(
     return edits
 
 
+def top_level_clause_source_edits(
+    sql_text: str,
+    mapping: List[int],
+    content: str,
+    source_range: tuple[int, int],
+    dynamic_ranges: List[tuple[int, int, int]],
+    base_indent: str,
+) -> List[tuple[int, int, str]]:
+    """Anchor physical top-level clauses one level inside their XML tag.
+
+    Reusable ``<include>`` fragments expand into the guest SQL before clause
+    rules run. Their source mappings can make an otherwise valid guest clause
+    appear aligned even when its physical XML line is still at the tag's
+    indentation. Resolve those clause anchors directly in source space.
+    """
+    from mir.rules.sql.sql_utils import get_token_depths, tokenize_sql
+
+    tokens = tokenize_sql(sql_text)
+    depths = get_token_depths(tokens)
+    statement_keywords = {"SELECT", "UPDATE", "INSERT", "DELETE", "WITH"}
+    clause_keywords = {
+        "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "HAVING", "LIMIT",
+        "OFFSET", "UNION", "INTERSECT", "EXCEPT", "UPDATE", "INSERT",
+        "DELETE", "VALUES", "SET", "RETURNING", "WITH",
+    }
+    statement_depth = next(
+        (
+            depths[index]
+            for index, token in enumerate(tokens)
+            if token["type"] == "KEYWORD"
+            and token["value"].upper() in statement_keywords
+        ),
+        None,
+    )
+    if statement_depth is None:
+        return []
+
+    source_start, source_end = source_range
+    edits = []
+    for index, token in enumerate(tokens):
+        if (
+            depths[index] != statement_depth
+            or token["type"] != "KEYWORD"
+            or token["value"].upper() not in clause_keywords
+            or not (0 <= token["start"] < len(mapping))
+        ):
+            continue
+        source_offset = mapping[token["start"]]
+        if not (source_start < source_offset < source_end):
+            continue
+        if any(start < source_offset < end for start, end, _ in dynamic_ranges):
+            continue
+        if (
+            source_offset >= len(content)
+            or content[source_offset:source_offset + len(token["value"])]
+            != token["value"]
+        ):
+            continue
+        line_start = content.rfind("\n", 0, source_offset) + 1
+        prefix = content[line_start:source_offset]
+        if prefix.strip() or len(prefix) >= len(base_indent):
+            continue
+        edits.append((line_start, source_offset, base_indent))
+    return edits
+
+
 def dynamic_subquery_source_edits(
     sql_text: str,
     mapping: List[int],
@@ -2081,6 +2147,27 @@ class XmlMybatisSqlRule(BaseRule):
                         ),
                         "is_fixable": True,
                     })
+                top_level_clause_edits = top_level_clause_source_edits(
+                    sql_text,
+                    mapping,
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    dynamic_indent_ranges,
+                    base_indent,
+                )
+                if top_level_clause_edits:
+                    first_start = min(
+                        start for start, _, _ in top_level_clause_edits
+                    )
+                    violations.append({
+                        "rule_id": self.rule_id,
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "Top-level SQL clauses must align one indentation "
+                            "level inside their MyBatis statement tag."
+                        ),
+                        "is_fixable": True,
+                    })
                 order_edits = compact_dynamic_order_by_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
@@ -2349,8 +2436,19 @@ class XmlMybatisSqlRule(BaseRule):
                     (el["start_offset"], el["end_offset"]),
                     dynamic_indent_ranges,
                 )
+                top_level_clause_edits = top_level_clause_source_edits(
+                    sql_text,
+                    mapping,
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    dynamic_indent_ranges,
+                    base_indent,
+                )
                 layout_edits = (
-                    post_choose_edits + dynamic_body_edits + layout_edits
+                    post_choose_edits
+                    + dynamic_body_edits
+                    + top_level_clause_edits
+                    + layout_edits
                 )
                 join_config = dict(inner_config)
                 join_config.update(bridge_state)
@@ -2456,6 +2554,7 @@ class XmlMybatisSqlRule(BaseRule):
                 protected_source_indent_spans = [
                     (start, end)
                     for start, end, _ in post_choose_edits + dynamic_body_edits
+                    + top_level_clause_edits
                     + dynamic_projection_edits
                     + dynamic_from_edits
                     + dynamic_order_edits
@@ -2476,6 +2575,7 @@ class XmlMybatisSqlRule(BaseRule):
                 protected_source_edit_set = set(
                     post_choose_edits
                     + dynamic_body_edits
+                    + top_level_clause_edits
                     + subquery_source_edits
                     + dynamic_window_edits
                     + dynamic_projection_edits

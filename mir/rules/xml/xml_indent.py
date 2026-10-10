@@ -219,6 +219,53 @@ class XmlIndentRule(BaseRule):
             if el["tag"] in ("select", "insert", "update", "delete", "sql")
         ]
         for element in elements:
+            if element["tag"] != "sql":
+                continue
+            fragment_id = element.get("attrs", {}).get("id", "").lower()
+            if "column" not in fragment_id or "list" not in fragment_id:
+                continue
+            body_start = tokens[element["open_end_idx"]]["end"]
+            body_end = tokens[element["end_idx"] - 1]["start"]
+            body = content[body_start:body_end]
+            if "<" in body or "," not in body:
+                continue
+            body_text = body.strip()
+            sql_tokens = tokenize_sql(body_text)
+            depth = 0
+            part_start = 0
+            parts = []
+            for sql_token in sql_tokens:
+                if sql_token["type"] == "PAREN":
+                    depth += 1 if sql_token["value"] == "(" else -1
+                elif sql_token["type"] == "COMMA" and depth == 0:
+                    parts.append(body_text[part_start:sql_token["start"]])
+                    part_start = sql_token["end"]
+            parts.append(body_text[part_start:])
+            normalized_parts = [" ".join(part.split()) for part in parts]
+            if len(normalized_parts) < 2 or any(not part for part in normalized_parts):
+                continue
+            tag_line_start = content.rfind("\n", 0, element["start_offset"]) + 1
+            tag_prefix = content[tag_line_start:element["start_offset"]]
+            tag_indent = tag_prefix[: len(tag_prefix) - len(tag_prefix.lstrip(" \t"))]
+            column_indent = tag_indent + " " * indent_size
+            expected = (
+                "\n"
+                + (",\n" + column_indent).join(
+                    column_indent + part if index == 0 else part
+                    for index, part in enumerate(normalized_parts)
+                )
+                + "\n"
+                + tag_indent
+            )
+            if body != expected:
+                violations.append({
+                    "line": tokens[element["open_end_idx"]]["line"] + 1,
+                    "start_offset": body_start,
+                    "end_offset": body_end,
+                    "replacement": expected,
+                    "message": "MyBatis column-list fragments should put each column on its own indented line.",
+                })
+        for element in elements:
             if element["tag"] not in {"select", "insert", "update", "delete", "sql"}:
                 continue
             body_start = tokens[element["open_end_idx"]]["end"]
