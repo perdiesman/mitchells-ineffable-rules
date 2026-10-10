@@ -3,7 +3,7 @@ from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.engine.rules_loader import load_rules_for_language
 from mir.rules.xml.xml_utils import tokenize_xml
-from mir.engine.embedded_bridge import check_embedded_content, fix_embedded_content
+from mir.engine.embedded_bridge import check_embedded_content, fix_embedded_content, xml_encode
 
 
 def mapped_offsets_in_ranges(mapping: List[int], ranges: List[tuple]) -> set[int]:
@@ -2835,6 +2835,28 @@ class XmlMybatisSqlRule(BaseRule):
                     require_embedded_safe=True,
                     extra_fix_args=bridge_state,
                 )
+                static_inner_tokens = el.get("inner_tokens", [])
+                static_full_replacement = bool(
+                    static_inner_tokens
+                    and sql_text.upper().count("SELECT") >= 4
+                    and not el.get("children")
+                    and not any(
+                        token["type"].startswith("TAG_")
+                        for token in static_inner_tokens
+                    )
+                    and bridge_state.get("fixed_text") != sql_text
+                )
+                if static_full_replacement:
+                    # A static mapper statement has a contiguous one-to-one
+                    # source body. Replacing that body atomically avoids the
+                    # ambiguous line matching that can misapply a large,
+                    # repetitive nested-query reflow to the wrong occurrence.
+                    edits = [(
+                        static_inner_tokens[0]["start"],
+                        static_inner_tokens[-1]["end"],
+                        xml_encode(bridge_state["fixed_text"]),
+                    )]
+                    layout_edits = []
                 # Expanded <include> content maps back to its reusable <sql>
                 # definition, which is formatted as its own element. A host
                 # statement must never claim those out-of-range edits or let

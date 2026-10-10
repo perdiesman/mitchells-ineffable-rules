@@ -3065,6 +3065,9 @@ class TestRunnerIntegration(unittest.TestCase):
             '                 UNION\n'
             '                 select second_item.item_identifier\n'
             '                 from sample_second_item second_item\n'
+            '                 UNION\n'
+            '                 select third_item.item_identifier\n'
+            '                 from sample_third_item third_item\n'
             '             ) wrapper\n'
             '    </select>\n'
             '</mapper>'
@@ -3076,7 +3079,7 @@ class TestRunnerIntegration(unittest.TestCase):
         first = process_document(config, xml_content, "generic.xml", "xml")
         second = process_document(config, first.content, "generic.xml", "xml")
 
-        self.assertEqual(first.content.count("SELECT"), 3)
+        self.assertEqual(first.content.count("SELECT"), 4)
         self.assertEqual(second.content, first.content)
         self.assertFalse(first.diagnostics)
 
