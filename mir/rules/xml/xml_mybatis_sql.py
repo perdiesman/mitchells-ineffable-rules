@@ -1072,6 +1072,9 @@ def host_semantic_source_edits(
 
     from mir.rules.sql.boolean_comparison import BooleanComparisonRule
     from mir.rules.sql.between import BetweenRule
+    from mir.rules.sql.parenthesized_expression_wrap import (
+        ParenthesizedExpressionWrapRule,
+    )
     from mir.rules.sql.redundant_keywords import RedundantKeywordsRule
     from mir.rules.sql.table_alias_as import TableAliasAsRule
 
@@ -1084,11 +1087,14 @@ def host_semantic_source_edits(
         RedundantKeywordsRule(),
         TableAliasAsRule(),
         BetweenRule(),
+        ParenthesizedExpressionWrapRule(),
     ):
         if rule.rule_id in disabled or (disable_all and rule.rule_id not in enabled):
             continue
         if isinstance(rule, BetweenRule):
             findings = rule._find_violations(sql_text, rule_config)
+        elif isinstance(rule, ParenthesizedExpressionWrapRule):
+            findings = rule._find_edits(sql_text, rule_config)
         elif isinstance(rule, TableAliasAsRule):
             findings = []
             for item in rule._find_violations(sql_text):
@@ -1111,8 +1117,10 @@ def host_semantic_source_edits(
         mapped_findings = []
         source_edits = []
         for finding in findings:
-            guest_start = finding["start_offset"]
-            guest_end = finding["end_offset"]
+            guest_start = finding.get("start_offset", finding.get("start"))
+            guest_end = finding.get("end_offset", finding.get("end"))
+            if guest_start is None or guest_end is None:
+                continue
             if not (0 <= guest_start < guest_end <= len(mapping)):
                 continue
             if any(
@@ -4455,6 +4463,11 @@ class XmlMybatisSqlRule(BaseRule):
                         for existing in long_select_edits
                     ):
                         long_select_edits.append(physical_edit)
+                long_select_edits = [
+                    edit
+                    for edit in long_select_edits
+                    if content[edit[0]:edit[1]] != edit[2]
+                ]
                 if long_select_edits:
                     first_start = min(start for start, _, _ in long_select_edits)
                     violations.append({
@@ -4873,6 +4886,7 @@ class XmlMybatisSqlRule(BaseRule):
         target_tags = {"select", "insert", "update", "delete", "sql"}
         all_xml_edits = []
         owned_where_edits = []
+        atomic_static_edits = set()
         expected_signature_updates = {}
         original_signature_map = {}
         lines_filter = rule_config.get("_lines")
@@ -5018,13 +5032,14 @@ class XmlMybatisSqlRule(BaseRule):
                         inner_config,
                     )
                     if (
-                        any(
-                            source_offset < el["start_offset"]
-                            or source_offset > el["end_offset"]
-                            for source_offset in mapping
+                        (
+                            any(
+                                source_offset < el["start_offset"]
+                                or source_offset > el["end_offset"]
+                                for source_offset in mapping
+                            )
+                            or bridge_state["mybatis_dynamic_indent_ranges"]
                         )
-                        and not null_source_edits
-                        and not paren_source_edits
                     )
                     else ([], sql_text, None)
                 )
@@ -5316,6 +5331,11 @@ class XmlMybatisSqlRule(BaseRule):
                         for existing in long_select_edits
                     ):
                         long_select_edits.append(physical_edit)
+                long_select_edits = [
+                    edit
+                    for edit in long_select_edits
+                    if content[edit[0]:edit[1]] != edit[2]
+                ]
                 layout_edits.extend(long_select_edits)
                 physical_case_edits = physical_case_indent_source_edits(
                     content,
@@ -5570,7 +5590,10 @@ class XmlMybatisSqlRule(BaseRule):
                 static_inner_tokens = el.get("inner_tokens", [])
                 static_full_replacement = bool(
                     static_inner_tokens
-                    and sql_text.upper().count("SELECT") >= 4
+                    and (
+                        sql_text.upper().count("SELECT") >= 4
+                        or any(len(line) > 120 for line in sql_text.splitlines())
+                    )
                     and not el.get("children")
                     and not any(
                         token["type"].startswith("TAG_")
@@ -5588,6 +5611,7 @@ class XmlMybatisSqlRule(BaseRule):
                         static_inner_tokens[-1]["end"],
                         xml_encode(bridge_state["fixed_text"]),
                     )]
+                    atomic_static_edits.update(edits)
                     layout_edits = []
                 # Expanded <include> content maps back to its reusable <sql>
                 # definition, which is formatted as its own element. A host
@@ -5603,6 +5627,7 @@ class XmlMybatisSqlRule(BaseRule):
                         edit for edit in edits
                         if not overlaps_protected_source_indent(edit)
                     ]
+                guest_edits = list(edits)
                 if bridge_state.get("semantic_changed"):
                     # Token rewrites need an exact source-mapped pass. Mixing
                     # them with a large layout reflow can make overlapping
@@ -5649,7 +5674,24 @@ class XmlMybatisSqlRule(BaseRule):
                     )
                 }
                 edits = layout_edits + edits
-                if datatype_case_edits:
+                if static_full_replacement:
+                    # The atomic body already contains the bridge's selected
+                    # semantic or layout pass. Do not replace it with a
+                    # narrower source-mapped helper edit below.
+                    pass
+                elif host_semantic_edits:
+                    from mir.rules.sql.sql_utils import protected_sql_signature
+
+                    edits = host_semantic_edits
+                    applied_rules.clear()
+                    applied_rules.add(host_semantic_rule)
+                    bridge_state["original_protected_signature"] = (
+                        protected_sql_signature(sql_text)
+                    )
+                    bridge_state["expected_protected_signature"] = (
+                        protected_sql_signature(host_semantic_fixed_text)
+                    )
+                elif datatype_case_edits:
                     # Cast casing is monotonic, but mixing it with a large
                     # repetitive CASE/layout rewrite can let that rewrite
                     # reintroduce the source spelling on the next pass.
@@ -5710,18 +5752,6 @@ class XmlMybatisSqlRule(BaseRule):
                     bridge_state["expected_protected_signature"] = (
                         protected_sql_signature(paren_fixed_text)
                     )
-                elif host_semantic_edits:
-                    from mir.rules.sql.sql_utils import protected_sql_signature
-
-                    edits = host_semantic_edits
-                    applied_rules.clear()
-                    applied_rules.add(host_semantic_rule)
-                    bridge_state["original_protected_signature"] = (
-                        protected_sql_signature(sql_text)
-                    )
-                    bridge_state["expected_protected_signature"] = (
-                        protected_sql_signature(host_semantic_fixed_text)
-                    )
                 statement_key = (el["tag"], el["attrs"]["id"])
                 original_signature_map[statement_key] = bridge_state[
                     "original_protected_signature"
@@ -5760,35 +5790,49 @@ class XmlMybatisSqlRule(BaseRule):
                             for edit in fragment_edits
                             if edit in safe_layout_fallback_edits
                         ]
-                        if not fallback_edits:
-                            continue
-                        fallback_chars = list(
-                            content[fragment_start:fragment_end]
-                        )
-                        for start, end, replacement in sorted(
-                            fallback_edits,
-                            reverse=True,
+                        accepted_fallback = None
+                        used_safe_layout_fallback = False
+                        for fallback_index, fallback_candidate in enumerate(
+                            (fallback_edits, guest_edits)
                         ):
-                            fallback_chars[
-                                start - fragment_start:end - fragment_start
-                            ] = list(replacement)
-                        candidate_signature = (
-                            get_mybatis_fragment_protected_signature(
-                                "".join(fallback_chars),
-                                sql_defs,
-                                statement_key,
+                            if not fallback_candidate:
+                                continue
+                            fallback_candidate = resolve_source_edits(
+                                fallback_candidate
                             )
-                        )
-                        if candidate_signature not in allowed_signatures:
+                            fallback_chars = list(
+                                content[fragment_start:fragment_end]
+                            )
+                            for start, end, replacement in sorted(
+                                fallback_candidate,
+                                reverse=True,
+                            ):
+                                fallback_chars[
+                                    start - fragment_start:end - fragment_start
+                                ] = list(replacement)
+                            fallback_signature = (
+                                get_mybatis_fragment_protected_signature(
+                                    "".join(fallback_chars),
+                                    sql_defs,
+                                    statement_key,
+                                )
+                            )
+                            if fallback_signature in allowed_signatures:
+                                accepted_fallback = fallback_candidate
+                                candidate_signature = fallback_signature
+                                used_safe_layout_fallback = fallback_index == 0
+                                break
+                        if accepted_fallback is None:
                             continue
-                        edits = fallback_edits
-                        applied_rules.intersection_update(
-                            {
-                                "IR-keyword-case",
-                                "IR-function-case",
-                                "IR-datatype-case",
-                            }
-                        )
+                        edits = accepted_fallback
+                        if used_safe_layout_fallback:
+                            applied_rules.intersection_update(
+                                {
+                                    "IR-keyword-case",
+                                    "IR-function-case",
+                                    "IR-datatype-case",
+                                }
+                            )
                     expected_signature_updates[(el["tag"], el["attrs"]["id"])] = (
                         candidate_signature
                     )
@@ -5801,7 +5845,7 @@ class XmlMybatisSqlRule(BaseRule):
             all_xml_edits = [
                 edit
                 for edit in all_xml_edits
-                if not any(
+                if edit in atomic_static_edits or not any(
                     max(edit[0], owned[0]) < min(edit[1], owned[1])
                     or (
                         edit[0] == edit[1]

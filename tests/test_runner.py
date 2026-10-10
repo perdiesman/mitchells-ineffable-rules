@@ -292,6 +292,43 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
 
+    def test_xml_mybatis_formats_overlaps_tuple_inside_choose(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        <choose>\n'
+            '            <when test="timestamp != null">\n'
+            '                AND (start_time, end_time) OVERLAPS (\n'
+            '                #{timestamp} - INTERVAL \'1 day\',\n'
+            '                #{timestamp} + INTERVAL \'1 day\'\n'
+            '                )\n'
+            '            </when>\n'
+            '        </choose>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            "                #{timestamp} - INTERVAL '1 day',\n"
+            "                #{timestamp} + INTERVAL '1 day'\n"
+            "                )",
+            "                    #{timestamp} - INTERVAL '1 day',\n"
+            "                    #{timestamp} + INTERVAL '1 day'\n"
+            "                )",
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_moves_dynamic_projection_after_select(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
