@@ -45,7 +45,21 @@ class ParenthesizedExpressionWrapRule(BaseRule):
                 "                    )\n"
                 "                ) - 1 AS outage_count"
             ),
-        }
+        },
+        {
+            "violating": (
+                "(\n"
+                "    current_measure / expected_measure -\n"
+                "    previous_measure_with_a_long_identifier / expected_measure\n"
+                ")"
+            ),
+            "correct": (
+                "(\n"
+                "    current_measure / expected_measure\n"
+                "    - previous_measure_with_a_long_identifier / expected_measure\n"
+                ")"
+            ),
+        },
     ]
     additional_validations = [
         "SELECT (current_count / expected_count) AS ratio;",
@@ -73,6 +87,12 @@ class ParenthesizedExpressionWrapRule(BaseRule):
         )
         tokens = tokenize_sql(content)
         lines = content.splitlines()
+        from mir.rules.sql.additive_wrap import AdditiveWrapRule
+        expression_max_length = AdditiveWrapRule().get_config_value(
+            rule_config,
+            "max_line_length",
+            default_value=100,
+        )
         edits: List[dict] = []
         first_active_by_line: Dict[int, int] = {}
         for index, item in enumerate(tokens):
@@ -165,13 +185,91 @@ class ParenthesizedExpressionWrapRule(BaseRule):
             if line_index >= len(lines):
                 continue
             line = lines[line_index]
-            if source_text_length(line, rule_config) <= max_length:
-                continue
             first_on_line = first_active_by_line.get(token["line"])
             if first_on_line != open_index:
                 continue
             close_index = find_matching_paren(tokens, open_index)
-            if close_index is None or tokens[close_index]["line"] != token["line"]:
+            if close_index is None:
+                continue
+
+            if tokens[close_index]["line"] != token["line"]:
+                base_indent = line[: len(line) - len(line.lstrip(" \t"))]
+                content_indent = base_indent + "    "
+                depth = 0
+                operators = []
+                for candidate in range(open_index + 1, close_index):
+                    item = tokens[candidate]
+                    if item["type"] == "PAREN":
+                        depth += 1 if item["value"] == "(" else -1
+                    elif (
+                        depth == 0
+                        and item["type"] == "OPERATOR"
+                        and item["value"] in {"+", "-", "*", "/", "||"}
+                    ):
+                        operators.append(candidate)
+                trailing_operator_lines = set()
+                for operator_index in operators:
+                    next_active_index = next(
+                        (
+                            candidate
+                            for candidate in range(operator_index + 1, close_index)
+                            if tokens[candidate]["type"]
+                            not in ("WHITESPACE", "COMMENT")
+                        ),
+                        None,
+                    )
+                    if (
+                        next_active_index is not None
+                        and tokens[next_active_index]["line"]
+                        > tokens[operator_index]["line"]
+                    ):
+                        trailing_operator_lines.add(tokens[operator_index]["line"])
+                for operator_index in operators:
+                    operator = tokens[operator_index]
+                    previous_on_line = first_active_by_line.get(operator["line"])
+                    next_active_index = next(
+                        (
+                            candidate
+                            for candidate in range(operator_index + 1, close_index)
+                            if tokens[candidate]["type"]
+                            not in ("WHITESPACE", "COMMENT")
+                        ),
+                        None,
+                    )
+                    trails_line = bool(
+                        next_active_index is not None
+                        and tokens[next_active_index]["line"] > operator["line"]
+                    )
+                    operator_line = lines[operator["line"] - 1]
+                    line_is_long = (
+                        source_text_length(operator_line, rule_config)
+                        > expression_max_length
+                    )
+                    if previous_on_line == operator_index:
+                        continue
+                    if trails_line:
+                        add_whitespace_edit(
+                            operator_index,
+                            "\n" + content_indent,
+                            before=True,
+                        )
+                        add_whitespace_edit(
+                            operator_index,
+                            " ",
+                            before=False,
+                        )
+                    elif (
+                        line_is_long
+                        and operator["line"] not in trailing_operator_lines
+                    ):
+                        add_whitespace_edit(
+                            operator_index,
+                            "\n" + content_indent,
+                            before=True,
+                        )
+                continue
+
+            if source_text_length(line, rule_config) <= max_length:
                 continue
 
             depth = 0

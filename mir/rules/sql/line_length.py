@@ -358,6 +358,26 @@ class LineLengthRule(BaseRule):
                 line_idx = call["name_token"]["line"] - 1
                 line = lines[line_idx] if line_idx < len(lines) else ""
                 if len(line) > max_length:
+                    earlier_line_tokens = [
+                        item
+                        for item in tokens
+                        if item["line"] == call["name_token"]["line"]
+                        and item["start"] < call["name_token"]["start"]
+                        and item["type"] not in ("WHITESPACE", "COMMENT")
+                    ]
+                    earlier_keywords = {
+                        item["value"].upper()
+                        for item in earlier_line_tokens
+                        if item["type"] == "KEYWORD"
+                    }
+                    if (
+                        "JOIN" in earlier_keywords
+                        and earlier_keywords.intersection({"AND", "OR"})
+                    ):
+                        # JOIN layout owns the earlier boolean boundary. Let
+                        # it move the predicate to a continuation before
+                        # expanding a function that will fit on that line.
+                        continue
                     if any(
                         later["name_token"]["line"] == call["name_token"]["line"]
                         and later["start"] > call["end"]

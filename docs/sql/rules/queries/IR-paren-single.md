@@ -1,6 +1,6 @@
 # IR-paren-single
 
-Unnecessary parentheses around a single condition should be removed.
+Unnecessary parentheses around a single condition or a safely ungrouped multiplicative operand should be removed.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
@@ -30,6 +30,16 @@ SELECT (id)::integer FROM users;
 ####  Correct Example #2
 ```sql
 SELECT id::integer FROM users;
+```
+
+#### ❌ Violating Example #3
+```sql
+SELECT (((current_count - prior_count)::numeric / total_count) - (adjustment / total_count));
+```
+
+####  Correct Example #3
+```sql
+SELECT ((current_count - prior_count)::numeric / total_count - adjustment / total_count);
 ```
 
 #### Additional Validations

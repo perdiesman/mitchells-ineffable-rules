@@ -12,7 +12,10 @@ class ParenSingleRule(BaseRule):
     commit_semantic_rewrite = True
     embedded_safe = True
     rule_id = "IR-paren-single"
-    description = "Unnecessary parentheses around a single condition should be removed."
+    description = (
+        "Unnecessary parentheses around a single condition or a safely "
+        "ungrouped multiplicative operand should be removed."
+    )
     category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
@@ -28,6 +31,10 @@ class ParenSingleRule(BaseRule):
         {
             "violating": "SELECT (id)::integer FROM users;",
             "correct": "SELECT id::integer FROM users;"
+        },
+        {
+            "violating": "SELECT (((current_count - prior_count)::numeric / total_count) - (adjustment / total_count));",
+            "correct": "SELECT ((current_count - prior_count)::numeric / total_count - adjustment / total_count);"
         }
     ]
     additional_validations = [
@@ -169,15 +176,49 @@ class ParenSingleRule(BaseRule):
                     continue
 
                 # Parentheses around arithmetic may document or control the
-                # operand that a following operator applies to. This rule is
-                # limited to a single predicate/atom, not expression regrouping.
-                if any(
-                    depth == 0
-                    and inner_token["type"] == "OPERATOR"
-                    and inner_token["value"] in {"+", "-", "*", "/", "%", "||"}
+                # operand that a following operator applies to. A purely
+                # multiplicative expression is the safe exception when it is
+                # itself an operand of an additive expression: ``(a / b) -
+                # (c / d)`` does not need the two inner grouping layers.
+                arithmetic_operators = [
+                    inner_token["value"]
                     for inner_token, depth in zip(inner_tokens, inner_depths)
-                ):
-                    continue
+                    if (
+                        depth == 0
+                        and inner_token["type"] == "OPERATOR"
+                        and inner_token["value"]
+                        in {"+", "-", "*", "/", "%", "||"}
+                    )
+                ]
+                if arithmetic_operators:
+                    left_is_additive_boundary = bool(
+                        prev_active is None
+                        or (
+                            prev_active["type"] == "PAREN"
+                            and prev_active["value"] == "("
+                        )
+                        or (
+                            prev_active["type"] == "OPERATOR"
+                            and prev_active["value"] in {"+", "-"}
+                        )
+                    )
+                    right_is_additive_boundary = bool(
+                        next_after_close is None
+                        or (
+                            next_after_close["type"] == "PAREN"
+                            and next_after_close["value"] == ")"
+                        )
+                        or (
+                            next_after_close["type"] == "OPERATOR"
+                            and next_after_close["value"] in {"+", "-"}
+                        )
+                    )
+                    if not (
+                        set(arithmetic_operators) <= {"*", "/", "%"}
+                        and left_is_additive_boundary
+                        and right_is_additive_boundary
+                    ):
+                        continue
                     
                 # Check next token for CAST
                 if next_after_close and next_after_close["type"] == "CAST":

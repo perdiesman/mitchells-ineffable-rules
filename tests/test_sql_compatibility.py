@@ -316,6 +316,55 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
 
+    def test_line_length_defers_long_join_boolean_to_join_layout(self):
+        source = (
+            "JOIN sample_customer customer ON customer.item_id = sample_item.item_id "
+            "AND coalesce(customer.organization_identifier, -1) = "
+            "coalesce(sample_item.organization_identifier, -1)"
+        )
+        rule = LineLengthRule()
+
+        self.assertGreater(len(source), 120)
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+
+    def test_redundant_multiplicative_operand_parentheses_are_removed(self):
+        source = (
+            "SELECT (((peak_count - current_count)::NUMERIC / greatest(peak_count, 1)) "
+            "- ((peak_count - prior_count)::NUMERIC / greatest(peak_count, 1))) AS progress"
+        )
+        expected = (
+            "SELECT ((peak_count - current_count)::NUMERIC / greatest(peak_count, 1) "
+            "- (peak_count - prior_count)::NUMERIC / greatest(peak_count, 1)) AS progress"
+        )
+
+        rule = ParenSingleRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+
+    def test_multiline_parenthesized_arithmetic_aligns_operators(self):
+        source = (
+            "(\n"
+            "    (peak_measure - current_measure)::NUMERIC / greatest(peak_measure, 1) -\n"
+            "    (peak_measure - previous_measure_with_an_exceptionally_long_name)::NUMERIC / greatest(peak_measure, 1)\n"
+            ")"
+        )
+        expected = (
+            "(\n"
+            "    (peak_measure - current_measure)::NUMERIC / greatest(peak_measure, 1)\n"
+            "    - (peak_measure - previous_measure_with_an_exceptionally_long_name)::NUMERIC\n"
+            "    / greatest(peak_measure, 1)\n"
+            ")"
+        )
+
+        rule = ParenthesizedExpressionWrapRule()
+        first = rule.fix(source, "generic.sql", {})
+        fixed = rule.fix(first, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+
     def test_additive_continuations_align_and_join_a_stranded_operand(self):
         source = (
             "    first_value + second_value\n"
