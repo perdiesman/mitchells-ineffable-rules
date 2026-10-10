@@ -243,13 +243,23 @@ class AdditiveWrapRule(BaseRule):
         edits = []
         for line_number, raw_line in enumerate(lines, start=1):
             line = raw_line.rstrip("\r\n")
+            line_keywords = {
+                token["value"].upper()
+                for token in tokens
+                if token["line"] == line_number and token["type"] == "KEYWORD"
+            }
+            line_max_length = (
+                continuation_max_length
+                if {"JOIN", "ON"}.issubset(line_keywords)
+                else max_length
+            )
             if (
                 line.lstrip(" \t").startswith(("+", "||"))
                 and source_text_length(line, rule_config)
                 <= continuation_max_length
             ):
                 continue
-            if source_text_length(line, rule_config) <= max_length:
+            if source_text_length(line, rule_config) <= line_max_length:
                 continue
             line_start = line_starts[line_number - 1]
             line_end = line_start + len(line)
@@ -295,9 +305,9 @@ class AdditiveWrapRule(BaseRule):
             while source_text_length(
                 indent + content[segment_start:line_end].lstrip(" \t"),
                 rule_config,
-            ) > max_length:
+            ) > line_max_length:
                 limit = (
-                    line_start + max_length
+                    line_start + line_max_length
                     if segment_start == line_start
                     else segment_start + max_length - len(indent)
                 )

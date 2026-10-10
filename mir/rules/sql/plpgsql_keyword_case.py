@@ -15,6 +15,7 @@ PLPGSQL_KEYWORDS = {
     "NEW", "OLD", "TG_OP", "TG_NAME", "TG_WHEN", "TG_LEVEL", "TG_RELID", "TG_RELNAME",
     "TG_TABLE_NAME", "TG_TABLE_SCHEMA", "TG_NARGS", "TG_ARGV"
 }
+PLPGSQL_MESSAGE_LEVELS = {"NOTICE", "WARNING", "INFO", "DEBUG", "LOG"}
 
 class PlpgsqlKeywordCaseRule(BaseRule):
     embedded_safe = True
@@ -34,15 +35,28 @@ class PlpgsqlKeywordCaseRule(BaseRule):
             "correct": "IF NEW.manager THEN NEW.file_uploader = TRUE; END IF;"
         }
     ]
-    additional_validations = []
+    additional_validations = [
+        "WITH info AS (SELECT item_id FROM sample_item) SELECT * FROM info;"
+    ]
 
     def _check_tokens(self, tokens: List[dict], offset_delta: int, violations: List[dict]):
+        previous_active = None
         for t in tokens:
             if t["type"] in ("IDENTIFIER", "KEYWORD"):
                 val = t["value"]
                 if val.startswith('"') and val.endswith('"'):
+                    previous_active = t
                     continue
                 upper_val = val.upper()
+                if (
+                    upper_val in PLPGSQL_MESSAGE_LEVELS
+                    and (
+                        previous_active is None
+                        or previous_active["value"].upper() != "RAISE"
+                    )
+                ):
+                    previous_active = t
+                    continue
                 if upper_val in PLPGSQL_KEYWORDS and val != upper_val:
                     if upper_val == "PLPGSQL":
                         continue
@@ -53,6 +67,8 @@ class PlpgsqlKeywordCaseRule(BaseRule):
                         "replacement": upper_val,
                         "line": t["line"]
                     })
+            if t["type"] not in ("WHITESPACE", "COMMENT"):
+                previous_active = t
 
     def _find_violations(self, content: str) -> List[dict]:
         tokens = tokenize_sql(content)

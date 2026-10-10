@@ -344,7 +344,6 @@ class JoinOnMultiRule(BaseRule):
                 
                 if (
                     estimated_line_len <= max_len
-                    and not has_dynamic_boolean
                     and not join_target_multiline
                     and not has_multiline_group
                 ):

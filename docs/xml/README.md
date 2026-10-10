@@ -28,7 +28,7 @@ This document describes all XML linting rules supported by Mitchell's Ineffable 
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
-| [`IR-xml-attribute-quotes`](rules/attributes/IR-xml-attribute-quotes.md) | Enforce double quotes around attribute values instead of single quotes. | Yes | [View Details](rules/attributes/IR-xml-attribute-quotes.md) |
+| [`IR-xml-attribute-quotes`](rules/attributes/IR-xml-attribute-quotes.md) | Enforce double quotes around attribute values and encode greater-than comparisons inside attributes. | Yes | [View Details](rules/attributes/IR-xml-attribute-quotes.md) |
 
 ## Namespaces
 

@@ -23,6 +23,7 @@ from mir.rules.sql.paren_same_op import ParenSameOpRule
 from mir.rules.sql.paren_single import ParenSingleRule
 from mir.rules.sql.redundant_keywords import RedundantKeywordsRule
 from mir.rules.sql.parenthesized_expression_wrap import ParenthesizedExpressionWrapRule
+from mir.rules.sql.plpgsql_keyword_case import PlpgsqlKeywordCaseRule
 from mir.rules.sql.sql_utils import _tokenize_sql_impl, protected_sql_signature, tokenize_sql
 from mir.rules.sql.statement_semicolon import StatementSemicolonRule
 from mir.rules.sql.subquery_indent import SubqueryIndentRule
@@ -34,6 +35,41 @@ from mir.rules.sql.where_multi import WhereMultiRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_plpgsql_message_level_can_be_a_sql_identifier(self):
+        source = "WITH info AS (SELECT item_id FROM sample_item) SELECT * FROM info;"
+        rule = PlpgsqlKeywordCaseRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
+    def test_dynamic_join_conditions_compact_within_one_xml_branch(self):
+        source = (
+            "    JOIN sample_owner owner ON owner.id = item.owner_id\n"
+            "        AND owner.active"
+        )
+        expected = (
+            "    JOIN sample_owner owner ON owner.id = item.owner_id AND owner.active"
+        )
+        and_offset = source.index("AND")
+        rule = JoinOnMultiRule()
+        config = {
+            "mybatis_dynamic_offsets": set(range(and_offset, len(source))),
+            "mybatis_boundary_offsets": set(),
+        }
+
+        self.assertEqual(rule.fix(source, "generic.xml", config), expected)
+
+    def test_additive_wrap_uses_join_continuation_limit(self):
+        source = (
+            "            JOIN sample_window window ON item.recorded_at "
+            "BETWEEN window.start_at AND window.start_at + window.duration"
+        )
+        rule = AdditiveWrapRule()
+
+        self.assertGreater(len(source), 100)
+        self.assertLessEqual(len(source), 120)
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+
     def test_nullable_equality_accepts_reversed_equality_operands(self):
         source = (
             "((left_item.owner_id IS NULL AND right_item.owner_id IS NULL) OR "

@@ -871,6 +871,42 @@ class TestRunnerIntegration(unittest.TestCase):
             get_mybatis_protected_signatures(xml_content),
         )
 
+    def test_xml_mybatis_dynamic_join_modifier_aligns_with_join(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="joinedFunction">\n'
+            '        SELECT item_id\n'
+            '        FROM\n'
+            '            sample_item item\n'
+            '            JOIN generate_series(\n'
+            '                #{start},\n'
+            '                #{end}\n'
+            '            ) period_start ON true\n'
+            '                <if test="optional">\n'
+            '                    LEFT\n'
+            '                </if>\n'
+            '            JOIN sample_period period USING (period_start)\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '                <if test="optional">\n'
+            '                    LEFT\n'
+            '                </if>',
+            '            <if test="optional">LEFT</if>',
+        )
+        config = Config()
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-indent"]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_compacts_short_static_join_predicates(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

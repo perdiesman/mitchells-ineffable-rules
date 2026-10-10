@@ -57,6 +57,21 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
             return choose_el["resolved_indent"] + " " * indent_size
             
     # 4. For opening tags (like <if>, <foreach>, <choose>, etc.)
+    if tag_name in {"if", "when", "otherwise"}:
+        opening_end = content.find(">", t["start"])
+        closing_start = content.find(f"</{tag_name}", opening_end + 1)
+        if opening_end != -1 and closing_start != -1:
+            dynamic_text = content[opening_end + 1:closing_start].strip().upper()
+            if dynamic_text in {"LEFT", "RIGHT", "INNER", "FULL", "CROSS"}:
+                for k in range(t["line"] - 2, query_line - 1, -1):
+                    candidate = lines[k]
+                    candidate_text = candidate.strip().upper()
+                    if re.match(
+                        r"(?:(?:LEFT|RIGHT|FULL)(?:\s+OUTER)?|INNER|CROSS)?\s*JOIN\b",
+                        candidate_text,
+                    ):
+                        return candidate[: len(candidate) - len(candidate.lstrip(" \t"))]
+
     # Look at preceding lines within the query block
     curr_line = t["line"]
     target_indent = None
