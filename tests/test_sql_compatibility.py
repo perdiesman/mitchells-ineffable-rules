@@ -115,6 +115,17 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertLessEqual(len(source), 120)
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
 
+    def test_additive_wrap_uses_join_limit_after_multiline_target(self):
+        source = (
+            "                ) generated_time ON recorded_at BETWEEN generated_time "
+            "AND generated_time + interval_length"
+        )
+        rule = AdditiveWrapRule()
+
+        self.assertGreater(len(source), 100)
+        self.assertLessEqual(len(source), 120)
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+
     def test_additive_wrap_leaves_join_predicate_continuation_to_join_rules(self):
         source = (
             "            JOIN generated_window window ON recorded_at BETWEEN window.start_at AND window.start_at\n"
@@ -1167,6 +1178,16 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
         self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+
+    def test_join_predicate_at_line_limit_stays_inline(self):
+        source = (
+            "                LEFT JOIN sample_running_calculation_handlers_long handler "
+            "ON handler.handler_id = state_utility_handler"
+        )
+        rule = JoinOnMultiRule()
+
+        self.assertEqual(len(source), 120)
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
 
     def test_distinct_on_wraps_independently_from_projection_columns(self):
         rule = ColumnLayoutRule()

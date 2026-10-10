@@ -322,7 +322,11 @@ class AdditiveWrapRule(BaseRule):
             }
             line_max_length = (
                 continuation_max_length
-                if {"JOIN", "ON"}.issubset(line_keywords)
+                if (
+                    "ON" in line_keywords
+                    and "DISTINCT" not in line_keywords
+                    and "CONFLICT" not in line_keywords
+                )
                 else max_length
             )
             if (

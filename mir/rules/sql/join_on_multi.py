@@ -194,6 +194,17 @@ class JoinOnMultiRule(BaseRule):
                     + 1
                     + len(on_clause_single.strip())
                 )
+                source_indent_offset = 0
+                base_indent = rule_config.get("base_indent")
+                if (
+                    join_target_multiline
+                    and "original_xml" in rule_config
+                    and isinstance(base_indent, str)
+                ):
+                    source_indent_offset = len(
+                        base_indent.replace("\t", "    ")
+                    )
+                    estimated_line_len += source_indent_offset
                 
                 from mir.rules.sql.line_length import LineLengthRule
                 max_len = self.get_config_value(rule_config, "max_line_length", 100, fallbacks=[(LineLengthRule, "max_length")])
@@ -317,7 +328,45 @@ class JoinOnMultiRule(BaseRule):
                         if has_additive_continuation
                         else first_cond_str_normalized
                     )
+                    + source_indent_offset
                 )
+                prospective_additive_index = None
+                if (
+                    not has_additive_continuation
+                    and estimated_line_len > max_len
+                ):
+                    for first_cond_position in range(
+                        len(first_cond_toks) - 1,
+                        -1,
+                        -1,
+                    ):
+                        candidate = first_cond_toks[first_cond_position]
+                        if (
+                            candidate["type"] != "OPERATOR"
+                            or candidate["value"] not in {"+", "||"}
+                        ):
+                            continue
+                        before_additive = "".join(
+                            " " if item["type"] == "WHITESPACE" else item["value"]
+                            for item in first_cond_toks[:first_cond_position]
+                        ).strip()
+                        prospective_length = (
+                            len(join_prefix_for_on)
+                            + len("ON ")
+                            + len(before_additive)
+                            + source_indent_offset
+                        )
+                        if prospective_length <= max_len:
+                            estimated_first_line_len = prospective_length
+                            prospective_additive_index = next(
+                                (
+                                    index
+                                    for index, item in enumerate(tokens)
+                                    if item is candidate
+                                ),
+                                None,
+                            )
+                            break
                 expected_pre_on_ws = (
                     "\n" + expected_indent
                     if estimated_first_line_len > max_len and operator_split is None
@@ -350,6 +399,32 @@ class JoinOnMultiRule(BaseRule):
                         "ws_end": ws_after_on["end"] if ws_after_on else tok["end"],
                         "replacement": expected_post_on_ws
                     })
+
+                if prospective_additive_index is not None:
+                    additive = tokens[prospective_additive_index]
+                    whitespace_before_additive = (
+                        tokens[prospective_additive_index - 1]
+                        if prospective_additive_index > 0
+                        and tokens[prospective_additive_index - 1]["type"]
+                        == "WHITESPACE"
+                        else None
+                    )
+                    expected_additive_ws = "\n" + expected_indent
+                    if (
+                        whitespace_before_additive is None
+                        or whitespace_before_additive["value"]
+                        != expected_additive_ws
+                    ):
+                        violations.append({
+                            "token": additive,
+                            "ws_start": (
+                                whitespace_before_additive["start"]
+                                if whitespace_before_additive
+                                else additive["start"]
+                            ),
+                            "ws_end": additive["start"],
+                            "replacement": expected_additive_ws,
+                        })
 
                 if operator_split is not None:
                     operator = tokens[operator_split]
