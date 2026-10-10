@@ -511,6 +511,118 @@ def get_mybatis_fragment_protected_signature(
     return protected_sql_signature("".join(expanded_chars))
 
 
+def dynamic_column_layout_edits(
+    sql_text: str,
+    mapping: List[int],
+    boundary_offsets: set[int],
+    tag_ranges: List[tuple[int, int]],
+    dynamic_ranges: List[tuple[int, int, int]],
+    content: str,
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Map safe multiline dynamic column indentation straight to XML.
+
+    Dynamic tags are absent from the expanded SQL document, so a normal text
+    diff cannot reliably place structural column-list edits in a large mapper
+    with repeated expressions. This helper changes only source-contiguous
+    whitespace and leaves every SQL and XML token in place.
+    """
+    from mir.rules.sql.column_layout import ColumnLayoutRule
+    from mir.rules.sql.line_length import LineLengthRule
+    from mir.rules.sql.sql_utils import source_text_length
+
+    column_rule = ColumnLayoutRule()
+    clauses = column_rule._parse_clauses(sql_text)
+    max_length = column_rule.get_config_value(
+        rule_config,
+        "max_length",
+        default_value=120,
+        fallbacks=[(LineLengthRule, "max_length")],
+    )
+    indent_size = column_rule.get_config_value(
+        rule_config,
+        "indent_size",
+        default_value=4,
+    )
+    edits: List[tuple[int, int, str]] = []
+
+    def source_span(guest_start: int, guest_end: int):
+        if guest_start >= guest_end or guest_end > len(mapping):
+            return None
+        if any(
+            mapping[index] - mapping[index - 1] != 1
+            for index in range(guest_start + 1, guest_end)
+        ):
+            return None
+        return mapping[guest_start], mapping[guest_end - 1] + 1
+
+    for clause in clauses:
+        if clause.get("is_nested") or not clause["keyword"].startswith(
+            ("SELECT", "GROUP BY", "ORDER BY")
+        ):
+            continue
+        points = sorted(
+            offset
+            for offset in boundary_offsets
+            if clause["list_start"] <= offset < clause["list_end"]
+        )
+        if not points:
+            continue
+        # Every transition must follow an existing comma. This accepts an
+        # optional group of complete list items and rejects mutually exclusive
+        # branches whose expanded expressions sit beside one another.
+        safe = True
+        for offset in points:
+            cursor = offset - 1
+            while cursor >= clause["list_start"] and sql_text[cursor].isspace():
+                cursor -= 1
+            if cursor < clause["list_start"] or sql_text[cursor] != ",":
+                safe = False
+                break
+        if not safe or not clause["expression_ranges"]:
+            continue
+
+        prefix = column_rule._format_prefix(
+            clause, max_length, indent_size, 0
+        )
+        single_line = f"{prefix} {', '.join(clause['expressions'])}"
+        if source_text_length(
+            clause["indentation"] + single_line, rule_config
+        ) <= max_length:
+            continue
+
+        inner_indent = clause["indentation"] + (" " * indent_size)
+        ranges = clause["expression_ranges"]
+        for index, (guest_start, guest_end) in enumerate(ranges):
+            source_start = mapping[guest_start]
+            if any(
+                start < source_start < end
+                for start, end, _ in dynamic_ranges
+            ):
+                continue
+            line_start = content.rfind("\n", 0, source_start) + 1
+            prefix_text = content[line_start:source_start]
+            if not prefix_text.strip():
+                if prefix_text != inner_indent:
+                    edits.append((line_start, source_start, inner_indent))
+                continue
+
+            separator_start = (
+                clause["keyword_end"]
+                if index == 0
+                else ranges[index - 1][1] + 1
+            )
+            span = source_span(separator_start, guest_start)
+            if span is None:
+                continue
+            source_separator = content[span[0]:span[1]]
+            if source_separator.strip():
+                continue
+            edits.append((span[0], span[1], "\n" + inner_indent))
+
+    return edits
+
+
 class XmlMybatisSqlRule(BaseRule):
     commit_profile = True
     rule_id = "IR-xml-mybatis-sql"
@@ -581,6 +693,9 @@ class XmlMybatisSqlRule(BaseRule):
             for element in elements
             if element["tag"] == "foreach"
         ]
+        dynamic_indent_ranges = get_dynamic_indent_ranges(
+            elements, content, rule_config
+        )
 
         sql_defs = {}
         for el in elements:
@@ -628,6 +743,28 @@ class XmlMybatisSqlRule(BaseRule):
                 inner_config = dict(rule_config)
                 if "_lines" in inner_config:
                     del inner_config["_lines"]
+
+                layout_edits = dynamic_column_layout_edits(
+                    sql_text,
+                    mapping,
+                    boundary_offsets,
+                    tag_ranges,
+                    dynamic_indent_ranges,
+                    content,
+                    inner_config,
+                )
+                if layout_edits:
+                    first_start = min(start for start, _, _ in layout_edits)
+                    violations.append({
+                        "rule_id": "IR-column-layout",
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "[MyBatis SQL: IR-column-layout] Align the "
+                            "dynamic column list one indentation level below "
+                            "its keyword."
+                        ),
+                        "is_fixable": True,
+                    })
 
                 embedded_violations = check_embedded_content(
                     guest_language="sql",
@@ -793,6 +930,15 @@ class XmlMybatisSqlRule(BaseRule):
                     "applied_rules": applied_rules,
                 }
                 from mir.engine.embedded_bridge import fix_embedded_content
+                layout_edits = dynamic_column_layout_edits(
+                    sql_text,
+                    mapping,
+                    boundary_offsets,
+                    tag_ranges,
+                    dynamic_indent_ranges,
+                    content,
+                    inner_config,
+                )
                 edits = fix_embedded_content(
                     guest_language="sql",
                     guest_text=sql_text,
@@ -802,6 +948,7 @@ class XmlMybatisSqlRule(BaseRule):
                     require_embedded_safe=True,
                     extra_fix_args=bridge_state,
                 )
+                edits = layout_edits + edits
                 statement_key = (el["tag"], el["attrs"]["id"])
                 original_signature_map[statement_key] = bridge_state[
                     "original_protected_signature"
