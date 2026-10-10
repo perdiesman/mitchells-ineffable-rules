@@ -143,7 +143,16 @@ class UpdateLayoutRule(BaseRule):
                         
                 # Check if it fits on a single line
                 single_line = c1_str + " SET " + ", ".join(fields) + (" " + c4_str if tail_tok else ";")
-                if len(base_indent + single_line) <= max_len:
+                original = content[t["start"] : tokens[semi_idx]["end"]].strip()
+                preserve_dynamic_clauses = (
+                    "\n" in original
+                    and t["start"] in rule_config.get(
+                        "mybatis_dynamic_offsets", set()
+                    )
+                )
+                if preserve_dynamic_clauses:
+                    expected = original
+                elif len(base_indent + single_line) <= max_len:
                     expected = single_line
                 else:
                     if len(fields) > 1:
@@ -171,7 +180,6 @@ class UpdateLayoutRule(BaseRule):
                             statement_tail
                         )
                     
-                original = content[t["start"] : tokens[semi_idx]["end"]].strip()
                 if original != expected:
                     violations.append({
                         "start_offset": t["start"],

@@ -1205,6 +1205,29 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_preserves_multiline_update_in_dynamic_block(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <update id="items">\n'
+            '        <if test="included">\n'
+            '            UPDATE sample_item SET item_name = #{itemName}\n'
+            '            WHERE item_id = #{itemId};\n'
+            '        </if>\n'
+            '    </update>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.violations)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_indent_keeps_optional_where_include_at_clause_indent(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
