@@ -2,7 +2,13 @@ from typing import Any, Dict, List
 
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.line_length import LineLengthRule
-from mir.rules.sql.sql_utils import find_matching_paren, source_text_length, tokenize_sql
+from mir.rules.sql.sql_utils import (
+    find_boolean_operator_indices,
+    find_matching_paren,
+    get_token_depths,
+    source_text_length,
+    tokenize_sql,
+)
 
 
 class ParenthesizedExpressionWrapRule(BaseRule):
@@ -86,6 +92,7 @@ class ParenthesizedExpressionWrapRule(BaseRule):
             fallbacks=[(LineLengthRule, "max_length")],
         )
         tokens = tokenize_sql(content)
+        depths = get_token_depths(tokens)
         lines = content.splitlines()
         from mir.rules.sql.additive_wrap import AdditiveWrapRule
         expression_max_length = AdditiveWrapRule().get_config_value(
@@ -190,6 +197,18 @@ class ParenthesizedExpressionWrapRule(BaseRule):
                 continue
             close_index = find_matching_paren(tokens, open_index)
             if close_index is None:
+                continue
+
+            if find_boolean_operator_indices(
+                tokens,
+                depths,
+                depths[open_index] + 1,
+                open_index + 1,
+                close_index,
+            ):
+                # Logical grouping is owned by IR-paren-multi. Arithmetic in
+                # one predicate arm must not cause this entire boolean group
+                # to be treated as a single arithmetic expression.
                 continue
 
             if tokens[close_index]["line"] != token["line"]:

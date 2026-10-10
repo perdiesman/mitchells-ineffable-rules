@@ -39,6 +39,7 @@ SELECT CASE WHEN x = 1 THEN 'a' ELSE 'b' END FROM users;
 SELECT 
     CASE
         WHEN x = 1 THEN 'a'
-        ELSE 'b'
+        WHEN x = 2 THEN 'b'
+        ELSE 'c'
     END;
 ```

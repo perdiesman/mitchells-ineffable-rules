@@ -1,6 +1,6 @@
 # IR-paren-multi
 
-Parentheses wrapping multiple logical conditions in WHERE/ON clauses must format contents on separate lines, indented 4 spaces.
+Parenthesized logical conditions stay inline when they fit; longer groups put each condition on its own indented line.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
@@ -13,15 +13,15 @@ Parentheses wrapping multiple logical conditions in WHERE/ON clauses must format
 
 #### ❌ Violating Example
 ```sql
-SELECT * FROM users WHERE active AND (enabled OR not blocked);
-```
-
-####  Correct Example
-```sql
 SELECT * FROM users WHERE active AND (
     enabled
     OR not blocked
 );
+```
+
+####  Correct Example
+```sql
+SELECT * FROM users WHERE active AND (enabled OR not blocked);
 ```
 
 #### Additional Validations

@@ -37,3 +37,9 @@ Enforce exactly one space before self-closing tag endings (e.g. <tag />).
 ```xml
 <root attr="val" />
 ```
+
+```xml
+<root
+    attr="val"
+/>
+```

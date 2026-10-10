@@ -330,6 +330,90 @@ class WhereMultiRule(BaseRule):
                                 "ws_end": t["start"],
                                 "replacement": expected_replacement
                             })
+
+                        next_boolean = min(
+                            (index for index in boolean_indices if index > actual_idx),
+                            default=clause_end,
+                        )
+                        condition_tokens = tokens[actual_idx:next_boolean]
+                        if any(
+                            item["type"] == "COMMENT"
+                            or (
+                                item["type"] == "KEYWORD"
+                                and item["value"].upper() in {"SELECT", "WITH"}
+                            )
+                            for item in condition_tokens
+                        ) or actual_idx in dynamic_boolean_indices:
+                            continue
+                        condition_single = "".join(
+                            " " if item["type"] == "WHITESPACE" else item["value"]
+                            for item in condition_tokens
+                        ).strip()
+                        if (
+                            source_text_length(
+                                boolean_indent + condition_single,
+                                rule_config,
+                            )
+                            <= max_len
+                        ):
+                            last_active = next(
+                                (
+                                    index
+                                    for index in range(next_boolean - 1, actual_idx, -1)
+                                    if tokens[index]["type"]
+                                    not in {"WHITESPACE", "COMMENT"}
+                                ),
+                                None,
+                            )
+                            if last_active is not None:
+                                for index in range(actual_idx + 1, last_active):
+                                    item = tokens[index]
+                                    if (
+                                        item["type"] == "WHITESPACE"
+                                        and item["value"] != " "
+                                    ):
+                                        violations.append({
+                                            "token": item,
+                                            "ws_start": item["start"],
+                                            "ws_end": item["end"],
+                                            "replacement": " ",
+                                        })
+
+                    # A condition that is too long may split after its binary
+                    # operator. Keep the operand exactly one indentation level
+                    # beyond the line containing that operator instead of
+                    # preserving column-aligned legacy whitespace.
+                    for token_index in range(i + 1, clause_end - 1):
+                        operator = tokens[token_index]
+                        whitespace = tokens[token_index + 1]
+                        if (
+                            operator["type"] != "OPERATOR"
+                            or operator["value"]
+                            not in {"=", "!=", "<>", "<", ">", "<=", ">="}
+                            or whitespace["type"] != "WHITESPACE"
+                            or "\n" not in whitespace["value"]
+                        ):
+                            continue
+                        operator_line_start = content.rfind(
+                            "\n", 0, operator["start"]
+                        ) + 1
+                        operator_prefix = content[
+                            operator_line_start:operator["start"]
+                        ]
+                        operator_indent = operator_prefix[
+                            : len(operator_prefix)
+                            - len(operator_prefix.lstrip(" \t"))
+                        ]
+                        expected_operand_ws = (
+                            "\n" + operator_indent + "    "
+                        )
+                        if whitespace["value"] != expected_operand_ws:
+                            violations.append({
+                                "token": operator,
+                                "ws_start": whitespace["start"],
+                                "ws_end": whitespace["end"],
+                                "replacement": expected_operand_ws,
+                            })
                                 
         return violations
 
@@ -365,4 +449,11 @@ class WhereMultiRule(BaseRule):
         for (start, end), new_text in ordered_edits:
             chars[start:end] = list(new_text)
             
-        return "".join(chars)
+        fixed = "".join(chars)
+
+        # Multiline WHERE owns logical groups nested inside its conditions.
+        # Reuse the standalone group layout without enabling that older rule
+        # broadly for every embedded MyBatis fragment.
+        from mir.rules.sql.paren_multi import ParenMultiRule
+
+        return ParenMultiRule().fix(fixed, file_path, rule_config)

@@ -643,6 +643,61 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
         self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
 
+    def test_multiline_where_aligns_split_operand_and_compacts_short_or_arm(self):
+        source = (
+            "                                        WHERE\n"
+            "                                            recorded_timestamp_for_requested_interval =\n"
+            "                                                   timezone('utc', :interval_start) - INTERVAL '15 minutes'\n"
+            "                                            OR\n"
+            "                                                   recorded_timestamp_for_requested_interval = :interval_start\n"
+            "                                        GROUP BY item_id"
+        )
+        expected = (
+            "                                        WHERE\n"
+            "                                            recorded_timestamp_for_requested_interval =\n"
+            "                                                timezone('utc', :interval_start) - INTERVAL '15 minutes'\n"
+            "                                            OR recorded_timestamp_for_requested_interval = :interval_start\n"
+            "                                        GROUP BY item_id"
+        )
+        rule = WhereMultiRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+
+    def test_parenthesized_boolean_group_uses_where_continuations(self):
+        source = (
+            "WHERE\n"
+            "    (\n"
+            "        recorded_timestamp_for_requested_interval =\n"
+            "               timezone('utc', :interval_start) - INTERVAL '15 minutes'\n"
+            "        OR\n"
+            "               recorded_timestamp_for_requested_interval = :interval_start\n"
+            "    )\n"
+            "    AND owner_id < 9000"
+        )
+        expected = (
+            "WHERE\n"
+            "    (\n"
+            "        recorded_timestamp_for_requested_interval =\n"
+            "            timezone('utc', :interval_start) - INTERVAL '15 minutes'\n"
+            "        OR recorded_timestamp_for_requested_interval = :interval_start\n"
+            "    )\n"
+            "    AND owner_id < 9000"
+        )
+        rule = ParenMultiRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+
+        self.assertEqual(
+            ParenthesizedExpressionWrapRule().fix(expected, "generic.sql", {}),
+            expected,
+        )
+
     def test_short_where_compacts_independently_of_the_previous_from_line(self):
         source = (
             "FROM outage_data.materialized_zip_additional_information\n"
