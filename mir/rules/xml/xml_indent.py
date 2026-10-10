@@ -254,6 +254,56 @@ class XmlIndentRule(BaseRule):
             if el["tag"] in ("select", "insert", "update", "delete", "sql")
         ]
         for element in elements:
+            if element["tag"] not in {"if", "when", "otherwise"}:
+                continue
+            opening_end = tokens[element["open_end_idx"]]["end"]
+            closing_start = content.rfind(
+                f"</{element['tag']}", opening_end, element["end_offset"]
+            )
+            if closing_start == -1:
+                continue
+            if content.count("\n", 0, opening_end) == content.count(
+                "\n", 0, closing_start
+            ):
+                continue
+            opening_line_start = content.rfind(
+                "\n", 0, element["start_offset"]
+            ) + 1
+            tag_indent = content[opening_line_start:element["start_offset"]]
+            if tag_indent.strip():
+                continue
+            body_indent = tag_indent + " " * indent_size
+
+            first_body = opening_end
+            while first_body < closing_start and content[first_body] in " \t":
+                first_body += 1
+            if first_body < closing_start and content[first_body] not in "\r\n":
+                violations.append({
+                    "line": content.count("\n", 0, opening_end) + 1,
+                    "start_offset": opening_end,
+                    "end_offset": first_body,
+                    "replacement": "\n" + body_indent,
+                    "message": (
+                        f"Multiline MyBatis <{element['tag']}> content must "
+                        "start on the following indented line."
+                    ),
+                    "structural": True,
+                })
+
+            closing_line_start = content.rfind("\n", 0, closing_start) + 1
+            if content[closing_line_start:closing_start].strip():
+                violations.append({
+                    "line": content.count("\n", 0, closing_start) + 1,
+                    "start_offset": closing_start,
+                    "end_offset": closing_start,
+                    "replacement": "\n" + tag_indent,
+                    "message": (
+                        f"Multiline MyBatis <{element['tag']}> closing tag "
+                        "must start on its own line."
+                    ),
+                    "structural": True,
+                })
+        for element in elements:
             if element["tag"] != "sql":
                 continue
             fragment_id = element.get("attrs", {}).get("id", "").lower()

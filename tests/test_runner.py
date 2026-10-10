@@ -1772,6 +1772,35 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_multiline_if_uses_programming_style_boundaries(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        WHERE enabled\n'
+            '        <if test="filtered">        AND powered\n'
+            '        AND NOT fueled</if>\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        expected_fragment = (
+            '            <if test="filtered">\n'
+            '                AND powered\n'
+            '                AND NOT fueled\n'
+            '            </if>'
+        )
+        config = Config()
+        config.fix = True
+        config.profile = "commit"
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertIn(expected_fragment, first.content)
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_commit_profile_removes_implied_keywords(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
