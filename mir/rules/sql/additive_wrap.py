@@ -58,16 +58,31 @@ class AdditiveWrapRule(BaseRule):
                 "        + third_measure + fourth_measure"
             ),
         },
+        {
+            "violating": (
+                "    first_measure\n"
+                "        + second_measure\n"
+                "        + third_measure_with_a_long_name + fourth_measure"
+            ),
+            "correct": (
+                "    first_measure + second_measure\n"
+                "        + third_measure_with_a_long_name + fourth_measure"
+            ),
+        },
     ]
     additional_validations = [
         "SELECT first_measure + second_measure FROM sample_measure;",
-        "SELECT first_measure\n    + second_measure FROM sample_measure;",
     ]
 
     def _find_continuation_edits(
         self, content: str, rule_config: Dict[str, Any]
     ) -> List[dict]:
         """Align existing continuations and rejoin a stranded final operand."""
+        base_max_length = self.get_config_value(
+            rule_config,
+            "max_line_length",
+            default_value=100,
+        )
         max_length = self.get_config_value(
             rule_config,
             "continuation_max_line_length",
@@ -103,12 +118,31 @@ class AdditiveWrapRule(BaseRule):
             if leading_additive:
                 previous_indices = active_by_line.get(line_number - 1)
                 continuation_depth = depths[leading_index]
-                if not previous_indices or not any(
-                    tokens[index]["type"] == "OPERATOR"
-                    and tokens[index]["value"] in {"+", "||"}
-                    and depths[index] == continuation_depth
-                    for index in previous_indices
-                ):
+                previous_active_index = next(
+                    (
+                        index
+                        for index in range(leading_index - 1, -1, -1)
+                        if tokens[index]["type"] not in {"WHITESPACE", "COMMENT"}
+                    ),
+                    None,
+                )
+                is_binary_continuation = (
+                    previous_indices
+                    and previous_active_index is not None
+                    and not any(
+                        tokens[index]["type"] == "KEYWORD"
+                        and tokens[index]["value"].upper() in {"JOIN", "ON"}
+                        for index in previous_indices
+                    )
+                    and depths[previous_active_index] == continuation_depth
+                    and tokens[previous_active_index]["type"]
+                    not in {"OPERATOR", "COMMA"}
+                    and not (
+                        tokens[previous_active_index]["type"] == "PAREN"
+                        and tokens[previous_active_index]["value"] == "("
+                    )
+                )
+                if not is_binary_continuation:
                     leading_additive = False
                 else:
                     previous_line = lines[line_number - 2].rstrip("\r\n")
@@ -122,17 +156,54 @@ class AdditiveWrapRule(BaseRule):
                         and previous_leading["value"] in {"+", "||"}
                         else "    "
                     )
-                    actual_indent = content[line_start:leading["start"]]
-                    if actual_indent != expected_indent:
+                    # Expression splitting can strand the first additive
+                    # operator on its own continuation even though that first
+                    # pair still fits on the base line. Rejoin only to the
+                    # stricter base threshold; later continuation lines retain
+                    # their separate continuation allowance.
+                    whitespace_before_leading = (
+                        tokens[leading_index - 1]
+                        if leading_index > 0
+                        and tokens[leading_index - 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    joined_previous = (
+                        previous_line.rstrip(" \t")
+                        + " "
+                        + line.lstrip(" \t")
+                    )
+                    previous_has_additive = any(
+                        tokens[index]["type"] == "OPERATOR"
+                        and tokens[index]["value"] in {"+", "||"}
+                        and depths[index] == continuation_depth
+                        for index in previous_indices
+                    )
+                    rejoins_previous = (
+                        whitespace_before_leading is not None
+                        and "\n" in whitespace_before_leading["value"]
+                        and not previous_has_additive
+                        and source_text_length(joined_previous, rule_config)
+                        <= base_max_length
+                    )
+                    if rejoins_previous:
                         edits.append({
                             "token": leading,
-                            "start": line_start,
-                            "end": leading["start"],
-                            "replacement": expected_indent,
+                            "start": whitespace_before_leading["start"],
+                            "end": whitespace_before_leading["end"],
+                            "replacement": " ",
                         })
+                    else:
+                        actual_indent = content[line_start:leading["start"]]
+                        if actual_indent != expected_indent:
+                            edits.append({
+                                "token": leading,
+                                "start": line_start,
+                                "end": leading["start"],
+                                "replacement": expected_indent,
+                            })
 
                     following_indices = active_by_line.get(line_number + 1)
-                    if following_indices:
+                    if following_indices and not rejoins_previous:
                         following_leading_index = following_indices[0]
                         following_leading = tokens[following_leading_index]
                         if (

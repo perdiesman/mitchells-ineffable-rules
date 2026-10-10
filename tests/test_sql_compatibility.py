@@ -115,6 +115,15 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertLessEqual(len(source), 120)
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
 
+    def test_additive_wrap_leaves_join_predicate_continuation_to_join_rules(self):
+        source = (
+            "            JOIN generated_window window ON recorded_at BETWEEN window.start_at AND window.start_at\n"
+            "                + window.duration"
+        )
+        rule = AdditiveWrapRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+
     def test_nullable_equality_accepts_reversed_equality_operands(self):
         source = (
             "((left_item.owner_id IS NULL AND right_item.owner_id IS NULL) OR "
@@ -350,6 +359,24 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+
+    def test_additive_first_continuation_rejoins_base_line_when_it_fits(self):
+        source = (
+            "    first_measure\n"
+            "        + second_measure\n"
+            "        + third_measure_with_a_long_name + fourth_measure"
+        )
+        expected = (
+            "    first_measure + second_measure\n"
+            "        + third_measure_with_a_long_name + fourth_measure"
+        )
+
+        rule = AdditiveWrapRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
 
     def test_table_function_preserves_case_nesting(self):
         source = (

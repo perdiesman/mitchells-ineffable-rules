@@ -37,12 +37,20 @@ Long additive expressions should wrap before an operator, with all continuation 
         + third_measure + fourth_measure
 ```
 
+#### ❌ Violating Example #3
+```sql
+    first_measure
+        + second_measure
+        + third_measure_with_a_long_name + fourth_measure
+```
+
+####  Correct Example #3
+```sql
+    first_measure + second_measure
+        + third_measure_with_a_long_name + fourth_measure
+```
+
 #### Additional Validations
 ```sql
 SELECT first_measure + second_measure FROM sample_measure;
-```
-
-```sql
-SELECT first_measure
-    + second_measure FROM sample_measure;
 ```
