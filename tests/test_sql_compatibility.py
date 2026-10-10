@@ -24,6 +24,7 @@ from mir.rules.sql.paren_same_op import ParenSameOpRule
 from mir.rules.sql.paren_single import ParenSingleRule
 from mir.rules.sql.redundant_keywords import RedundantKeywordsRule
 from mir.rules.sql.parenthesized_expression_wrap import ParenthesizedExpressionWrapRule
+from mir.rules.sql.multiline_function_layout import MultilineFunctionLayoutRule
 from mir.rules.sql.plpgsql_keyword_case import PlpgsqlKeywordCaseRule
 from mir.rules.sql.sql_utils import _tokenize_sql_impl, protected_sql_signature, tokenize_sql
 from mir.rules.sql.statement_semicolon import StatementSemicolonRule
@@ -727,6 +728,27 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.fix(fixed, "generic.xml", config), expected)
+
+    def test_multiline_single_row_values_puts_each_value_on_its_own_line(self):
+        source = (
+            "INSERT INTO sample_item (item_id, item_name, owner_id)\n"
+            "VALUES (:item_id, :item_name,\n"
+            "      :owner_id)"
+        )
+        expected = (
+            "INSERT INTO sample_item (item_id, item_name, owner_id)\n"
+            "VALUES (\n"
+            "    :item_id,\n"
+            "    :item_name,\n"
+            "    :owner_id\n"
+            ")"
+        )
+        rule = MultilineFunctionLayoutRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
 
     def test_parenthesized_boolean_group_uses_where_continuations(self):
         source = (

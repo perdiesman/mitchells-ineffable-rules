@@ -1,6 +1,6 @@
 # IR-multiline-function-layout
 
-Multiline function calls should put every direct argument on its own indented line and align the closing parenthesis with the function.
+Multiline function calls and single-row VALUES lists should put every direct argument on its own indented line and align the closing parenthesis with the caller.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes

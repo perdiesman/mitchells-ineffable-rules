@@ -11,8 +11,9 @@ class MultilineFunctionLayoutRule(BaseRule):
     embedded_dynamic_indent_safe = True
     rule_id = "IR-multiline-function-layout"
     description = (
-        "Multiline function calls should put every direct argument on its own "
-        "indented line and align the closing parenthesis with the function."
+        "Multiline function calls and single-row VALUES lists should put every "
+        "direct argument on its own indented line and align the closing "
+        "parenthesis with the caller."
     )
     category = "queries"
     is_fixable = "yes"
@@ -94,7 +95,7 @@ class MultilineFunctionLayoutRule(BaseRule):
             if (
                 tokens[name_index]["type"] == "KEYWORD"
                 and tokens[name_index]["value"].upper()
-                not in {"COALESCE", "NULLIF"}
+                not in {"COALESCE", "NULLIF", "VALUES"}
             ):
                 continue
             close_index = find_matching_paren(tokens, open_index)
