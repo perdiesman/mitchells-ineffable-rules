@@ -6,6 +6,7 @@ from mir.rules.sql.sql_utils import (
     find_boolean_operator_indices,
     find_matching_paren,
     get_token_depths,
+    source_text_length,
     tokenize_sql,
 )
 
@@ -314,10 +315,11 @@ class JoinOnMultiRule(BaseRule):
                     " " if t["type"] == "WHITESPACE" else t["value"]
                     for t in on_clause_tokens
                 )
-                estimated_line_len = (
-                    len(join_prefix_for_on.rstrip())
-                    + 1
-                    + len(on_clause_single.strip())
+                estimated_line_len = source_text_length(
+                    join_prefix_for_on.rstrip()
+                    + " "
+                    + on_clause_single.strip(),
+                    rule_config,
                 )
                 source_indent_offset = 0
                 base_indent = rule_config.get("base_indent")

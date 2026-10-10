@@ -2781,6 +2781,41 @@ class TestRunnerIntegration(unittest.TestCase):
             [violation.rule_id for violation, _, _ in second.violations],
         )
 
+    def test_xml_mybatis_join_wrap_counts_encoded_operator_width(self):
+        join_line = (
+            "                LEFT JOIN sample_data.item_override_detail row "
+            "ON row.override_id = event.id AND row.end_time &gt;= now()"
+        )
+        self.assertEqual(len(join_line), 121)
+        self.assertEqual(len(join_line.replace("&gt;", ">")), 118)
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="save">\n'
+            '        INSERT INTO sample_history (item_id)\n'
+            '            SELECT event.id\n'
+            '            FROM\n'
+            '                sample_data.event event\n'
+            f'{join_line}\n'
+            '            WHERE event.enabled;\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            " = event.id AND row.end_time",
+            " = event.id\n                    AND row.end_time",
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_fragment_semantic_rewrite_updates_consumer_signatures(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
