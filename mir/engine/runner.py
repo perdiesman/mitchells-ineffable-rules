@@ -394,7 +394,11 @@ def process_document(
         seen = {current}
         violations = initial
         convergence_failed = False
-        max_fix_passes = 20
+        # Large embedded documents can expose the next safe edit only after an
+        # earlier host-language edit has been mapped back into place. Keep a
+        # finite ceiling for genuinely divergent formatters, but leave enough
+        # room for those monotonic transformations to settle.
+        max_fix_passes = 30
         for _ in range(max_fix_passes):
             fix_rules: list[BaseRule] = []
             for violation, rule, _ in violations:

@@ -604,6 +604,43 @@ class TestRunnerIntegration(unittest.TestCase):
             any("formatting cycle" in item for item in result.diagnostics)
         )
 
+    def test_formatter_allows_large_monotonic_documents_to_converge(self):
+        class ProgressiveRule(BaseRule):
+            rule_id = "IR-test-progressive"
+            is_fixable = "yes"
+
+            def check(self, content, file_path, rule_config):
+                remaining = content.count("x")
+                if not remaining:
+                    return []
+                return [
+                    Violation(
+                        self.rule_id,
+                        1,
+                        "Progressive test fixture.",
+                        [content],
+                        is_fixable=True,
+                    )
+                ]
+
+            def fix(self, content, file_path, rule_config):
+                return content.replace("x", "", 1)
+
+        rule = ProgressiveRule()
+        config = Config()
+        config.fix = True
+
+        def collect(_config, content, _path, _lang, _selection):
+            violations = rule.check(content, "progressive.xml", {})
+            return ([(item, rule, "error") for item in violations], [])
+
+        with patch("mir.engine.runner._collect", side_effect=collect):
+            result = process_document(config, "x" * 21, "progressive.xml", "xml")
+
+        self.assertEqual(result.content, "")
+        self.assertFalse(result.violations)
+        self.assertFalse(result.diagnostics)
+
     def test_language_specific_disable(self):
         # A file with select (which violates keyword case)
         path = self.write_temp_file("test.sql", "select id from t;")
