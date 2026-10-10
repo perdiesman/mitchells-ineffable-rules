@@ -3511,6 +3511,16 @@ class XmlMybatisSqlRule(BaseRule):
                     for edit in layout_edits
                     if content[edit[0]:edit[1]] != edit[2]
                 ]
+                safe_layout_fallback_edits = set(
+                    keyword_case_edits + function_case_edits
+                ) | {
+                    edit
+                    for edit in layout_edits
+                    if (
+                        (edit[0] == edit[1] or content[edit[0]:edit[1]].isspace())
+                        and (not edit[2] or edit[2].isspace())
+                    )
+                }
                 edits = layout_edits + edits
                 if null_source_edits:
                     from mir.rules.sql.sql_utils import protected_sql_signature
@@ -3578,15 +3588,13 @@ class XmlMybatisSqlRule(BaseRule):
                     if candidate_signature not in allowed_signatures:
                         # A repeated predicate on opposite sides of a dynamic
                         # tag can make a large layout diff ambiguous. Preserve
-                        # exact source-mapped case edits instead of starving
-                        # them behind an unrelated rejected layout proposal.
-                        trusted_case_edits = set(
-                            keyword_case_edits + function_case_edits
-                        )
+                        # exact source-mapped case and whitespace-only edits
+                        # instead of starving them behind an unrelated
+                        # rejected layout proposal.
                         fallback_edits = [
                             edit
                             for edit in fragment_edits
-                            if edit in trusted_case_edits
+                            if edit in safe_layout_fallback_edits
                         ]
                         if not fallback_edits:
                             continue

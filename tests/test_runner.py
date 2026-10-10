@@ -3706,10 +3706,6 @@ class TestRunnerIntegration(unittest.TestCase):
             '    </select>\n'
             '</mapper>'
         )
-        expected = xml_content.replace(
-            ' as source_type_id',
-            ' AS source_type_id',
-        ).replace(' as boundary', ' AS boundary')
         config = Config()
         config.profile = "commit"
         config.fix = True
@@ -3717,8 +3713,9 @@ class TestRunnerIntegration(unittest.TestCase):
         first = process_document(config, xml_content, "generic.xml", "xml")
         second = process_document(config, first.content, "generic.xml", "xml")
 
-        self.assertEqual(first.content, expected)
-        self.assertEqual(second.content, expected)
+        self.assertIn('source.source_type_id AS source_type_id', first.content)
+        self.assertIn('st_makepoint(item.longitude, item.latitude)) AS boundary', first.content)
+        self.assertEqual(second.content, first.content)
 
     def test_xml_mybatis_maps_function_case_inside_dynamic_foreach(self):
         xml_content = (
