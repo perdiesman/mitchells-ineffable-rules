@@ -3663,6 +3663,63 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_keeps_case_edits_when_layout_is_rejected(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            <include refid="External.Columns1" />,\n'
+            '            <include refid="External.Columns2" />,\n'
+            '            <include refid="External.Columns3" />,\n'
+            '            <include refid="External.Columns4" />,\n'
+            '            <include refid="External.Columns5" />,\n'
+            '        source.source_type_id as source_type_id,\n'
+            '        st_asgeojson(st_makepoint(item.longitude, item.latitude)) as boundary\n'
+            '        FROM sample.item item\n'
+            '        LEFT JOIN sample.extra extra\n'
+            '        ON item.id = extra.id\n'
+            '        LEFT JOIN sample.item_keyword ik\n'
+            '        ON item.id = ik.item_id\n'
+            '        LEFT JOIN sample.keyword keyword\n'
+            '        ON ik.keyword_id = keyword.id\n'
+            '        LEFT JOIN sample.item_media im\n'
+            '        ON item.id = im.item_id\n'
+            '        LEFT JOIN sample.media media\n'
+            '        ON im.media_id = media.id\n'
+            '        LEFT JOIN sample.source source\n'
+            '        ON item.source_id = source.id\n'
+            '        LEFT JOIN sample.source_role sr\n'
+            '        ON source.id = sr.source_id\n'
+            '        LEFT JOIN sample.user_role ur\n'
+            '        ON ur.role_name = sr.role_name\n'
+            '        LEFT JOIN sample.user_account account\n'
+            '        ON account.id = ur.user_id\n'
+            '        WHERE\n'
+            '            <if test="start != null and end != null">\n'
+            "                item.created_at BETWEEN timezone('utc', '${start}') AND timezone('utc', '${end}') AND\n"
+            '            </if>\n'
+            "            <if test=\"start != null and end == null\">item.created_at &gt;= timezone('utc', '${start}') AND</if>\n"
+            "            <if test=\"start == null and end != null\">item.created_at &lt;= timezone('utc', '${end}') AND</if>\n"
+            '            <if test="source != null">source.source_type_id = #{source} AND</if>\n'
+            '            <if test="userId != null">(account.id = ${userId} OR sr.role_name IS NULL) AND</if>\n'
+            '        keyword.active\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            ' as source_type_id',
+            ' AS source_type_id',
+        ).replace(' as boundary', ' AS boundary')
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+
     def test_xml_mybatis_maps_function_case_inside_dynamic_foreach(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

@@ -3577,9 +3577,42 @@ class XmlMybatisSqlRule(BaseRule):
                     }
                     if candidate_signature not in allowed_signatures:
                         # A repeated predicate on opposite sides of a dynamic
-                        # tag can make a text diff ambiguous. Reject the whole
-                        # statement edit instead of applying only part of it.
-                        continue
+                        # tag can make a large layout diff ambiguous. Preserve
+                        # exact source-mapped case edits instead of starving
+                        # them behind an unrelated rejected layout proposal.
+                        trusted_case_edits = set(
+                            keyword_case_edits + function_case_edits
+                        )
+                        fallback_edits = [
+                            edit
+                            for edit in fragment_edits
+                            if edit in trusted_case_edits
+                        ]
+                        if not fallback_edits:
+                            continue
+                        fallback_chars = list(
+                            content[fragment_start:fragment_end]
+                        )
+                        for start, end, replacement in sorted(
+                            fallback_edits,
+                            reverse=True,
+                        ):
+                            fallback_chars[
+                                start - fragment_start:end - fragment_start
+                            ] = list(replacement)
+                        candidate_signature = (
+                            get_mybatis_fragment_protected_signature(
+                                "".join(fallback_chars),
+                                sql_defs,
+                                statement_key,
+                            )
+                        )
+                        if candidate_signature not in allowed_signatures:
+                            continue
+                        edits = fallback_edits
+                        applied_rules.intersection_update(
+                            {"IR-keyword-case", "IR-function-case"}
+                        )
                     expected_signature_updates[(el["tag"], el["attrs"]["id"])] = (
                         candidate_signature
                     )
