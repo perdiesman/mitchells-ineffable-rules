@@ -933,7 +933,7 @@ class TestRunnerIntegration(unittest.TestCase):
             "                            '${start}',\n"
             "                            '${end}',\n"
             "                            '${hours} Hours'::interval\n"
-            '                        ) AS period_start ON item.recorded_at BETWEEN period_start AND period_start\n'
+            '                        ) period_start ON item.recorded_at BETWEEN period_start AND period_start\n'
             "                        + '${hours} Hours'::interval\n"
             '            </when>\n'
             '        </choose>\n'
@@ -2242,6 +2242,30 @@ class TestRunnerIntegration(unittest.TestCase):
         )
         config = Config()
         config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_removes_sql_trailing_whitespace(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="calculatedItems">\n'
+            '        SELECT item_count +   \n'
+            '            CASE WHEN enabled THEN 1 ELSE 0 END AS adjusted_count\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            'item_count +   \n            CASE',
+            'item_count + CASE',
+        )
+        config = Config()
         config.fix = True
 
         first = process_document(config, xml_content, "generic.xml", "xml")

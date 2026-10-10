@@ -1,6 +1,6 @@
 # IR-table-alias-as
 
-Table, subquery, and table-function aliases should not use AS, except generate_series aliases, which should use AS.
+Table, subquery, and joined table-function aliases should not use AS; a standalone generate_series source should use AS.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
@@ -42,4 +42,8 @@ SELECT * FROM (SELECT a AS b FROM t) sub;
 
 ```sql
 SELECT * FROM generate_series(1, 3) AS item_number;
+```
+
+```sql
+SELECT * FROM users CROSS JOIN generate_series(1, 3) item_number;
 ```

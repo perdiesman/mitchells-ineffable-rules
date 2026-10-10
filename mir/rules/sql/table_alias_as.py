@@ -7,8 +7,8 @@ class TableAliasAsRule(BaseRule):
     embedded_safe = True
     rule_id = "IR-table-alias-as"
     description = (
-        "Table, subquery, and table-function aliases should not use AS, except "
-        "generate_series aliases, which should use AS."
+        "Table, subquery, and joined table-function aliases should not use AS; "
+        "a standalone generate_series source should use AS."
     )
     category = "queries"
     is_fixable = "yes"
@@ -31,11 +31,12 @@ class TableAliasAsRule(BaseRule):
         "SELECT * FROM users u;",
         "SELECT * FROM (SELECT a AS b FROM t) sub;",
         "SELECT * FROM generate_series(1, 3) AS item_number;",
+        "SELECT * FROM users CROSS JOIN generate_series(1, 3) item_number;",
     ]
 
     @staticmethod
-    def _is_generate_series_alias_position(
-        tokens: List[dict], index: int
+    def _standalone_generate_series_alias(
+        tokens: List[dict], depths: List[int], index: int
     ) -> bool:
         previous_index = index - 1
         while (
@@ -72,11 +73,21 @@ class TableAliasAsRule(BaseRule):
             and tokens[function_index]["type"] in ("WHITESPACE", "COMMENT")
         ):
             function_index -= 1
-        return (
+        if not (
             function_index >= 0
             and tokens[function_index]["type"] == "IDENTIFIER"
             and tokens[function_index]["value"].lower() == "generate_series"
-        )
+        ):
+            return False
+
+        relation_depth = depths[function_index]
+        for candidate in range(function_index - 1, -1, -1):
+            token = tokens[candidate]
+            if depths[candidate] != relation_depth or token["type"] != "KEYWORD":
+                continue
+            if token["value"].upper() in {"FROM", "JOIN"}:
+                return token["value"].upper() == "FROM"
+        return False
 
     def _find_violations(self, content: str) -> List[dict]:
         tokens = tokenize_sql(content)
@@ -100,7 +111,7 @@ class TableAliasAsRule(BaseRule):
                     t = tokens[idx]
                     d = depths[idx]
                     if d == outer_depth and t["type"] == "KEYWORD" and t["value"].upper() == "AS":
-                        if self._is_generate_series_alias_position(tokens, idx):
+                        if self._standalone_generate_series_alias(tokens, depths, idx):
                             continue
                         if t["start"] not in seen_as_starts:
                             seen_as_starts.add(t["start"])
@@ -124,7 +135,9 @@ class TableAliasAsRule(BaseRule):
                     if (
                         depths[idx] != outer_depth
                         or token["type"] != "IDENTIFIER"
-                        or not self._is_generate_series_alias_position(tokens, idx)
+                        or not self._standalone_generate_series_alias(
+                            tokens, depths, idx
+                        )
                         or token["start"] in seen_alias_starts
                     ):
                         continue
@@ -133,7 +146,7 @@ class TableAliasAsRule(BaseRule):
                         "type": "add_as",
                         "alias_tok": token,
                     })
-                            
+
         return violations
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
@@ -144,7 +157,7 @@ class TableAliasAsRule(BaseRule):
         for item in offending:
             tok = item.get("as_tok", item.get("alias_tok"))
             message = (
-                "generate_series alias should use the AS keyword."
+                "A standalone generate_series alias should use the AS keyword."
                 if item["type"] == "add_as"
                 else "Table/subquery alias should not use the AS keyword."
             )

@@ -848,6 +848,92 @@ def compact_dynamic_order_by_edits(
     return edits
 
 
+def sql_trailing_whitespace_source_edits(
+    content: str,
+    sql_text: str,
+    mapping: List[int],
+    tag_ranges: List[tuple[int, int]],
+) -> List[tuple[int, int, str]]:
+    """Remove end-of-line SQL whitespace through contiguous source mappings."""
+    import re
+
+    from mir.rules.sql.sql_utils import tokenize_sql
+
+    edits = []
+    for token in tokenize_sql(sql_text):
+        if token["type"] != "WHITESPACE":
+            continue
+        for match in re.finditer(r"[ \t]+(?=\r?\n)", token["value"]):
+            guest_start = token["start"] + match.start()
+            guest_end = token["start"] + match.end()
+            if not (0 <= guest_start < guest_end <= len(mapping)):
+                continue
+            if any(
+                mapping[index] - mapping[index - 1] != 1
+                for index in range(guest_start + 1, guest_end)
+            ):
+                continue
+            source_start = mapping[guest_start]
+            source_end = mapping[guest_end - 1] + 1
+            if source_end >= len(content) or content[source_end] not in "\r\n":
+                continue
+            if any(
+                max(source_start, tag_start) < min(source_end, tag_end)
+                for tag_start, tag_end in tag_ranges
+            ):
+                continue
+            edits.append((source_start, source_end, ""))
+    return edits
+
+
+def remove_mybatis_sql_trailing_whitespace(content: str) -> str:
+    """Remove SQL-only trailing whitespace introduced by mapped formatting."""
+    import re
+
+    if re.search(r"[ \t]+(?=\r?\n)", content) is None:
+        return content
+
+    tokens = tokenize_xml(content)
+    elements = get_all_elements_recursively(parse_xml_elements(tokens))
+    sql_defs = {}
+    for element in elements:
+        if element["tag"] == "sql" and "id" in element["attrs"]:
+            sql_id = element["attrs"]["id"]
+            sql_defs[sql_id] = element["inner_tokens"]
+            if "." in sql_id:
+                sql_defs[sql_id.split(".")[-1]] = element["inner_tokens"]
+
+    edits = []
+    for element in elements:
+        if element["tag"] not in {"select", "insert", "update", "delete", "sql"}:
+            continue
+        expanded_chars: List[str] = []
+        mapping: List[int] = []
+        is_after_tag: List[bool] = []
+        expand_tokens(
+            element["inner_tokens"],
+            sql_defs,
+            expanded_chars,
+            mapping,
+            is_after_tag,
+        )
+        edits.extend(
+            sql_trailing_whitespace_source_edits(
+                content,
+                "".join(expanded_chars),
+                mapping,
+                [],
+            )
+        )
+    chars = list(content)
+    for start, end, replacement in sorted(
+        resolve_source_edits(edits),
+        reverse=True,
+    ):
+        chars[start:end] = list(replacement)
+    return "".join(chars)
+
+
 class XmlMybatisSqlRule(BaseRule):
     commit_profile = True
     rule_id = "IR-xml-mybatis-sql"
@@ -1205,6 +1291,14 @@ class XmlMybatisSqlRule(BaseRule):
                     inner_config,
                 )
                 layout_edits.extend(dynamic_order_edits)
+                layout_edits.extend(
+                    sql_trailing_whitespace_source_edits(
+                        content,
+                        sql_text,
+                        mapping,
+                        tag_ranges,
+                    )
+                )
                 # Direct layout helpers are authorized to move only
                 # whitespace, except for exact structural compaction that
                 # preserves the complete SQL and XML token sequence.
@@ -1284,7 +1378,7 @@ class XmlMybatisSqlRule(BaseRule):
         for start, end, new_text in resolved_edits:
             chars[start:end] = list(new_text)
 
-        fixed_content = "".join(chars)
+        fixed_content = remove_mybatis_sql_trailing_whitespace("".join(chars))
         if lines_filter:
             # A line-restricted pass expands only selected statements above,
             # but final safety validation still covers the entire mapper.
