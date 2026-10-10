@@ -783,6 +783,70 @@ def top_level_clause_source_edits(
     return edits
 
 
+def host_semantic_source_edits(
+    sql_text: str,
+    mapping: List[int],
+    content: str,
+    source_range: tuple[int, int],
+    tag_ranges: List[tuple[int, int]],
+    rule_config: dict,
+) -> tuple[List[tuple[int, int, str]], str, str | None]:
+    """Map semantic rewrites that belong wholly to an include host.
+
+    An expanded reusable fragment can map outside the host statement. Rather
+    than disabling semantic rules for the entire statement, accept only an
+    edit whose complete guest span is a contiguous, tag-free source span
+    inside the host. One rule is returned at a time so protected signatures
+    and later layout passes remain independently auditable.
+    """
+    from mir.rules.sql.boolean_comparison import BooleanComparisonRule
+    from mir.rules.sql.redundant_keywords import RedundantKeywordsRule
+
+    disabled = rule_config.get("_rules_to_disable", set())
+    enabled = rule_config.get("_rules_to_enable", set())
+    disable_all = rule_config.get("_disable_all", False)
+    source_start, source_end = source_range
+    for rule in (BooleanComparisonRule(), RedundantKeywordsRule()):
+        if rule.rule_id in disabled or (disable_all and rule.rule_id not in enabled):
+            continue
+        findings = rule._find_violations(sql_text)
+        mapped_findings = []
+        source_edits = []
+        for finding in findings:
+            guest_start = finding["start_offset"]
+            guest_end = finding["end_offset"]
+            if not (0 <= guest_start < guest_end <= len(mapping)):
+                continue
+            if any(
+                mapping[index] - mapping[index - 1] != 1
+                for index in range(guest_start + 1, guest_end)
+            ):
+                continue
+            edit_start = mapping[guest_start]
+            edit_end = mapping[guest_end - 1] + 1
+            if not (
+                source_start <= edit_start < edit_end <= source_end
+                and content[edit_start:edit_end]
+                == sql_text[guest_start:guest_end]
+            ):
+                continue
+            if any(
+                max(edit_start, tag_start) < min(edit_end, tag_end)
+                for tag_start, tag_end in tag_ranges
+            ):
+                continue
+            replacement = finding["replacement"]
+            source_edits.append((edit_start, edit_end, replacement))
+            mapped_findings.append((guest_start, guest_end, replacement))
+        if not source_edits:
+            continue
+        chars = list(sql_text)
+        for start, end, replacement in sorted(mapped_findings, reverse=True):
+            chars[start:end] = list(replacement)
+        return source_edits, "".join(chars), rule.rule_id
+    return [], sql_text, None
+
+
 def dynamic_subquery_source_edits(
     sql_text: str,
     mapping: List[int],
@@ -2417,6 +2481,26 @@ class XmlMybatisSqlRule(BaseRule):
                 ]
                 if not paren_source_edits:
                     paren_fixed_text = sql_text
+                host_semantic_edits, host_semantic_fixed_text, host_semantic_rule = (
+                    host_semantic_source_edits(
+                        sql_text,
+                        mapping,
+                        content,
+                        (el["start_offset"], el["end_offset"]),
+                        tag_ranges,
+                        inner_config,
+                    )
+                    if (
+                        any(
+                            source_offset < el["start_offset"]
+                            or source_offset > el["end_offset"]
+                            for source_offset in mapping
+                        )
+                        and not null_source_edits
+                        and not paren_source_edits
+                    )
+                    else ([], sql_text, None)
+                )
                 from mir.engine.embedded_bridge import fix_embedded_content
                 layout_edits = dynamic_column_layout_edits(
                     sql_text,
@@ -2692,6 +2776,18 @@ class XmlMybatisSqlRule(BaseRule):
                     )
                     bridge_state["expected_protected_signature"] = (
                         protected_sql_signature(paren_fixed_text)
+                    )
+                elif host_semantic_edits:
+                    from mir.rules.sql.sql_utils import protected_sql_signature
+
+                    edits = host_semantic_edits
+                    applied_rules.clear()
+                    applied_rules.add(host_semantic_rule)
+                    bridge_state["original_protected_signature"] = (
+                        protected_sql_signature(sql_text)
+                    )
+                    bridge_state["expected_protected_signature"] = (
+                        protected_sql_signature(host_semantic_fixed_text)
                     )
                 statement_key = (el["tag"], el["attrs"]["id"])
                 original_signature_map[statement_key] = bridge_state[

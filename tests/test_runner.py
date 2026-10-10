@@ -1137,6 +1137,40 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
 
+    def test_xml_mybatis_applies_host_semantics_around_include(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="OwnerTotals">\n'
+            '        SELECT owner_id, count(*) AS item_count\n'
+            '        FROM sample_item\n'
+            '        GROUP BY owner_id\n'
+            '    </sql>\n'
+            '    <select id="items">\n'
+            '        SELECT item.item_id\n'
+            '        FROM\n'
+            '            sample_item item\n'
+            '            INNER JOIN (\n'
+            '                    <include refid="OwnerTotals" />\n'
+            '                ) owner ON owner.owner_id = item.owner_id\n'
+            '        WHERE item.enabled = FALSE\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace("INNER JOIN", "JOIN").replace(
+            "item.enabled = FALSE", "NOT item.enabled"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_commit_profile_applies_declared_boolean_rewrites(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
