@@ -847,6 +847,51 @@ def host_semantic_source_edits(
     return [], sql_text, None
 
 
+def keyword_case_source_edits(
+    sql_text: str,
+    mapping: List[int],
+    content: str,
+    source_range: tuple[int, int],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Map case-only keyword edits directly, including repeated dynamic arms."""
+    from mir.rules.sql.keyword_case import KeywordCaseRule
+
+    disabled = rule_config.get("_rules_to_disable", set())
+    enabled = rule_config.get("_rules_to_enable", set())
+    if "IR-keyword-case" in disabled or (
+        rule_config.get("_disable_all", False)
+        and "IR-keyword-case" not in enabled
+    ):
+        return []
+    rule = KeywordCaseRule()
+    tokens = rule._find_keyword_tokens(
+        sql_text,
+        rule._get_keywords(rule_config),
+    )
+    source_start, source_end = source_range
+    edits = []
+    for token in tokens:
+        guest_start = token["start"]
+        guest_end = token["end"]
+        if not (0 <= guest_start < guest_end <= len(mapping)):
+            continue
+        if any(
+            mapping[index] - mapping[index - 1] != 1
+            for index in range(guest_start + 1, guest_end)
+        ):
+            continue
+        edit_start = mapping[guest_start]
+        edit_end = mapping[guest_end - 1] + 1
+        if not (
+            source_start <= edit_start < edit_end <= source_end
+            and content[edit_start:edit_end] == token["value"]
+        ):
+            continue
+        edits.append((edit_start, edit_end, token["value"].upper()))
+    return list(dict.fromkeys(edits))
+
+
 def dynamic_subquery_source_edits(
     sql_text: str,
     mapping: List[int],
@@ -2284,6 +2329,16 @@ class XmlMybatisSqlRule(BaseRule):
                     mapping=mapping,
                     file_path=file_path,
                     rule_config=inner_config,
+                    excluded_rule_ids=(
+                        {"IR-where-multi", "IR-where-single"}
+                        if any(
+                            child["tag"] == "where"
+                            for child in get_all_elements_recursively(
+                                el.get("children", [])
+                            )
+                        )
+                        else None
+                    ),
                     require_embedded_safe=True,
                     extra_check_args={
                         "ignored_comma_offsets": ignored_comma_offsets,
@@ -2302,6 +2357,32 @@ class XmlMybatisSqlRule(BaseRule):
                 )
                 
                 for ev in embedded_violations:
+                    mapped_line_start = content.rfind(
+                        "\n", 0, ev["mapped_offset"]
+                    ) + 1
+                    mapped_line_end = content.find(
+                        "\n", ev["mapped_offset"]
+                    )
+                    if mapped_line_end == -1:
+                        mapped_line_end = len(content)
+                    mapped_line = content[mapped_line_start:mapped_line_end].strip()
+                    if not (
+                        el["start_offset"]
+                        <= ev["mapped_offset"]
+                        <= el["end_offset"]
+                    ) or any(
+                        start <= ev["mapped_offset"] < end
+                        for start, end in tag_ranges
+                    ) or (
+                        mapped_line.lower().startswith("<include")
+                        and mapped_line.endswith("/>")
+                    ):
+                        # Reusable definitions are checked in their own
+                        # element pass. Reporting their expanded findings for
+                        # every include consumer creates fixable-after-fix
+                        # duplicates that the host is intentionally forbidden
+                        # from editing.
+                        continue
                     abs_line = content[:ev["mapped_offset"]].count('\n') + 1
                     if lines_filter and abs_line not in lines_filter:
                         el_start_line = content[:el["start_offset"]].count('\n') + 1
@@ -2528,10 +2609,18 @@ class XmlMybatisSqlRule(BaseRule):
                     dynamic_indent_ranges,
                     base_indent,
                 )
+                keyword_case_edits = keyword_case_source_edits(
+                    sql_text,
+                    mapping,
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
                 layout_edits = (
                     post_choose_edits
                     + dynamic_body_edits
                     + top_level_clause_edits
+                    + keyword_case_edits
                     + layout_edits
                 )
                 join_config = dict(inner_config)
@@ -2681,6 +2770,7 @@ class XmlMybatisSqlRule(BaseRule):
                 trusted_structural_edits = set(
                     dynamic_order_edits + static_order_edits
                     + dynamic_from_edits
+                    + keyword_case_edits
                 )
                 layout_edits = [
                     (start, end, replacement)
@@ -2703,6 +2793,22 @@ class XmlMybatisSqlRule(BaseRule):
                     if bridge_state["mybatis_dynamic_indent_ranges"]
                     else set()
                 )
+                if keyword_case_edits:
+                    excluded_guest_rule_ids.add("IR-keyword-case")
+                    applied_rules.add("IR-keyword-case")
+                if any(
+                    child["tag"] == "where"
+                    for child in get_all_elements_recursively(
+                        el.get("children", [])
+                    )
+                ):
+                    # MyBatis <where> owns prefix insertion/removal across
+                    # mutually exclusive dynamic branches. Concatenating all
+                    # branches into guest SQL cannot represent its runtime
+                    # predicate and produces unfixable WHERE layout reports.
+                    excluded_guest_rule_ids.update(
+                        {"IR-where-multi", "IR-where-single"}
+                    )
                 if any(
                     source_offset < el["start_offset"]
                     or source_offset > el["end_offset"]

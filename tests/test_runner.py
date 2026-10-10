@@ -1171,6 +1171,57 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
 
+    def test_xml_mybatis_uppercases_repeated_dynamic_fragment_keywords(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="Generated_Where_Clause">\n'
+            '        <where>\n'
+            '            <choose>\n'
+            '                <when test="primary">and ${condition}</when>\n'
+            '                <otherwise>and ${fallback}</otherwise>\n'
+            '            </choose>\n'
+            '        </where>\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(">and ", ">AND ")
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_mybatis_reports_included_fragment_only_at_its_definition(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="Item_Filter">where item.enabled</sql>\n'
+            '    <select id="items">\n'
+            '        SELECT item_id FROM sample_item\n'
+            '        <include refid="Item_Filter" />\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-mybatis-sql", "IR-keyword-case"]
+
+        result = process_document(config, xml_content, "generic.xml", "xml")
+        keyword_findings = [
+            violation
+            for violation, _, _ in result.violations
+            if violation.rule_id == "IR-keyword-case"
+        ]
+
+        self.assertEqual(len(keyword_findings), 1)
+        self.assertEqual(keyword_findings[0].line_number, 2)
+
     def test_xml_mybatis_commit_profile_applies_declared_boolean_rewrites(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
