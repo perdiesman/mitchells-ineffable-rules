@@ -142,8 +142,22 @@ class TestSqlCompatibility(unittest.TestCase):
             "right_item.owner_id = left_item.owner_id)"
         )
         expected = (
-            "(COALESCE(right_item.owner_id, -1) = "
-            "COALESCE(left_item.owner_id, -1))"
+            "COALESCE(right_item.owner_id, -1) = "
+            "COALESCE(left_item.owner_id, -1)"
+        )
+
+        rule = NullCoalesceRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
+
+    def test_nullable_equality_unwraps_parenthesized_equality_branch(self):
+        source = (
+            "((left_item.owner_id IS NULL AND right_item.owner_id IS NULL) OR "
+            "(right_item.owner_id = left_item.owner_id))"
+        )
+        expected = (
+            "COALESCE(right_item.owner_id, -1) = "
+            "COALESCE(left_item.owner_id, -1)"
         )
 
         rule = NullCoalesceRule()

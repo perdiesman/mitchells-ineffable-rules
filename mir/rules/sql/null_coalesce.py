@@ -103,8 +103,23 @@ class NullCoalesceRule(BaseRule):
                                                             continue
 
             # 2. Try to match reverse pattern: (a IS NULL AND b IS NULL) OR a = b
+            pattern_start = i
+            outer_wrapper = False
             has_parens = False
             check_idx = i
+            if (
+                check_idx + 1 < num_active
+                and active[check_idx]["type"] == "PAREN"
+                and active[check_idx]["value"] == "("
+                and active[check_idx + 1]["type"] == "PAREN"
+                and active[check_idx + 1]["value"] == "("
+            ):
+                # The complete OR expression is often wrapped once more when
+                # it appears after JOIN ... ON. Keep that wrapper in the
+                # replacement range so the semantic coalesce rewrite is not
+                # blocked by the nested opening parenthesis.
+                outer_wrapper = True
+                check_idx += 1
             if check_idx < num_active and active[check_idx]["type"] == "PAREN" and active[check_idx]["value"] == "(":
                 has_parens = True
                 check_idx += 1
@@ -133,7 +148,15 @@ class NullCoalesceRule(BaseRule):
                                         if end_idx is not None and end_idx < num_active:
                                             t_or = active[end_idx]
                                             if t_or["type"] == "KEYWORD" and t_or["value"].upper() == "OR":
-                                                op1_check, next_check = parse_operand(end_idx + 1)
+                                                equality_start = end_idx + 1
+                                                equality_parens = bool(
+                                                    equality_start < num_active
+                                                    and active[equality_start]["type"] == "PAREN"
+                                                    and active[equality_start]["value"] == "("
+                                                )
+                                                if equality_parens:
+                                                    equality_start += 1
+                                                op1_check, next_check = parse_operand(equality_start)
                                                 if op1_check and next_check < num_active:
                                                     t_eq = active[next_check]
                                                     if t_eq["type"] == "OPERATOR" and t_eq["value"] == "=":
@@ -150,13 +173,34 @@ class NullCoalesceRule(BaseRule):
                                                             }
                                                         )
                                                         if equality_matches:
+                                                            replacement_end = next_check2
+                                                            if equality_parens:
+                                                                if (
+                                                                    replacement_end < num_active
+                                                                    and active[replacement_end]["type"] == "PAREN"
+                                                                    and active[replacement_end]["value"] == ")"
+                                                                ):
+                                                                    replacement_end += 1
+                                                                else:
+                                                                    i += 1
+                                                                    continue
+                                                            if outer_wrapper:
+                                                                if (
+                                                                    replacement_end < num_active
+                                                                    and active[replacement_end]["type"] == "PAREN"
+                                                                    and active[replacement_end]["value"] == ")"
+                                                                ):
+                                                                    replacement_end += 1
+                                                                else:
+                                                                    i += 1
+                                                                    continue
                                                             violations.append({
-                                                                "start_offset": active[i]["start"],
-                                                                "end_offset": active[next_check2 - 1]["end"],
-                                                                "line": active[i]["line"],
+                                                                "start_offset": active[pattern_start]["start"],
+                                                                "end_offset": active[replacement_end - 1]["end"],
+                                                                "line": active[pattern_start]["line"],
                                                                 "replacement": f"COALESCE({op1_check}, -1) = COALESCE({op2_check}, -1)"
                                                             })
-                                                            i = next_check2
+                                                            i = replacement_end
                                                             continue
 
             # 3. Match: x = v OR x IS NULL

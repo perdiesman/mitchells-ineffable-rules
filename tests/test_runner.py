@@ -1457,6 +1457,73 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_rewrites_nullable_equality_inside_dynamic_join(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT a.item_id\n'
+            '        FROM sample_item a\n'
+            '        <if test="enabled">\n'
+            '            JOIN sample_owner b ON a.owner_id = b.owner_id\n'
+            '                AND ((a.group_id IS NULL AND b.group_id IS NULL) '
+            'OR (b.group_id = a.group_id))\n'
+            '        </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT a.item_id\n'
+            '        FROM\n'
+            '            sample_item a\n'
+            '            <if test="enabled">\n'
+            '                JOIN sample_owner b ON a.owner_id = b.owner_id\n'
+            '                    AND coalesce(b.group_id, -1) = coalesce(a.group_id, -1)\n'
+            '            </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_dynamic_join_after_derived_table_is_a_sibling(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM\n'
+            '            sample_item item\n'
+            '            JOIN (\n'
+            '                    SELECT owner_id\n'
+            '                    FROM sample_owner\n'
+            '                ) owning ON owning.owner_id = item.owner_id\n'
+            '                <if test="enabled">JOIN sample_group g ON g.owner_id = owning.owner_id</if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '                <if test="enabled">',
+            '            <if test="enabled">',
+        )
+        config = Config()
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_keeps_optional_where_condition_in_its_tag(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

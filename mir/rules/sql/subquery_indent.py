@@ -252,7 +252,27 @@ class SubqueryIndentRule(BaseRule):
                                 default_value=120,
                                 fallbacks=[(LineLengthRule, "max_length")],
                             )
-                            if len(candidate_line) <= max_length:
+                            dynamic_source_indent = 0
+                            base_indent = rule_config.get("base_indent")
+                            if (
+                                next_active["start"] in mybatis_dynamic_offsets
+                                and "original_xml" in rule_config
+                                and isinstance(base_indent, str)
+                            ):
+                                # Expanded SQL omits the indentation contributed
+                                # by its enclosing MyBatis tag. Count the host
+                                # statement indent before compacting a subquery
+                                # back onto that physical XML line.
+                                dynamic_source_indent = len(
+                                    base_indent.replace("\t", "    ")
+                                )
+                            if (
+                                len(candidate_line) + dynamic_source_indent
+                                <= max_length
+                                and not rule_config.get(
+                                    "source_mapped_subquery_compaction"
+                                )
+                            ):
                                 violations.append({
                                     "type": "compact_subquery",
                                     "open_tok": tok,

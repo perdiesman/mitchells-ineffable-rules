@@ -305,9 +305,13 @@ class JoinOnMultiRule(BaseRule):
                 source_indent_offset = 0
                 base_indent = rule_config.get("base_indent")
                 if (
-                    join_target_multiline
-                    and "original_xml" in rule_config
+                    "original_xml" in rule_config
                     and isinstance(base_indent, str)
+                    and (
+                        join_target_multiline
+                        or has_dynamic_boolean
+                        or next_boundary is not None
+                    )
                 ):
                     source_indent_offset = len(
                         base_indent.replace("\t", "    ")

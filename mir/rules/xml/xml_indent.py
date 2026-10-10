@@ -77,6 +77,18 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
                         ]
                         if len(previous_indent) >= indent_size:
                             return previous_indent[:-indent_size]
+                    if (
+                        previous_text.startswith(")")
+                        and " ON " in previous_text
+                    ):
+                        previous_indent = previous[
+                            : len(previous) - len(previous.lstrip(" \t"))
+                        ]
+                        if len(previous_indent) >= indent_size:
+                            # A derived-table closing parenthesis is a JOIN
+                            # continuation line. A following optional JOIN is
+                            # a sibling of that JOIN, not a child of the close.
+                            return previous_indent[:-indent_size]
                     break
             if dynamic_text in {"LEFT", "RIGHT", "INNER", "FULL", "CROSS"}:
                 for k in range(t["line"] - 2, query_line - 1, -1):

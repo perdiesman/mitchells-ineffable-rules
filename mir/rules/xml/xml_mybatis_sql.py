@@ -652,8 +652,11 @@ def dynamic_sql_indent_source_edits(
             # safely see an optional JOIN beyond a tag boundary when deciding
             # that the FROM entry itself needs one continuation level.
             active_config["mybatis_boundary_offsets"] = set()
-        items.extend(rule._find_violations(sql_text, active_config))
-    for item in items:
+        items.extend(
+            (rule, item)
+            for item in rule._find_violations(sql_text, active_config)
+        )
+    for source_rule, item in items:
         guest_start = item["ws_start"]
         guest_end = item["ws_end"]
         original_whitespace = sql_text[guest_start:guest_end]
@@ -680,10 +683,14 @@ def dynamic_sql_indent_source_edits(
             original_whitespace.count("\n")
             == replacement.count("\n")
         )
-        if not indentation_only and any(
+        if (
+            isinstance(source_rule, FromMultiRule)
+            and not indentation_only
+            and any(
             range_start < source_start < range_end
             or range_start < source_end < range_end
             for range_start, range_end, _ in dynamic_ranges
+            )
         ):
             continue
         dynamic_indent = max(
@@ -712,6 +719,11 @@ def dynamic_subquery_source_edits(
 ) -> List[tuple[int, int, str]]:
     """Map indentation-only subquery repairs to their exact XML lines."""
     from mir.rules.sql.subquery_indent import SubqueryIndentRule
+    from mir.rules.sql.sql_utils import (
+        find_matching_paren,
+        get_token_depths,
+        tokenize_sql,
+    )
 
     rule = SubqueryIndentRule()
     lines = sql_text.splitlines(keepends=True)
@@ -722,11 +734,55 @@ def dynamic_subquery_source_edits(
         offset += len(line)
 
     edits = []
-    for item in rule._find_violations(sql_text, rule_config):
-        if item.get("type") in {"compact_join_opener", "compact_subquery"}:
+    scan_config = dict(rule_config)
+    scan_config.pop("source_mapped_subquery_compaction", None)
+    for item in rule._find_violations(sql_text, scan_config):
+        if item.get("type") == "compact_join_opener":
+            continue
+        if item.get("type") == "compact_subquery":
+            guest_start = item["ws_start"]
+            guest_end = item["ws_end"]
+            if not (0 <= guest_start < guest_end <= len(mapping)):
+                continue
+            if any(
+                mapping[index] - mapping[index - 1] != 1
+                for index in range(guest_start + 1, guest_end)
+            ):
+                continue
+            source_start = mapping[guest_start]
+            source_end = mapping[guest_end - 1] + 1
+            source_line_start = content.rfind("\n", 0, source_start) + 1
+            source_line_end = content.find("\n", source_end)
+            if source_line_end == -1:
+                source_line_end = len(content)
+            candidate = (
+                content[source_line_start:source_start]
+                + item["replacement"]
+                + content[source_end:source_line_end]
+            )
+            from mir.rules.sql.line_length import LineLengthRule
+
+            max_length = LineLengthRule().get_config_value(
+                rule_config,
+                "max_length",
+                default_value=120,
+            )
+            if len(candidate) <= max_length:
+                edits.append((source_start, source_end, item["replacement"]))
             continue
         if item["first_sub_tok"]["line"] == item["open_tok"]["line"]:
             continue
+        open_guest_offset = item["open_tok"]["start"]
+        source_indent_delta = 0
+        if open_guest_offset < len(mapping):
+            source_open = mapping[open_guest_offset]
+            source_open_line = content.rfind("\n", 0, source_open) + 1
+            source_prefix = content[source_open_line:source_open]
+            source_indent = len(source_prefix) - len(source_prefix.lstrip(" \t"))
+            guest_open_line = sql_text.rfind("\n", 0, open_guest_offset) + 1
+            guest_prefix = sql_text[guest_open_line:open_guest_offset]
+            guest_indent = len(guest_prefix) - len(guest_prefix.lstrip(" \t"))
+            source_indent_delta = max(0, source_indent - guest_indent)
         start_line = item["open_line"] + 1
         close_line = item["close_line"]
         clause_lines = item["clause_lines"]
@@ -737,15 +793,13 @@ def dynamic_subquery_source_edits(
             body = raw_line.lstrip(" \t")
             guest_indent = raw_line[: len(raw_line) - len(body)]
             if line_number == close_line:
-                expected = item["close_indent"]
+                expected = item["close_indent"] + (" " * source_indent_delta)
             elif line_number in clause_lines:
-                expected = item["content_indent"]
+                expected = item["content_indent"] + (" " * source_indent_delta)
             elif guest_indent.startswith(item["content_indent"]):
-                continue
+                expected = guest_indent + (" " * source_indent_delta)
             else:
-                expected = item["content_indent"]
-            if guest_indent == expected:
-                continue
+                expected = item["content_indent"] + (" " * source_indent_delta)
             guest_body_start = line_offsets[line_number - 1] + len(guest_indent)
             if guest_body_start >= len(mapping):
                 continue
@@ -765,10 +819,106 @@ def dynamic_subquery_source_edits(
             source_prefix = content[source_line_start:source_body_start]
             if source_prefix.strip():
                 continue
+            if source_prefix == expected:
+                continue
             edits.append(
                 (source_line_start, source_body_start, expected)
             )
-    return edits
+    # Expanded SQL intentionally hides indentation contributed by XML tags.
+    # Reassert the physical source relationship for clause anchors and the
+    # closing parenthesis even when the guest view is already logically
+    # aligned and therefore reports no violation.
+    sql_tokens = tokenize_sql(sql_text)
+    depths = get_token_depths(sql_tokens)
+    dynamic_offsets = rule_config.get("mybatis_dynamic_offsets", set())
+    clause_keywords = {
+        "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "HAVING",
+        "LIMIT", "UNION", "INTERSECT", "EXCEPT",
+    }
+
+    def source_indent_edit(guest_offset: int, expected: str):
+        if not (0 <= guest_offset < len(mapping)):
+            return
+        source_offset = mapping[guest_offset]
+        if source_offset >= len(content):
+            return
+        line_start = content.rfind("\n", 0, source_offset) + 1
+        prefix = content[line_start:source_offset]
+        if prefix.strip() or prefix == expected:
+            return
+        edits.append((line_start, source_offset, expected))
+
+    for open_index, open_token in enumerate(sql_tokens):
+        if open_token["type"] != "PAREN" or open_token["value"] != "(":
+            continue
+        close_index = find_matching_paren(sql_tokens, open_index)
+        if close_index is None:
+            continue
+        select_index = next(
+            (
+                index
+                for index in range(open_index + 1, close_index)
+                if sql_tokens[index]["type"] not in {"WHITESPACE", "COMMENT"}
+            ),
+            None,
+        )
+        if (
+            select_index is None
+            or sql_tokens[select_index]["type"] != "KEYWORD"
+            or sql_tokens[select_index]["value"].upper() != "SELECT"
+            or sql_tokens[select_index]["line"]
+            == sql_tokens[close_index]["line"]
+            or open_token["start"] >= len(mapping)
+        ):
+            continue
+        if (
+            sql_tokens[select_index]["start"] in dynamic_offsets
+            and open_token["start"] not in dynamic_offsets
+        ):
+            # A dynamic tag supplies an alternative SELECT inside an outer
+            # CTE/derived-table parenthesis. Its extra source indentation is
+            # XML nesting, not SQL subquery depth.
+            continue
+        source_open = mapping[open_token["start"]]
+        source_line_start = content.rfind("\n", 0, source_open) + 1
+        source_prefix = content[source_line_start:source_open]
+        open_indent = source_prefix[: len(source_prefix) - len(source_prefix.lstrip(" \t"))]
+
+        is_from_join = False
+        for previous_index in range(open_index - 1, -1, -1):
+            previous = sql_tokens[previous_index]
+            if previous["line"] != open_token["line"]:
+                break
+            if previous["type"] in {"WHITESPACE", "COMMENT"}:
+                continue
+            if previous["type"] == "KEYWORD" and previous["value"].upper() == "LATERAL":
+                continue
+            is_from_join = bool(
+                previous["type"] == "KEYWORD"
+                and previous["value"].upper() in {"FROM", "JOIN"}
+            )
+            break
+
+        close_indent = open_indent + ("    " if is_from_join else "")
+        content_indent = close_indent + "    "
+        subquery_depth = depths[select_index]
+        for token_index in range(select_index, close_index):
+            token = sql_tokens[token_index]
+            if (
+                depths[token_index] == subquery_depth
+                and token["type"] == "KEYWORD"
+                and token["value"].upper() in clause_keywords
+            ):
+                source_indent_edit(token["start"], content_indent)
+        source_indent_edit(sql_tokens[close_index]["start"], close_indent)
+
+    edits_by_span = {}
+    for start, end, replacement in edits:
+        edits_by_span[(start, end)] = replacement
+    return [
+        (start, end, replacement)
+        for (start, end), replacement in edits_by_span.items()
+    ]
 
 
 def post_choose_clause_source_edits(
@@ -951,6 +1101,138 @@ def resolve_source_edits(
             resolved.append((start, end, replacement))
             last_end = end
     return resolved
+
+
+def dynamic_null_coalesce_source_edits(
+    sql_text: str,
+    mapping: List[int],
+    tag_ranges: List[tuple[int, int]],
+) -> tuple[List[tuple[int, int, str]], str]:
+    """Map nullable-equality rewrites that stay inside one XML text span.
+
+    A general line diff can pair repeated predicates across MyBatis branches
+    and produce a partial semantic rewrite.  The rule already exposes exact
+    guest offsets, so map only ranges whose source offsets are contiguous and
+    do not intersect markup.  Statements with such edits take a semantic-only
+    pass; normal layout resumes on the next convergence round.
+    """
+    from mir.rules.sql.null_coalesce import NullCoalesceRule
+
+    rule = NullCoalesceRule()
+    violations = rule._find_violations(sql_text)
+    edits = []
+    for item in violations:
+        guest_start = item["start_offset"]
+        guest_end = item["end_offset"]
+        if not (0 <= guest_start < guest_end <= len(mapping)):
+            continue
+        if any(
+            mapping[index] - mapping[index - 1] != 1
+            for index in range(guest_start + 1, guest_end)
+        ):
+            continue
+        source_start = mapping[guest_start]
+        source_end = mapping[guest_end - 1] + 1
+        if any(
+            max(source_start, tag_start) < min(source_end, tag_end)
+            for tag_start, tag_end in tag_ranges
+        ):
+            continue
+        edits.append((source_start, source_end, item["replacement"]))
+    return edits, rule.fix(sql_text, "embedded.sql", {})
+
+
+def dynamic_paren_single_source_edits(
+    sql_text: str,
+    mapping: List[int],
+    tag_ranges: List[tuple[int, int]],
+) -> tuple[List[tuple[int, int, str]], str]:
+    """Remove each redundant parenthesis pair atomically in dynamic SQL."""
+    from mir.rules.sql.paren_single import ParenSingleRule
+    from mir.rules.sql.sql_utils import tokenize_sql
+
+    rule = ParenSingleRule()
+    tokens = tokenize_sql(sql_text)
+    guest_groups = []
+    for pair in rule._find_violations(sql_text):
+        open_tok = pair["open_tok"]
+        close_tok = pair["close_tok"]
+        open_index = tokens.index(open_tok)
+        close_index = tokens.index(close_tok)
+        open_end = open_tok["end"]
+        open_replacement = ""
+
+        next_token = tokens[open_index + 1] if open_index + 1 < len(tokens) else None
+        if next_token and next_token["type"] == "WHITESPACE":
+            open_end = next_token["end"]
+            next_token = (
+                tokens[open_index + 2]
+                if open_index + 2 < len(tokens)
+                else None
+            )
+        previous_token = tokens[open_index - 1] if open_index else None
+
+        def is_word_like(token):
+            return bool(
+                token
+                and (
+                    token["type"] in {
+                        "KEYWORD", "IDENTIFIER", "NUMBER", "OPERATOR"
+                    }
+                    or (
+                        token["type"] == "OTHER"
+                        and token["value"].isalnum()
+                    )
+                )
+            )
+
+        if (
+            previous_token
+            and previous_token["type"] != "WHITESPACE"
+            and is_word_like(previous_token)
+            and is_word_like(next_token)
+        ):
+            open_replacement = " "
+
+        close_start = close_tok["start"]
+        if close_index and tokens[close_index - 1]["type"] == "WHITESPACE":
+            close_start = tokens[close_index - 1]["start"]
+        guest_groups.append([
+            (open_tok["start"], open_end, open_replacement),
+            (close_start, close_tok["end"], ""),
+        ])
+
+    source_edits = []
+    accepted_guest_edits = []
+    for group in guest_groups:
+        mapped_group = []
+        for guest_start, guest_end, replacement in group:
+            if not (0 <= guest_start < guest_end <= len(mapping)):
+                mapped_group = []
+                break
+            if any(
+                mapping[index] - mapping[index - 1] != 1
+                for index in range(guest_start + 1, guest_end)
+            ):
+                mapped_group = []
+                break
+            source_start = mapping[guest_start]
+            source_end = mapping[guest_end - 1] + 1
+            if any(
+                max(source_start, tag_start) < min(source_end, tag_end)
+                for tag_start, tag_end in tag_ranges
+            ):
+                mapped_group = []
+                break
+            mapped_group.append((source_start, source_end, replacement))
+        if mapped_group:
+            source_edits.extend(mapped_group)
+            accepted_guest_edits.extend(group)
+
+    chars = list(sql_text)
+    for start, end, replacement in sorted(accepted_guest_edits, reverse=True):
+        chars[start:end] = list(replacement)
+    return source_edits, "".join(chars)
 
 
 def compact_dynamic_order_by_edits(
@@ -1588,6 +1870,30 @@ class XmlMybatisSqlRule(BaseRule):
                     "source_range": (el["start_offset"], el["end_offset"]),
                     "applied_rules": applied_rules,
                 }
+                bridge_state["source_mapped_subquery_compaction"] = bool(
+                    bridge_state["mybatis_dynamic_indent_ranges"]
+                )
+                null_source_edits, null_fixed_text = (
+                    dynamic_null_coalesce_source_edits(
+                        sql_text,
+                        mapping,
+                        tag_ranges,
+                    )
+                    if bridge_state["mybatis_dynamic_indent_ranges"]
+                    else ([], sql_text)
+                )
+                paren_source_edits, paren_fixed_text = (
+                    dynamic_paren_single_source_edits(
+                        sql_text,
+                        mapping,
+                        tag_ranges,
+                    )
+                    if (
+                        bridge_state["mybatis_dynamic_indent_ranges"]
+                        and not null_source_edits
+                    )
+                    else ([], sql_text)
+                )
                 from mir.engine.embedded_bridge import fix_embedded_content
                 layout_edits = dynamic_column_layout_edits(
                     sql_text,
@@ -1621,14 +1927,23 @@ class XmlMybatisSqlRule(BaseRule):
                         join_config,
                     )
                 )
-                layout_edits.extend(
-                    dynamic_subquery_source_edits(
-                        sql_text,
-                        mapping,
-                        content,
-                        join_config,
-                    )
+                subquery_source_edits = dynamic_subquery_source_edits(
+                    sql_text,
+                    mapping,
+                    content,
+                    join_config,
                 )
+                if subquery_source_edits:
+                    layout_edits = [
+                        edit
+                        for edit in layout_edits
+                        if not any(
+                            max(edit[0], source_edit[0])
+                            < min(edit[1], source_edit[1])
+                            for source_edit in subquery_source_edits
+                        )
+                    ]
+                    layout_edits.extend(subquery_source_edits)
                 dynamic_order_edits = compact_dynamic_order_by_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
@@ -1672,7 +1987,9 @@ class XmlMybatisSqlRule(BaseRule):
                     )
 
                 protected_source_edit_set = set(
-                    post_choose_edits + dynamic_body_edits
+                    post_choose_edits
+                    + dynamic_body_edits
+                    + subquery_source_edits
                 )
                 layout_edits = [
                     edit
@@ -1706,7 +2023,11 @@ class XmlMybatisSqlRule(BaseRule):
                     file_path=file_path,
                     rule_config=inner_config,
                     excluded_rule_ids=(
-                        {"IR-null-coalesce"}
+                        {
+                            "IR-join-on-multi",
+                            "IR-null-coalesce",
+                            "IR-paren-single",
+                        }
                         if bridge_state["mybatis_dynamic_indent_ranges"]
                         else None
                     ),
@@ -1718,6 +2039,30 @@ class XmlMybatisSqlRule(BaseRule):
                     if not overlaps_protected_source_indent(edit)
                 ]
                 edits = layout_edits + edits
+                if null_source_edits:
+                    from mir.rules.sql.sql_utils import protected_sql_signature
+
+                    edits = null_source_edits
+                    applied_rules.clear()
+                    applied_rules.add("IR-null-coalesce")
+                    bridge_state["original_protected_signature"] = (
+                        protected_sql_signature(sql_text)
+                    )
+                    bridge_state["expected_protected_signature"] = (
+                        protected_sql_signature(null_fixed_text)
+                    )
+                elif paren_source_edits:
+                    from mir.rules.sql.sql_utils import protected_sql_signature
+
+                    edits = paren_source_edits
+                    applied_rules.clear()
+                    applied_rules.add("IR-paren-single")
+                    bridge_state["original_protected_signature"] = (
+                        protected_sql_signature(sql_text)
+                    )
+                    bridge_state["expected_protected_signature"] = (
+                        protected_sql_signature(paren_fixed_text)
+                    )
                 statement_key = (el["tag"], el["attrs"]["id"])
                 original_signature_map[statement_key] = bridge_state[
                     "original_protected_signature"
