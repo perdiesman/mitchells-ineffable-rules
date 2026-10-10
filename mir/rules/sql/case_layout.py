@@ -124,6 +124,14 @@ class CaseLayoutRule(BaseRule):
                 and token["value"] in {"+", "||"}
                 for token in tokens[start_idx:end_idx + 1]
             )
+            if (
+                has_additive_expression
+                and case_tok["line"] != end_tok["line"]
+            ):
+                # Additive and WHEN/THEN rules own line breaks inside an
+                # already-multiline CASE. Rebuilding the whole block would
+                # compact their stricter expression layout on the next pass.
+                continue
             if has_additive_expression:
                 from mir.rules.sql.additive_wrap import AdditiveWrapRule
 

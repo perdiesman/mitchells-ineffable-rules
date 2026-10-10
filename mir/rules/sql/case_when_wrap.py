@@ -102,7 +102,7 @@ class CaseWhenWrapRule(BaseRule):
                     continue
                 if nested_depth or value not in {"WHEN", "ELSE", "END"}:
                     continue
-                if value == "WHEN":
+                if value in {"WHEN", "ELSE"}:
                     case_inner_indents[token_index] = inner_indent
                 whitespace = (
                     tokens[token_index - 1]
@@ -304,6 +304,55 @@ class CaseWhenWrapRule(BaseRule):
                             "replacement": " ",
                         }
                     )
+
+        for index, token in enumerate(tokens):
+            if token["type"] != "KEYWORD" or token["value"].upper() != "ELSE":
+                continue
+            end_index = next(
+                (
+                    candidate
+                    for candidate in range(index + 1, len(tokens))
+                    if depths[candidate] == depths[index]
+                    and tokens[candidate]["type"] == "KEYWORD"
+                    and tokens[candidate]["value"].upper() == "END"
+                ),
+                None,
+            )
+            if end_index is None:
+                continue
+            result_tokens = tokens[index + 1:end_index]
+            active_result = [
+                position
+                for position, item in enumerate(result_tokens)
+                if item["type"] not in {"WHITESPACE", "COMMENT"}
+            ]
+            if not active_result or any(
+                item["type"] == "COMMENT" for item in result_tokens
+            ):
+                continue
+            first_result_index = index + 1 + active_result[0]
+            result_whitespace = (
+                tokens[first_result_index - 1]
+                if tokens[first_result_index - 1]["type"] == "WHITESPACE"
+                else None
+            )
+            if result_whitespace is None or "\n" not in result_whitespace["value"]:
+                continue
+            result_text = "".join(
+                " " if item["type"] == "WHITESPACE" else item["value"]
+                for item in result_tokens
+            ).strip()
+            branch_indent = case_inner_indents.get(index, "")
+            if source_text_length(
+                branch_indent + "ELSE " + result_text,
+                rule_config,
+            ) <= max_length:
+                edits.append({
+                    "token": tokens[first_result_index],
+                    "start": result_whitespace["start"],
+                    "end": result_whitespace["end"],
+                    "replacement": " ",
+                })
         return edits
 
     def check(
