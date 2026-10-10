@@ -310,7 +310,58 @@ class CaseLayoutRule(BaseRule):
                         cond_strs = []
                         for part in cond_parts:
                             part_str = "".join([t["value"] for t in part]).strip()
-                            if "\n" not in part_str:
+                            if "\n" in part_str:
+                                condition_fragments = [
+                                    line.rstrip()
+                                    for line in part_str.splitlines()
+                                    if line.strip()
+                                ]
+                                continuation_indents = [
+                                    len(line) - len(line.lstrip(" \t"))
+                                    for line in condition_fragments[1:]
+                                ]
+                                common_indent = (
+                                    min(continuation_indents)
+                                    if continuation_indents
+                                    else 0
+                                )
+                                part_str = condition_fragments[0].strip()
+                                normalized_lines = []
+                                previous_relative_indent = 0
+                                previous_starts_with_operator = False
+                                for line in condition_fragments[1:]:
+                                    relative_indent = max(
+                                        0,
+                                        len(line)
+                                        - len(line.lstrip(" \t"))
+                                        - common_indent,
+                                    )
+                                    body = line.lstrip(" \t")
+                                    starts_with_operator = bool(
+                                        re.match(r"(?:\+|-|\*|/|\|\|)\s", body)
+                                    )
+                                    if starts_with_operator:
+                                        operator_indent = (
+                                            previous_relative_indent
+                                            if previous_starts_with_operator
+                                            else previous_relative_indent + 4
+                                        )
+                                        relative_indent = max(
+                                            relative_indent, operator_indent
+                                        )
+                                    normalized_lines.append(
+                                        "\n"
+                                        + case_indent
+                                        + "        "
+                                        + " " * relative_indent
+                                        + body
+                                    )
+                                    previous_relative_indent = relative_indent
+                                    previous_starts_with_operator = (
+                                        starts_with_operator
+                                    )
+                                part_str += "".join(normalized_lines)
+                            else:
                                 part_str = re.sub(r"\s+", " ", part_str)
                             cond_strs.append(part_str)
                             

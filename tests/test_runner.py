@@ -3445,6 +3445,50 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_multiline_case_condition_rebases_nested_expression_indent(self):
+        sql_content = (
+            "SELECT\n"
+            "    CASE\n"
+            "        WHEN error_count >\n"
+            "    ((abs(\n"
+            "        extract(\n"
+            "            epoch FROM (cast(interval_start AS TIMESTAMP)\n"
+            "    - cast(interval_end AS TIMESTAMP))\n"
+            "        ) / 3600\n"
+            "    ) * 4) / 2)\n"
+            "            THEN 'unstable'\n"
+            "        ELSE 'normal'\n"
+            "    END AS status\n"
+            "FROM sample_record;\n"
+        )
+        expected = (
+            "SELECT\n"
+            "    CASE\n"
+            "        WHEN error_count >\n"
+            "            ((abs(\n"
+            "                extract(\n"
+            "                    epoch FROM (cast(interval_start AS TIMESTAMP)\n"
+            "                        - cast(interval_end AS TIMESTAMP))\n"
+            "                ) / 3600\n"
+            "            ) * 4) / 2)\n"
+            "            THEN 'unstable'\n"
+            "        ELSE 'normal'\n"
+            "    END AS status\n"
+            "FROM sample_record;\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_multiline_update_is_not_recompacted_after_expression_wrap(self):
         sql_content = (
             "UPDATE sample_group\n"
