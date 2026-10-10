@@ -2409,6 +2409,32 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_choose_value_is_not_a_synthetic_function_error(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="item">\n'
+            '        INSERT INTO sample_item (item_name, item_code)\n'
+            '        VALUES (\n'
+            '            #{name},\n'
+            '            <choose>\n'
+            '                <when test="code != null">#{code}</when>\n'
+            "                <otherwise>'UNKNOWN'</otherwise>\n"
+            '            </choose>\n'
+            '        )\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_foreach_keeps_multicondition_where_expanded(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

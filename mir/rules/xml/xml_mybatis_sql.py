@@ -3463,6 +3463,13 @@ class XmlMybatisSqlRule(BaseRule):
                     has_dynamic_choose = any(
                         child["tag"] == "choose" for child in dynamic_children
                     )
+                    has_dynamic_values_choose = bool(
+                        re.search(
+                            r"\bVALUES\s*\([^;]*<choose\b",
+                            content[el["start_offset"]:el["end_offset"]],
+                            re.IGNORECASE | re.DOTALL,
+                        )
+                    )
                     next_line_start = mapped_line_end + 1
                     next_nonempty_line = ""
                     while next_line_start < len(content):
@@ -3515,11 +3522,18 @@ class XmlMybatisSqlRule(BaseRule):
                         # when a consumer appends another condition.
                         continue
                     if (
-                        ev["rule_id"] in {
-                            "IR-table-function-indent",
-                            "IR-subquery-indent",
-                        }
-                        and has_dynamic_choose
+                        (
+                            ev["rule_id"] in {
+                                "IR-table-function-indent",
+                                "IR-subquery-indent",
+                            }
+                            and has_dynamic_choose
+                        )
+                        or (
+                            ev["rule_id"]
+                            == "IR-multiline-function-layout"
+                            and has_dynamic_values_choose
+                        )
                     ):
                         # Mutually exclusive XML branches cannot be assigned
                         # one meaningful guest-SQL indentation depth.
