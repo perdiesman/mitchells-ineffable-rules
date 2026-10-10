@@ -1,6 +1,7 @@
 import unittest
 
 from mir.rules.sql.additive_wrap import AdditiveWrapRule
+from mir.rules.sql.union_layout import UnionLayoutRule
 from mir.rules.sql.alias_as import AliasAsRule
 from mir.rules.sql.as_spacing import ASSpacingRule
 from mir.rules.sql.function_case import FunctionCaseRule
@@ -466,6 +467,49 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
         self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
 
+    def test_union_following_query_aligns_with_set_operator(self):
+        source = (
+            "    SELECT item_id\n"
+            "    FROM current_item\n"
+            "    UNION ALL\n"
+            "            SELECT item_id\n"
+            "            FROM archived_item"
+        )
+        expected = source.replace(
+            "            SELECT item_id\n"
+            "            FROM archived_item",
+            "    SELECT item_id\n"
+            "    FROM archived_item",
+        )
+
+        rule = UnionLayoutRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+
+    def test_join_expands_a_mixed_boolean_group(self):
+        source = (
+            "    JOIN customer_counts counts ON counts.state_id = state.id "
+            "AND (NOT :by_county OR counts.county_id = county.id)"
+        )
+        expected = (
+            "    JOIN customer_counts counts ON counts.state_id = state.id\n"
+            "        AND (\n"
+            "            NOT :by_county\n"
+            "            OR counts.county_id = county.id\n"
+            "        )"
+        )
+
+        rule = JoinOnMultiRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+        self.assertEqual(LineLengthRule().fix(expected, "generic.sql", {}), expected)
+
     def test_table_function_preserves_case_nesting(self):
         source = (
             "FROM generate_series(\n"
@@ -639,6 +683,33 @@ class TestSqlCompatibility(unittest.TestCase):
             expected,
         )
 
+        where_rule = WhereMultiRule()
+        self.assertEqual(where_rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(where_rule.fix(expected, "generic.sql", {}), expected)
+
+    def test_long_filter_predicate_uses_multiline_where_layout(self):
+        source = (
+            "        count(*) FILTER (\n"
+            "            WHERE direct_customers IS NOT NULL "
+            "AND snapshot_customers IS NOT NULL "
+            "AND direct_customers > snapshot_customers\n"
+            "        ) AS direct_selected"
+        )
+        expected = (
+            "        count(*) FILTER (\n"
+            "            WHERE\n"
+            "                direct_customers IS NOT NULL\n"
+            "                AND snapshot_customers IS NOT NULL\n"
+            "                AND direct_customers > snapshot_customers\n"
+            "        ) AS direct_selected"
+        )
+
+        rule = WhereMultiRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+
     def test_join_wraps_before_on_when_the_predicate_fits_its_own_line(self):
         source = (
             "                LEFT JOIN outage_data.running_calculation_handlers rch_cuh "
@@ -680,8 +751,9 @@ class TestSqlCompatibility(unittest.TestCase):
         expected = (
             "LEFT JOIN sample_counts counts ON counts.owner_id = owner.id\n"
             "    AND (\n"
-            "    counts.category_id = category.id OR counts.category_id IS NULL\n"
-            ")"
+            "        counts.category_id = category.id\n"
+            "        OR counts.category_id IS NULL\n"
+            "    )"
         )
 
         rule = JoinOnMultiRule()

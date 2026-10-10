@@ -135,6 +135,15 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
                         }
                         if last_char in extra_indent_keywords or last_word in extra_indent_keywords:
                             target_indent += " " * indent_size
+                            if (
+                                last_char == "("
+                                and re.search(
+                                    r"\bJOIN\s+[A-Z_][A-Z0-9_.]*\s*\($",
+                                    clean_line,
+                                    re.IGNORECASE,
+                                )
+                            ):
+                                target_indent += " " * indent_size
             break
             
     if target_indent is None:

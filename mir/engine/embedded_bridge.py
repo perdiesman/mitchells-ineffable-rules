@@ -268,6 +268,10 @@ def fix_embedded_content(
             "IR-window-layout": 4,
             "IR-parenthesized-expression-wrap": 4,
             "IR-line-length": 5,
+            # Dynamic SELECT branches can make earlier generic indentation
+            # infer the wrong query anchor. Reassert the set operator's own
+            # indentation after those rules have finished.
+            "IR-union-layout": 7,
         }
         guest_rules.sort(
             key=lambda rule: (

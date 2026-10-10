@@ -1779,6 +1779,10 @@ class TestRunnerIntegration(unittest.TestCase):
         ).replace(
             '                GROUP BY item_id',
             '            GROUP BY item_id',
+        ).replace(
+            '                LEFT JOIN sample_group item_group ON item_group.owner_id = owner.owner_id\n'
+            '                    AND item_group.enabled',
+            '                LEFT JOIN sample_group item_group ON item_group.owner_id = owner.owner_id AND item_group.enabled',
         )
         config = Config()
         config.profile = "commit"
@@ -1950,10 +1954,13 @@ class TestRunnerIntegration(unittest.TestCase):
         config.fix = True
 
         expected = xml_content.replace(
+            '                SELECT\n'
+            '                    CASE\n'
             '                        WHEN item.active\n'
             '                            AND item.visible\n'
-            '                            THEN item.item_id',
-            '                        WHEN item.active AND item.visible THEN item.item_id',
+            '                            THEN item.item_id\n'
+            '                    END',
+            '                SELECT CASE WHEN item.active AND item.visible THEN item.item_id END',
         )
 
         first = process_document(config, xml_content, "generic.xml", "xml")
@@ -2020,7 +2027,7 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
-    def test_xml_mybatis_commit_profile_expands_long_simple_case(self):
+    def test_xml_mybatis_commit_profile_compacts_normalized_simple_case(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
             '    <select id="summary">\n'
@@ -2031,11 +2038,9 @@ class TestRunnerIntegration(unittest.TestCase):
             '</mapper>'
         )
         expected = xml_content.replace(
+            '        SELECT\n'
             '                                    CASE WHEN (sum(override_count) IS NULL) THEN false ELSE true END AS has_override',
-            '                                    CASE\n'
-            '                                        WHEN (sum(override_count) IS NULL) THEN false\n'
-            '                                        ELSE true\n'
-            '                                    END AS has_override',
+            '        SELECT CASE WHEN (sum(override_count) IS NULL) THEN false ELSE true END AS has_override',
         )
         config = Config()
         config.profile = "commit"

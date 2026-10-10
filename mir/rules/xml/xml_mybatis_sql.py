@@ -868,7 +868,12 @@ def post_choose_clause_source_edits(
                 break
             line_start = offsets[line_index]
             indent_end = line_start + len(candidate) - len(body)
-            edits.append((line_start, indent_end, expected))
+            actual_indent = content[line_start:indent_end]
+            is_boolean_continuation = bool(
+                re.match(r"^(?:AND|OR)\b", body, re.IGNORECASE)
+            )
+            if not is_boolean_continuation or actual_indent != expected:
+                edits.append((line_start, indent_end, expected))
     return edits
 
 
@@ -1055,6 +1060,49 @@ def compact_static_order_by_edits(
             lines[final_index].rstrip("\r\n")
         )
         edits.append((edit_start, edit_end, replacement))
+    return edits
+
+
+def compact_static_select_edits(
+    content: str,
+    source_range: tuple[int, int],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Compact one static SELECT expression after embedded rules simplify it."""
+    import re
+
+    from mir.rules.sql.line_length import LineLengthRule
+    from mir.rules.sql.sql_utils import source_text_length, tokenize_sql
+
+    start, end = source_range
+    fragment = content[start:end]
+    max_length = LineLengthRule().get_config_value(
+        rule_config, "max_length", default_value=120
+    )
+    edits = []
+    pattern = re.compile(
+        r"(?m)^(?P<indent>[ \t]*)SELECT(?P<gap>[ \t]*\n[ \t]+)"
+        r"(?P<expression>[^\n<]+)\n(?P=indent)(?P<clause>FROM|INTO)\b"
+    )
+    for match in pattern.finditer(fragment):
+        expression = match.group("expression").strip()
+        expression_tokens = tokenize_sql(expression)
+        depth = 0
+        has_top_level_comma = False
+        for token in expression_tokens:
+            if token["type"] == "PAREN":
+                depth += 1 if token["value"] == "(" else -1
+            elif token["type"] == "COMMA" and depth == 0:
+                has_top_level_comma = True
+                break
+        candidate = match.group("indent") + "SELECT " + expression
+        if (
+            not has_top_level_comma
+            and source_text_length(candidate, rule_config) <= max_length
+        ):
+            gap_start = start + match.start("gap")
+            gap_end = start + match.start("expression")
+            edits.append((gap_start, gap_end, " "))
     return edits
 
 
@@ -1360,6 +1408,22 @@ class XmlMybatisSqlRule(BaseRule):
                         "message": "Compact the ORDER BY list when the line fits.",
                         "is_fixable": True,
                     })
+                static_select_edits = compact_static_select_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                if static_select_edits:
+                    first_start = min(start for start, _, _ in static_select_edits)
+                    violations.append({
+                        "rule_id": "IR-column-layout",
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "Compact a single static SELECT expression when "
+                            "the physical XML line fits."
+                        ),
+                        "is_fixable": True,
+                    })
 
                 embedded_violations = check_embedded_content(
                     guest_language="sql",
@@ -1577,6 +1641,12 @@ class XmlMybatisSqlRule(BaseRule):
                     inner_config,
                 )
                 layout_edits.extend(static_order_edits)
+                static_select_edits = compact_static_select_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                layout_edits.extend(static_select_edits)
                 layout_edits.extend(
                     sql_trailing_whitespace_source_edits(
                         content,

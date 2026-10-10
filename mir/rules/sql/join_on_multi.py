@@ -185,6 +185,114 @@ class JoinOnMultiRule(BaseRule):
                     ):
                         has_multiline_group = True
                         break
+                grouped_boolean_edits = []
+                for boolean_index in boolean_indices:
+                    next_active_index = next(
+                        (
+                            index
+                            for index in range(boolean_index + 1, clause_end)
+                            if tokens[index]["type"] not in {"WHITESPACE", "COMMENT"}
+                        ),
+                        None,
+                    )
+                    if (
+                        next_active_index is None
+                        or tokens[next_active_index]["type"] != "PAREN"
+                        or tokens[next_active_index]["value"] != "("
+                    ):
+                        continue
+                    group_close_index = find_matching_paren(
+                        tokens, next_active_index
+                    )
+                    if (
+                        group_close_index is None
+                        or group_close_index >= clause_end
+                    ):
+                        continue
+                    first_group_active = next(
+                        (
+                            index
+                            for index in range(
+                                next_active_index + 1, group_close_index
+                            )
+                            if tokens[index]["type"]
+                            not in {"WHITESPACE", "COMMENT"}
+                        ),
+                        None,
+                    )
+                    if (
+                        first_group_active is not None
+                        and tokens[first_group_active]["type"] == "PAREN"
+                        and tokens[first_group_active]["value"] == "("
+                    ):
+                        # Nullable-equality rewrites use a double-wrapped
+                        # boolean form. Leave it intact for the semantic rule
+                        # that replaces the whole expression with coalesce().
+                        continue
+                    inner_booleans = [
+                        index
+                        for index in find_boolean_operator_indices(
+                            tokens,
+                            depths,
+                            outer_depth + 1,
+                            next_active_index + 1,
+                            group_close_index,
+                        )
+                    ]
+                    if not inner_booleans:
+                        continue
+                    has_multiline_group = True
+                    group_indent = expected_indent + "    "
+
+                    after_open = (
+                        tokens[next_active_index + 1]
+                        if next_active_index + 1 < len(tokens)
+                        and tokens[next_active_index + 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    grouped_boolean_edits.append({
+                        "token": tokens[next_active_index],
+                        "ws_start": (
+                            after_open["start"]
+                            if after_open else tokens[next_active_index]["end"]
+                        ),
+                        "ws_end": (
+                            after_open["end"]
+                            if after_open else tokens[next_active_index]["end"]
+                        ),
+                        "replacement": "\n" + group_indent,
+                    })
+                    for inner_index in inner_booleans:
+                        before_inner = (
+                            tokens[inner_index - 1]
+                            if inner_index > 0
+                            and tokens[inner_index - 1]["type"] == "WHITESPACE"
+                            else None
+                        )
+                        grouped_boolean_edits.append({
+                            "token": tokens[inner_index],
+                            "ws_start": (
+                                before_inner["start"]
+                                if before_inner else tokens[inner_index]["start"]
+                            ),
+                            "ws_end": tokens[inner_index]["start"],
+                            "replacement": "\n" + group_indent,
+                        })
+                    before_close = (
+                        tokens[group_close_index - 1]
+                        if group_close_index > 0
+                        and tokens[group_close_index - 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    grouped_boolean_edits.append({
+                        "token": tokens[group_close_index],
+                        "ws_start": (
+                            before_close["start"]
+                            if before_close else tokens[group_close_index]["start"]
+                        ),
+                        "ws_end": tokens[group_close_index]["start"],
+                        "replacement": "\n" + expected_indent,
+                    })
                 on_clause_single = "".join(
                     " " if t["type"] == "WHITESPACE" else t["value"]
                     for t in on_clause_tokens
@@ -425,6 +533,13 @@ class JoinOnMultiRule(BaseRule):
                             "ws_end": additive["start"],
                             "replacement": expected_additive_ws,
                         })
+
+                violations.extend(
+                    item
+                    for item in grouped_boolean_edits
+                    if content[item["ws_start"]:item["ws_end"]]
+                    != item["replacement"]
+                )
 
                 if operator_split is not None:
                     operator = tokens[operator_split]

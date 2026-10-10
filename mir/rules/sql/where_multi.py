@@ -57,6 +57,17 @@ class WhereMultiRule(BaseRule):
         
         for i, tok in enumerate(tokens):
             if tok["type"] == "KEYWORD" and tok["value"].upper() == "WHERE":
+                previous_active = [
+                    index
+                    for index in range(i - 1, -1, -1)
+                    if tokens[index]["type"] not in {"WHITESPACE", "COMMENT"}
+                ][:2]
+                is_filter_where = (
+                    len(previous_active) == 2
+                    and tokens[previous_active[0]]["type"] == "PAREN"
+                    and tokens[previous_active[0]]["value"] == "("
+                    and tokens[previous_active[1]]["value"].upper() == "FILTER"
+                )
                 outer_depth = depths[i]
                 
                 line_start = content.rfind("\n", 0, tok["start"]) + 1
@@ -118,6 +129,27 @@ class WhereMultiRule(BaseRule):
                     100,
                     fallbacks=[(LineLengthRule, "max_length")],
                 )
+                if is_filter_where:
+                    filter_token = tokens[previous_active[1]]
+                    filter_line_start = content.rfind(
+                        "\n", 0, filter_token["start"]
+                    ) + 1
+                    filter_line = content[filter_line_start:filter_token["start"]]
+                    filter_indent = len(filter_line) - len(filter_line.lstrip())
+                    filter_where_single = "".join(
+                        " " if token["type"] == "WHITESPACE" else token["value"]
+                        for token in tokens[i:clause_end]
+                    ).strip()
+                    if (
+                        filter_indent + 4
+                        + source_text_length(filter_where_single, rule_config)
+                        <= max_len
+                    ):
+                        # FILTER owns its required WHERE parentheses. When its
+                        # predicate fits on the indented inner line, line-length
+                        # formatting may expand the call without turning the
+                        # predicate itself into a multiline WHERE clause.
+                        continue
                 for delimiter_idx in find_between_delimiter_indices(
                     tokens, depths, outer_depth, i + 1, clause_end
                 ):

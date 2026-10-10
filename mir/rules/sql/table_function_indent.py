@@ -329,6 +329,68 @@ class TableFunctionIndentRule(BaseRule):
             })
         return edits
 
+    def _multiline_argument_edits(
+        self, content: str, rule_config: Dict[str, Any]
+    ) -> List[dict]:
+        """Put direct arguments and the close of a multiline call on their own lines."""
+        tokens = tokenize_sql(content)
+        indent_size = self.get_config_value(
+            rule_config,
+            "indent_size",
+            4,
+            fallbacks=[(IndentRule, "indent_size")],
+        )
+        unit = " " * indent_size
+        edits = []
+
+        def whitespace_edit(token_index: int, before: bool, expected: str) -> None:
+            whitespace_index = token_index - 1 if before else token_index + 1
+            whitespace = (
+                tokens[whitespace_index]
+                if 0 <= whitespace_index < len(tokens)
+                and tokens[whitespace_index]["type"] == "WHITESPACE"
+                else None
+            )
+            token = tokens[token_index]
+            start = whitespace["start"] if whitespace else (
+                token["start"] if before else token["end"]
+            )
+            end = whitespace["end"] if whitespace else start
+            if content[start:end] != expected:
+                edits.append({
+                    "token": token,
+                    "start": start,
+                    "end": end,
+                    "replacement": expected,
+                })
+
+        for open_index, source_keyword in table_function_parens(tokens).items():
+            close_index = find_matching_paren(tokens, open_index)
+            if close_index is None:
+                continue
+            opening = tokens[open_index]
+            closing = tokens[close_index]
+            if opening["line"] >= closing["line"]:
+                continue
+            line_start = content.rfind("\n", 0, opening["start"]) + 1
+            line_prefix = content[line_start:opening["start"]]
+            base_indent = line_prefix[: len(line_prefix) - len(line_prefix.lstrip())]
+            close_indent = base_indent + (unit if source_keyword == "JOIN" else "")
+            argument_indent = close_indent + unit
+            whitespace_edit(open_index, False, "\n" + argument_indent)
+            whitespace_edit(close_index, True, "\n" + close_indent)
+
+            depth = 0
+            for index in range(open_index + 1, close_index):
+                token = tokens[index]
+                if token["type"] == "PAREN":
+                    depth += 1 if token["value"] == "(" else -1
+                elif token["type"] == "COMMA" and depth == 0:
+                    whitespace_edit(index, False, "\n" + argument_indent)
+        return list({
+            (item["start"], item["end"]): item for item in edits
+        }.values())
+
     def _expected_indents(self, content: str, indent_size: int) -> Dict[int, str]:
         tokens = tokenize_sql(content)
         lines = content.splitlines()
@@ -427,6 +489,16 @@ class TableFunctionIndentRule(BaseRule):
             )
             for item in self._expand_join_edits(content, rule_config)
         )
+        violations.extend(
+            Violation(
+                self.rule_id,
+                item["token"]["line"],
+                "Multiline table-function arguments must use one line each.",
+                [lines[item["token"]["line"] - 1]],
+                True,
+            )
+            for item in self._multiline_argument_edits(content, rule_config)
+        )
         for line_number, expected in self._expected_indents(content, indent_size).items():
             line = lines[line_number - 1]
             actual = line[: len(line) - len(line.lstrip())]
@@ -448,6 +520,14 @@ class TableFunctionIndentRule(BaseRule):
             chars = list(content)
             for item in sorted(
                 expand_edits, key=lambda edit: edit["start"], reverse=True
+            ):
+                chars[item["start"] : item["end"]] = list(item["replacement"])
+            content = "".join(chars)
+        argument_edits = self._multiline_argument_edits(content, rule_config)
+        if argument_edits:
+            chars = list(content)
+            for item in sorted(
+                argument_edits, key=lambda edit: edit["start"], reverse=True
             ):
                 chars[item["start"] : item["end"]] = list(item["replacement"])
             content = "".join(chars)

@@ -141,6 +141,16 @@ class LineLengthRule(BaseRule):
         for index, token in enumerate(compact_tokens):
             if token["type"] not in ("IDENTIFIER", "KEYWORD"):
                 continue
+            if (
+                token["type"] == "KEYWORD"
+                and token["value"].upper()
+                not in {
+                    "ANY", "CAST", "COALESCE", "EXTRACT", "FILTER",
+                    "GREATEST", "LEAST", "LEFT", "NULLIF", "RIGHT",
+                    "ROW_NUMBER", "SOME",
+                }
+            ):
+                continue
             open_index = next(
                 (
                     candidate

@@ -35,7 +35,7 @@ class CaseLayoutRule(BaseRule):
     additional_validations = [
         "SELECT CASE WHEN x = 1 THEN 'a' END FROM users;",
         "SELECT CASE WHEN x = 1 THEN 'a' ELSE 'b' END FROM users;",
-        "SELECT \n    CASE\n        WHEN x = 1 THEN 'a'\n        ELSE 'b'\n    END;"
+        "SELECT \n    CASE\n        WHEN x = 1 THEN 'a'\n        WHEN x = 2 THEN 'b'\n        ELSE 'c'\n    END;",
     ]
 
     def _find_case_blocks(self, tokens: List[dict]) -> List[dict]:
@@ -145,6 +145,30 @@ class CaseLayoutRule(BaseRule):
             )
             
             if is_simple_inline:
+                continue
+
+            compact_text = " ".join(original_text.split())
+            can_compact_multiline = (
+                case_tok["line"] != end_tok["line"]
+                and when_count == 1
+                and not any(
+                    token["type"] in {"COMMENT", "COMMA"}
+                    for token in tokens[start_idx:end_idx + 1]
+                )
+                and (
+                    source_text_length(
+                        line_prefix + compact_text + line_suffix,
+                        rule_config,
+                    )
+                    - base_indent_spaces
+                ) <= max_len
+            )
+            if can_compact_multiline:
+                violations.append({
+                    "case_tok": case_tok,
+                    "end_tok": end_tok,
+                    "replacement": compact_text,
+                })
                 continue
                 
             select_indent = ""
