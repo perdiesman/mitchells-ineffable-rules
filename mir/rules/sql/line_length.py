@@ -82,7 +82,8 @@ class LineLengthRule(BaseRule):
     description = (
         "Lines must not exceed the configured maximum length. Overlong "
         "keyword-owned IN, VALUES, and TABLE lists wrap one item per line, "
-        "and long foreign-key constraints wrap their detail clauses. "
+        "OPTIONS and LIMIT TO lists expand, and long constraints and indexes "
+        "wrap at schema-clause boundaries. "
         "Large repeated one-row INSERT data dumps remain compact. Literal "
         "data that cannot be wrapped without changing its value is reported "
         "as nonfixable."
@@ -245,20 +246,60 @@ class LineLengthRule(BaseRule):
             ):
                 continue
             values = [constraint_tokens[index]["value"].upper() for index in indices]
+            physical_line = constraint_lines[line_number - 1]
+            base_indent = physical_line[:
+                len(physical_line) - len(physical_line.lstrip(" \t"))
+            ]
+            index_position = next(
+                (
+                    position
+                    for position, value in enumerate(values)
+                    if value == "INDEX"
+                ),
+                None,
+            )
+            on_position = next(
+                (
+                    position
+                    for position, value in enumerate(values)
+                    if value == "ON"
+                ),
+                None,
+            )
+            if (
+                values
+                and values[0] == "CREATE"
+                and index_position is not None
+                and on_position is not None
+                and on_position > index_position
+            ):
+                token_index = indices[on_position]
+                previous = constraint_tokens[token_index - 1]
+                if (
+                    previous["type"] == "WHITESPACE"
+                    and "\n" not in previous["value"]
+                ):
+                    constraint_edits.append(
+                        (
+                            previous["start"],
+                            previous["end"],
+                            "\n" + base_indent + "    ",
+                        )
+                    )
             if "CONSTRAINT" not in values:
                 continue
             constraint_position = values.index("CONSTRAINT")
             detail_positions = [
                 position
                 for position in range(constraint_position + 1, len(indices))
-                if values[position] in {"FOREIGN", "REFERENCES"}
+                if values[position]
+                in {
+                    "CHECK", "EXCLUDE", "FOREIGN", "PRIMARY",
+                    "REFERENCES", "UNIQUE",
+                }
             ]
             if not detail_positions:
                 continue
-            physical_line = constraint_lines[line_number - 1]
-            base_indent = physical_line[:
-                len(physical_line) - len(physical_line.lstrip(" \t"))
-            ]
             detail_indent = base_indent + "    "
             for position in detail_positions:
                 token_index = indices[position]
@@ -464,10 +505,20 @@ class LineLengthRule(BaseRule):
                     for item in preceding_active
                 )
             )
+            is_limit_target = (
+                owner["type"] == "KEYWORD"
+                and owner["value"].upper() == "TO"
+                and any(
+                    item["type"] == "KEYWORD"
+                    and item["value"].upper() == "LIMIT"
+                    for item in preceding_active
+                )
+            )
             if not is_insert_target and (
                 owner["type"] != "KEYWORD"
-                or owner["value"].upper() not in {"IN", "TABLE", "VALUES"}
-            ):
+                or owner["value"].upper()
+                not in {"IN", "OPTIONS", "TABLE", "VALUES"}
+            ) and not is_limit_target:
                 continue
             active_inner = [
                 item

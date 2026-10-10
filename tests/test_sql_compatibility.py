@@ -149,6 +149,65 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
         self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
 
+    def test_line_length_wraps_schema_statement_boundaries(self):
+        rule = LineLengthRule()
+        unique_constraint = (
+            "    ADD CONSTRAINT "
+            "sample_item_extraordinarily_long_owner_region_timestamp_key "
+            "UNIQUE (owner_id, region_id, recorded_timestamp);"
+        )
+        expected_constraint = unique_constraint.replace(
+            " UNIQUE", "\n        UNIQUE"
+        )
+        create_index = (
+            "CREATE INDEX "
+            "sample_item_extraordinarily_long_owner_region_timestamp_index "
+            "ON sample_item_history USING btree (owner_id, region_id);"
+        )
+        expected_index = create_index.replace(" ON ", "\n    ON ")
+
+        self.assertEqual(
+            rule.fix(unique_constraint, "generic.sql", {}),
+            expected_constraint,
+        )
+        self.assertEqual(
+            rule.fix(create_index, "generic.sql", {}), expected_index
+        )
+
+    def test_line_length_expands_options_and_limit_to_lists(self):
+        rule = LineLengthRule()
+        options = (
+            "CREATE SERVER generic_remote FOREIGN DATA WRAPPER postgres_fdw "
+            "OPTIONS (host 'generic-source-connection', dbname 'generic_database', "
+            "fetch_size '10000');"
+        )
+        expected_options = (
+            "CREATE SERVER generic_remote FOREIGN DATA WRAPPER postgres_fdw "
+            "OPTIONS (\n"
+            "    host 'generic-source-connection',\n"
+            "    dbname 'generic_database',\n"
+            "    fetch_size '10000'\n"
+            ");"
+        )
+        limit_to = (
+            "IMPORT FOREIGN SCHEMA generic_source LIMIT TO "
+            "(first_extraordinarily_long_table, second_extraordinarily_long_table, "
+            "third_extraordinarily_long_table) FROM SERVER generic_remote "
+            "INTO generic_target;"
+        )
+        expected_limit_to = (
+            "IMPORT FOREIGN SCHEMA generic_source LIMIT TO (\n"
+            "    first_extraordinarily_long_table,\n"
+            "    second_extraordinarily_long_table,\n"
+            "    third_extraordinarily_long_table\n"
+            ") FROM SERVER generic_remote INTO generic_target;"
+        )
+
+        self.assertEqual(rule.fix(options, "generic.sql", {}), expected_options)
+        self.assertEqual(
+            rule.fix(limit_to, "generic.sql", {}), expected_limit_to
+        )
+
     def test_line_length_reports_literal_data_as_nonfixable(self):
         assignment = (
             "    description = '"
