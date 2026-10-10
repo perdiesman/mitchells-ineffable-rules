@@ -1108,6 +1108,78 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
 
+    def test_xml_mybatis_indents_dynamic_where_after_subquery_include(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="BaseQuery">\n'
+            '        SELECT item_id, starts_at, ends_at\n'
+            '        FROM sample_item\n'
+            '    </sql>\n'
+            '    <select id="items">\n'
+            '        SELECT * FROM (\n'
+            '                <include refid="BaseQuery" />\n'
+            '            ) item_table\n'
+            '            <if test="bounded">\n'
+            '                WHERE\n'
+            '                item_table.extraordinarily_long_start_timestamp &gt; #{start} OR\n'
+            '                item_table.extraordinarily_long_completion_timestamp IS NULL\n'
+            '            </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '                WHERE\n'
+            '                item_table.extraordinarily_long_start_timestamp &gt; #{start} OR\n'
+            '                item_table.extraordinarily_long_completion_timestamp IS NULL',
+            '                WHERE\n'
+            '                    item_table.extraordinarily_long_start_timestamp &gt; #{start}\n'
+            '                    OR item_table.extraordinarily_long_completion_timestamp IS NULL',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_indents_static_where_after_subquery_include(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="BaseQuery">\n'
+            '        SELECT item_id, extraordinarily_long_completion_timestamp\n'
+            '        FROM sample_item\n'
+            '    </sql>\n'
+            '    <select id="items">\n'
+            '        SELECT * FROM (\n'
+            '                <include refid="BaseQuery" />\n'
+            '            ) item_table\n'
+            '        WHERE item_table.extraordinarily_long_completion_timestamp &gt; now() OR\n'
+            '        item_table.extraordinarily_long_completion_timestamp IS NULL\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '        WHERE item_table.extraordinarily_long_completion_timestamp &gt; now() OR\n'
+            '        item_table.extraordinarily_long_completion_timestamp IS NULL',
+            '        WHERE\n'
+            '            item_table.extraordinarily_long_completion_timestamp &gt; now()\n'
+            '            OR item_table.extraordinarily_long_completion_timestamp IS NULL',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_reusable_dynamic_column_list_is_clean(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

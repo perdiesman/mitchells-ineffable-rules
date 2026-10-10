@@ -2190,6 +2190,250 @@ def dynamic_body_indent_source_edits(
     ]
 
 
+def dynamic_where_source_edits(
+    content: str,
+    source_range: tuple[int, int],
+    elements: List[dict],
+    tag_ranges: List[tuple[int, int]],
+    dynamic_ranges: List[tuple[int, int, int]],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Format a WHERE wholly owned by one dynamic XML body.
+
+    Expanding a reusable query before such a body can give the full guest SQL
+    a different parenthesis depth. Isolating the complete dynamic body keeps
+    the WHERE parser's source mapping local and deterministic.
+    """
+    source_start, source_end = source_range
+    edits = []
+    for element in elements:
+        if (
+            element["tag"] not in {"if", "when", "otherwise", "trim", "where"}
+            or not (
+                source_start < element["start_offset"]
+                < element["end_offset"] < source_end
+            )
+        ):
+            continue
+        if "<include" not in content[
+            source_start:element["start_offset"]
+        ].lower():
+            continue
+        open_end = content.find(
+            ">", element["start_offset"], element["end_offset"]
+        )
+        close_start = content.rfind(
+            "</", element["start_offset"], element["end_offset"]
+        )
+        if open_end == -1 or close_start <= open_end:
+            continue
+        body_start = open_end + 1
+        body_source = content[body_start:close_start]
+        # Nested tags need the regular expansion machinery. This focused
+        # fallback is only for one complete physical SQL body.
+        if "<" in body_source:
+            continue
+        from html import unescape
+
+        expanded_chars = []
+        mapping = []
+        cursor = 0
+        for entity in re.finditer(r"&(?:gt|lt|amp|quot|apos);", body_source):
+            for index in range(cursor, entity.start()):
+                expanded_chars.append(body_source[index])
+                mapping.append(body_start + index)
+            decoded = unescape(entity.group(0))
+            expanded_chars.append(decoded)
+            mapping.append(body_start + entity.start())
+            cursor = entity.end()
+        for index in range(cursor, len(body_source)):
+            expanded_chars.append(body_source[index])
+            mapping.append(body_start + index)
+        body_sql = "".join(expanded_chars)
+        if not re.search(r"\bWHERE\b", body_sql, re.IGNORECASE):
+            continue
+        local_config = dict(rule_config)
+        local_config.update({
+            "original_xml": content,
+            "source_range": (element["start_offset"], element["end_offset"]),
+            # The isolated body has no internal tag boundary. Its surrounding
+            # XML range still supplies the physical indentation anchor below.
+            "mybatis_dynamic_offsets": set(),
+            "mybatis_nested_dynamic_offsets": set(),
+            "mybatis_boundary_offsets": mapping_boundary_offsets(
+                mapping, tag_ranges
+            ),
+        })
+        edits.extend(dynamic_sql_indent_source_edits(
+            body_sql,
+            mapping,
+            tag_ranges,
+            dynamic_ranges,
+            local_config,
+        ))
+        from mir.rules.sql.sql_utils import get_token_depths, tokenize_sql
+
+        sql_tokens = tokenize_sql(body_sql)
+        depths = get_token_depths(sql_tokens)
+        where_index = next(
+            (
+                index
+                for index, token in enumerate(sql_tokens)
+                if token["type"] == "KEYWORD"
+                and token["value"].upper() == "WHERE"
+            ),
+            None,
+        )
+        if where_index is None:
+            continue
+        where_source = mapping[sql_tokens[where_index]["start"]]
+        where_line_start = content.rfind("\n", 0, where_source) + 1
+        where_indent = content[where_line_start:where_source]
+        if where_indent.strip():
+            continue
+        for index, token in enumerate(sql_tokens):
+            if (
+                token["type"] != "KEYWORD"
+                or token["value"].upper() not in {"AND", "OR"}
+                or token["start"] >= len(mapping)
+            ):
+                continue
+            token_source = mapping[token["start"]]
+            line_start = content.rfind("\n", 0, token_source) + 1
+            prefix = content[line_start:token_source]
+            if prefix.strip():
+                continue
+            relative_depth = max(
+                1,
+                depths[index] - depths[where_index] + 1,
+            )
+            expected = where_indent + (" " * (4 * relative_depth))
+            if prefix != expected:
+                edits.append((line_start, token_source, expected))
+    edits_by_span = {
+        (start, end): replacement for start, end, replacement in edits
+    }
+    return [
+        (start, end, replacement)
+        for (start, end), replacement in edits_by_span.items()
+    ]
+
+
+def dynamic_where_source_ranges(
+    content: str,
+    source_range: tuple[int, int],
+    elements: List[dict],
+) -> List[tuple[int, int]]:
+    """Return complete tag-free dynamic bodies owned by the WHERE helper."""
+    source_start, source_end = source_range
+    ranges = []
+    for element in elements:
+        if (
+            element["tag"] not in {"if", "when", "otherwise", "trim", "where"}
+            or not (
+                source_start < element["start_offset"]
+                < element["end_offset"] < source_end
+            )
+        ):
+            continue
+        if "<include" not in content[
+            source_start:element["start_offset"]
+        ].lower():
+            continue
+        open_end = content.find(
+            ">", element["start_offset"], element["end_offset"]
+        )
+        close_start = content.rfind(
+            "</", element["start_offset"], element["end_offset"]
+        )
+        if open_end == -1 or close_start <= open_end:
+            continue
+        body = content[open_end + 1:close_start]
+        if "<" not in body and re.search(r"\bWHERE\b", body, re.IGNORECASE):
+            ranges.append((open_end + 1, close_start))
+    return ranges
+
+
+def physical_where_source_edits(
+    content: str,
+    source_range: tuple[int, int],
+    tag_ranges: List[tuple[int, int]],
+    dynamic_ranges: List[tuple[int, int, int]],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Format a tag-free physical WHERE suffix after an expanded include."""
+    from html import unescape
+
+    source_start, source_end = source_range
+    fragment = content[source_start:source_end]
+    edits = []
+    for match in re.finditer(r"(?im)^([ \t]*)WHERE\b", fragment):
+        where_start = source_start + match.start()
+        if "<include" not in content[source_start:where_start].lower():
+            continue
+        if any(start < where_start < end for start, end, _ in dynamic_ranges):
+            continue
+        candidate_end = content.find("<", where_start, source_end)
+        if candidate_end == -1:
+            candidate_end = source_end
+        source_sql = content[where_start:candidate_end]
+        if not source_sql.strip():
+            continue
+        chars = []
+        mapping = []
+        cursor = 0
+        for entity in re.finditer(r"&(?:gt|lt|amp|quot|apos);", source_sql):
+            for index in range(cursor, entity.start()):
+                chars.append(source_sql[index])
+                mapping.append(where_start + index)
+            chars.append(unescape(entity.group(0)))
+            mapping.append(where_start + entity.start())
+            cursor = entity.end()
+        for index in range(cursor, len(source_sql)):
+            chars.append(source_sql[index])
+            mapping.append(where_start + index)
+        sql_text = "".join(chars)
+        local_config = dict(rule_config)
+        local_config.update({
+            "original_xml": content,
+            "source_range": source_range,
+            "mybatis_dynamic_offsets": set(),
+            "mybatis_nested_dynamic_offsets": set(),
+            "mybatis_boundary_offsets": set(),
+        })
+        edits.extend(dynamic_sql_indent_source_edits(
+            sql_text,
+            mapping,
+            tag_ranges,
+            dynamic_ranges,
+            local_config,
+        ))
+        break
+    edits_by_span = {
+        (start, end): replacement for start, end, replacement in edits
+    }
+    return [
+        (start, end, replacement)
+        for (start, end), replacement in edits_by_span.items()
+    ]
+
+
+def include_subquery_source_ranges(
+    content: str,
+    source_range: tuple[int, int],
+) -> List[tuple[int, int]]:
+    """Locate physical derived tables whose body is one reusable include."""
+    source_start, source_end = source_range
+    fragment = content[source_start:source_end]
+    pattern = re.compile(
+        r"(?is)\bSELECT\s+\*\s+FROM\s*\(\s*<include\b[^>]*/>\s*\)\s+AS\b"
+    )
+    return [
+        (source_start + match.start(), source_start + match.end())
+        for match in pattern.finditer(fragment)
+    ]
+
+
 def multiline_foreach_function_source_edits(
     content: str,
     source_range: tuple[int, int],
@@ -3035,6 +3279,10 @@ class XmlMybatisSqlRule(BaseRule):
                 inner_config = dict(rule_config)
                 if "_lines" in inner_config:
                     del inner_config["_lines"]
+                include_subquery_ranges = include_subquery_source_ranges(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                )
 
                 layout_edits = (
                     []
@@ -3170,6 +3418,26 @@ class XmlMybatisSqlRule(BaseRule):
                     (el["start_offset"], el["end_offset"]),
                     dynamic_indent_ranges,
                 )
+                dynamic_where_edits = dynamic_where_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    get_all_elements_recursively(el.get("children", [])),
+                    tag_ranges,
+                    dynamic_indent_ranges,
+                    inner_config,
+                )
+                dynamic_where_ranges = dynamic_where_source_ranges(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    get_all_elements_recursively(el.get("children", [])),
+                )
+                physical_where_edits = physical_where_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    tag_ranges,
+                    dynamic_indent_ranges,
+                    inner_config,
+                )
                 changed_dynamic_body_edits = [
                     edit
                     for edit in dynamic_body_edits
@@ -3185,6 +3453,42 @@ class XmlMybatisSqlRule(BaseRule):
                         "message": (
                             "SQL text must remain one indentation level inside "
                             "its dynamic XML block."
+                        ),
+                        "is_fixable": True,
+                    })
+                changed_dynamic_where_edits = [
+                    edit
+                    for edit in dynamic_where_edits
+                    if content[edit[0]:edit[1]] != edit[2]
+                ]
+                if changed_dynamic_where_edits:
+                    first_start = min(
+                        start for start, _, _ in changed_dynamic_where_edits
+                    )
+                    violations.append({
+                        "rule_id": "IR-where-multi",
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "[MyBatis SQL: IR-where-multi] Align a dynamic "
+                            "WHERE body independently of an included query."
+                        ),
+                        "is_fixable": True,
+                    })
+                changed_physical_where_edits = [
+                    edit
+                    for edit in physical_where_edits
+                    if content[edit[0]:edit[1]] != edit[2]
+                ]
+                if changed_physical_where_edits:
+                    first_start = min(
+                        start for start, _, _ in changed_physical_where_edits
+                    )
+                    violations.append({
+                        "rule_id": "IR-where-multi",
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "[MyBatis SQL: IR-where-multi] Align a physical "
+                            "WHERE suffix independently of an included query."
                         ),
                         "is_fixable": True,
                     })
@@ -3230,6 +3534,8 @@ class XmlMybatisSqlRule(BaseRule):
                         + join_case_edits
                         + between_edits
                         + dynamic_body_edits
+                        + dynamic_where_edits
+                        + physical_where_edits
                     )
                 ]
                 changed_mapped_indent_edits = [
@@ -3245,8 +3551,29 @@ class XmlMybatisSqlRule(BaseRule):
                     and not any(
                         max(edit[0], protected_start)
                         < min(edit[1], protected_end)
+                        or (
+                            edit[0] == edit[1]
+                            and protected_start
+                            <= edit[0] <= protected_end
+                        )
                         for protected_start, protected_end
                         in protected_mapped_indent_spans
+                    )
+                    and not any(
+                        max(edit[0], range_start) < min(edit[1], range_end)
+                        or (
+                            edit[0] == edit[1]
+                            and range_start <= edit[0] <= range_end
+                        )
+                        for range_start, range_end in include_subquery_ranges
+                    )
+                    and not any(
+                        max(edit[0], range_start) < min(edit[1], range_end)
+                        or (
+                            edit[0] == edit[1]
+                            and range_start <= edit[0] <= range_end
+                        )
+                        for range_start, range_end in dynamic_where_ranges
                     )
                 ]
                 if changed_mapped_indent_edits:
@@ -3660,6 +3987,7 @@ class XmlMybatisSqlRule(BaseRule):
 
         target_tags = {"select", "insert", "update", "delete", "sql"}
         all_xml_edits = []
+        owned_where_edits = []
         expected_signature_updates = {}
         original_signature_map = {}
         lines_filter = rule_config.get("_lines")
@@ -3721,6 +4049,10 @@ class XmlMybatisSqlRule(BaseRule):
                 inner_config = dict(rule_config)
                 if "_lines" in inner_config:
                     del inner_config["_lines"]
+                include_subquery_ranges = include_subquery_source_ranges(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                )
 
                 applied_rules = set()
                 bridge_state = {
@@ -3852,6 +4184,31 @@ class XmlMybatisSqlRule(BaseRule):
                     (el["start_offset"], el["end_offset"]),
                     dynamic_indent_ranges,
                 )
+                dynamic_where_edits = dynamic_where_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    get_all_elements_recursively(el.get("children", [])),
+                    tag_ranges,
+                    dynamic_indent_ranges,
+                    inner_config,
+                )
+                dynamic_where_ranges = dynamic_where_source_ranges(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    get_all_elements_recursively(el.get("children", [])),
+                )
+                physical_where_edits = physical_where_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    tag_ranges,
+                    dynamic_indent_ranges,
+                    inner_config,
+                )
+                owned_where_edits.extend(
+                    edit
+                    for edit in dynamic_where_edits + physical_where_edits
+                    if content[edit[0]:edit[1]] != edit[2]
+                )
                 top_level_clause_edits = top_level_clause_source_edits(
                     sql_text,
                     mapping,
@@ -3887,6 +4244,8 @@ class XmlMybatisSqlRule(BaseRule):
                     + between_edits
                     + foreach_function_edits
                     + dynamic_body_edits
+                    + dynamic_where_edits
+                    + physical_where_edits
                     + top_level_clause_edits
                     + keyword_case_edits
                     + function_case_edits
@@ -3902,6 +4261,42 @@ class XmlMybatisSqlRule(BaseRule):
                     dynamic_indent_ranges,
                     join_config,
                 )
+                mapped_sql_indent_edits = [
+                    edit
+                    for edit in mapped_sql_indent_edits
+                    if not any(
+                        max(edit[0], range_start) < min(edit[1], range_end)
+                        or (
+                            edit[0] == edit[1]
+                            and range_start <= edit[0] <= range_end
+                        )
+                        for range_start, range_end in include_subquery_ranges
+                    )
+                    and not any(
+                        max(edit[0], range_start) < min(edit[1], range_end)
+                        or (
+                            edit[0] == edit[1]
+                            and range_start <= edit[0] <= range_end
+                        )
+                        for range_start, range_end in dynamic_where_ranges
+                    )
+                ]
+                where_source_edits = dynamic_where_edits + physical_where_edits
+                if where_source_edits:
+                    mapped_sql_indent_edits = [
+                        edit
+                        for edit in mapped_sql_indent_edits
+                        if not any(
+                            max(edit[0], source_edit[0])
+                            < min(edit[1], source_edit[1])
+                            or (
+                                edit[0] == edit[1]
+                                and source_edit[0]
+                                <= edit[0] <= source_edit[1]
+                            )
+                            for source_edit in where_source_edits
+                        )
+                    ]
                 layout_edits.extend(mapped_sql_indent_edits)
                 subquery_source_edits = dynamic_subquery_source_edits(
                     sql_text,
@@ -4012,6 +4407,8 @@ class XmlMybatisSqlRule(BaseRule):
                     (start, end)
                     for start, end, _ in post_choose_edits + dynamic_body_edits
                     + join_case_edits + between_edits + top_level_clause_edits
+                    + dynamic_where_edits
+                    + physical_where_edits
                     + dynamic_projection_edits
                 ] + [
                     (start, end)
@@ -4041,6 +4438,8 @@ class XmlMybatisSqlRule(BaseRule):
                         + join_case_edits
                         + between_edits
                         + dynamic_body_edits
+                        + dynamic_where_edits
+                        + physical_where_edits
                         + top_level_clause_edits
                         + subquery_source_edits
                         + dynamic_window_edits
@@ -4192,8 +4591,16 @@ class XmlMybatisSqlRule(BaseRule):
                     # them with a large layout reflow can make overlapping
                     # diffs discard only part of the semantic edit (for
                     # example removing OUTER and ASC but retaining INNER).
-                    # The convergence loop applies layout on the next pass.
-                    layout_edits = []
+                    # Keep only local WHERE-source edits: unlike the large
+                    # guest diff, they are whitespace-only, source-exact, and
+                    # signature checked below. This prevents semantic changes
+                    # inside an expanded include from starving its host WHERE.
+                    exact_where_edits = set(where_source_edits)
+                    layout_edits = [
+                        edit
+                        for edit in layout_edits
+                        if edit in exact_where_edits
+                    ]
                 layout_edits = [
                     edit
                     for edit in layout_edits
@@ -4337,6 +4744,20 @@ class XmlMybatisSqlRule(BaseRule):
                     if rules_fixed_set is not None:
                         rules_fixed_set.update(applied_rules)
 
+        if owned_where_edits:
+            all_xml_edits = [
+                edit
+                for edit in all_xml_edits
+                if not any(
+                    max(edit[0], owned[0]) < min(edit[1], owned[1])
+                    or (
+                        edit[0] == edit[1]
+                        and owned[0] <= edit[0] <= owned[1]
+                    )
+                    for owned in owned_where_edits
+                )
+            ]
+            all_xml_edits.extend(owned_where_edits)
         if not all_xml_edits:
             return content
 
