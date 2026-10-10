@@ -3370,10 +3370,11 @@ class XmlMybatisSqlRule(BaseRule):
                     for edit in edits
                     if el["start_offset"] <= edit[0] <= edit[1] <= el["end_offset"]
                 ]
-                edits = [
-                    edit for edit in edits
-                    if not overlaps_protected_source_indent(edit)
-                ]
+                if not static_full_replacement:
+                    edits = [
+                        edit for edit in edits
+                        if not overlaps_protected_source_indent(edit)
+                    ]
                 if bridge_state.get("semantic_changed"):
                     # Token rewrites need an exact source-mapped pass. Mixing
                     # them with a large layout reflow can make overlapping

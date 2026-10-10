@@ -3480,6 +3480,34 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, first.content)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_static_nested_query_applies_atomic_layout(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="nestedItems">\n'
+            '        select wrapper.item_id from (\n'
+            '        select item_id from sample_first\n'
+            '        union all\n'
+            '        select item_id from sample_second\n'
+            '        union all\n'
+            '        select item_id from sample_third\n'
+            '        ) wrapper where wrapper.item_id is not null\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertIn("        SELECT wrapper.item_id", first.content)
+        self.assertIn("        FROM (", first.content)
+        self.assertIn("                SELECT item_id", first.content)
+        self.assertIn("        WHERE wrapper.item_id", first.content)
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_formats_dynamic_group_by_items(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
