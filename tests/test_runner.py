@@ -965,6 +965,10 @@ class TestRunnerIntegration(unittest.TestCase):
             'JOIN sample_owner owner ON owner.owner_id = item.owner_id\n'
             '                AND owner.active',
             'JOIN sample_owner owner ON owner.owner_id = item.owner_id AND owner.active',
+        ).replace(
+            '        FROM sample_item item\n',
+            '        FROM\n'
+            '            sample_item item\n',
         )
         config = Config()
         config.profile = "commit"
@@ -2098,6 +2102,83 @@ class TestRunnerIntegration(unittest.TestCase):
 
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_maps_dynamic_join_continuation_indentation(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item.item_identifier\n'
+            '        FROM sample_item_with_a_descriptive_name item\n'
+            '        <if test="includeOwner">\n'
+            '            LEFT JOIN sample_owner_with_a_descriptive_name owner '
+            'ON owner.organization_identifier = item.organization_identifier\n'
+            '            AND owner.external_identifier = item.owner_external_identifier\n'
+            '        </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '            LEFT JOIN sample_owner_with_a_descriptive_name owner '
+            'ON owner.organization_identifier = item.organization_identifier\n'
+            '            AND owner.external_identifier',
+            '            LEFT JOIN sample_owner_with_a_descriptive_name owner\n'
+            '                ON owner.organization_identifier = item.organization_identifier\n'
+            '                AND owner.external_identifier',
+        ).replace(
+            '        FROM sample_item_with_a_descriptive_name item\n',
+            '        FROM\n'
+            '            sample_item_with_a_descriptive_name item\n',
+        ).replace(
+            '        <if test="includeOwner">\n'
+            '            LEFT JOIN',
+            '            <if test="includeOwner">\n'
+            '                LEFT JOIN',
+        ).replace(
+            '                ON owner.organization_identifier',
+            '                    ON owner.organization_identifier',
+        ).replace(
+            '                AND owner.external_identifier',
+            '                    AND owner.external_identifier',
+        ).replace(
+            '        </if>\n',
+            '            </if>\n',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_preserves_repeated_nested_select_keywords(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="nestedItems">\n'
+            '        SELECT wrapper.item_identifier\n'
+            '        FROM (\n'
+            '                 select first_item.item_identifier\n'
+            '                 from sample_first_item first_item\n'
+            '                 UNION\n'
+            '                 select second_item.item_identifier\n'
+            '                 from sample_second_item second_item\n'
+            '             ) wrapper\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content.count("SELECT"), 3)
+        self.assertEqual(second.content, first.content)
         self.assertFalse(first.diagnostics)
 
     def test_xml_mybatis_choose_branches_do_not_extend_join_predicates(self):

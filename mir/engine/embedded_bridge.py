@@ -429,7 +429,12 @@ def fix_embedded_content(
             for line in fixed_lines
         ]
 
-        sm = difflib.SequenceMatcher(None, guest_lines_stripped, fixed_lines_stripped)
+        sm = difflib.SequenceMatcher(
+            None,
+            guest_lines_stripped,
+            fixed_lines_stripped,
+            autojunk=False,
+        )
         tag_ranges = extra_fix_args.get("tag_ranges") if extra_fix_args else None
 
         for tag, i1, i2, j1, j2 in sm.get_opcodes():
@@ -487,22 +492,61 @@ def fix_embedded_content(
                                 ))
                             guest_body = guest_line[guest_indent:]
                             fixed_body = fixed_line[fixed_indent:]
-                            char_matcher = difflib.SequenceMatcher(
-                                None, guest_body, fixed_body, autojunk=False
-                            )
-                            for char_tag, ci1, ci2, cj1, cj2 in char_matcher.get_opcodes():
-                                if char_tag == "equal":
-                                    continue
-                                sub_ops.append((
-                                    line_offset + guest_indent + ci1,
-                                    line_offset + guest_indent + ci2,
-                                    fixed_body[cj1:cj2],
-                                    False,
-                                ))
+                            if (
+                                len(guest_body) == len(fixed_body)
+                                and guest_body.lower() == fixed_body.lower()
+                            ):
+                                # SequenceMatcher can align a leading letter
+                                # with a later occurrence on case-only lines
+                                # (for example ``select os...``), producing
+                                # ``ELECT`` after source mapping.  Positional
+                                # runs are exact and unambiguous here.
+                                position = 0
+                                while position < len(guest_body):
+                                    if guest_body[position] == fixed_body[position]:
+                                        position += 1
+                                        continue
+                                    run_start = position
+                                    while (
+                                        position < len(guest_body)
+                                        and guest_body[position] != fixed_body[position]
+                                    ):
+                                        position += 1
+                                    sub_ops.append((
+                                        line_offset + guest_indent + run_start,
+                                        line_offset + guest_indent + position,
+                                        fixed_body[run_start:position],
+                                        False,
+                                    ))
+                            else:
+                                char_matcher = difflib.SequenceMatcher(
+                                    None, guest_body, fixed_body, autojunk=False
+                                )
+                                for char_tag, ci1, ci2, cj1, cj2 in char_matcher.get_opcodes():
+                                    if char_tag == "equal":
+                                        continue
+                                    sub_ops.append((
+                                        line_offset + guest_indent + ci1,
+                                        line_offset + guest_indent + ci2,
+                                        fixed_body[cj1:cj2],
+                                        False,
+                                    ))
                             line_offset += len(guest_line)
                     else:
+                        repeated_selects = (
+                            guest_block.lower().count("select") > 1
+                            and fixed_block.lower().count("select")
+                            == guest_block.lower().count("select")
+                        )
                         char_matcher = difflib.SequenceMatcher(
-                            None, guest_block, fixed_block, autojunk=False
+                            (
+                                (lambda char: char.isspace())
+                                if repeated_selects
+                                else None
+                            ),
+                            guest_block,
+                            fixed_block,
+                            autojunk=False,
                         )
                         for char_tag, ci1, ci2, cj1, cj2 in char_matcher.get_opcodes():
                             if char_tag == "equal":
@@ -548,7 +592,6 @@ def fix_embedded_content(
                                 if mapping[k] - mapping[k - 1] != 1:
                                     is_contiguous = False
                                     break
-
                     if not is_contiguous:
                         continue
 

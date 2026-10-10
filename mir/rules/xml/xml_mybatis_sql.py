@@ -557,7 +557,7 @@ def dynamic_column_layout_edits(
         return mapping[guest_start], mapping[guest_end - 1] + 1
 
     for clause in clauses:
-        if clause.get("is_nested") or not clause["keyword"].startswith(
+        if not clause["keyword"].startswith(
             ("SELECT", "GROUP BY", "ORDER BY")
         ):
             continue
@@ -571,15 +571,18 @@ def dynamic_column_layout_edits(
         # Every transition must follow an existing comma. This accepts an
         # optional group of complete list items and rejects mutually exclusive
         # branches whose expanded expressions sit beside one another.
-        safe = True
+        comma_boundaries = 0
         for offset in points:
             cursor = offset - 1
             while cursor >= clause["list_start"] and sql_text[cursor].isspace():
                 cursor -= 1
-            if cursor < clause["list_start"] or sql_text[cursor] != ",":
-                safe = False
-                break
-        if not safe or not clause["expression_ranges"]:
+            if cursor >= clause["list_start"] and sql_text[cursor] == ",":
+                comma_boundaries += 1
+        # A boundary immediately after a comma proves that the dynamic block
+        # contributes complete list items. Other points may be the close/open
+        # transition between mutually exclusive blocks and need not themselves
+        # follow commas.
+        if not comma_boundaries or not clause["expression_ranges"]:
             continue
 
         prefix = column_rule._format_prefix(
@@ -620,6 +623,134 @@ def dynamic_column_layout_edits(
                 continue
             edits.append((span[0], span[1], "\n" + inner_indent))
 
+    return edits
+
+
+def dynamic_sql_indent_source_edits(
+    sql_text: str,
+    mapping: List[int],
+    tag_ranges: List[tuple[int, int]],
+    dynamic_ranges: List[tuple[int, int, int]],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Map source-contiguous SQL indentation fixes without a text diff."""
+    from mir.rules.sql.from_multi import FromMultiRule
+    from mir.rules.sql.join_on_multi import JoinOnMultiRule
+
+    edits = []
+    items = []
+    for rule in (FromMultiRule(), JoinOnMultiRule()):
+        active_config = rule_config
+        if isinstance(rule, FromMultiRule):
+            active_config = dict(rule_config)
+            # The host mapper below accepts indentation-only edits, so it can
+            # safely see an optional JOIN beyond a tag boundary when deciding
+            # that the FROM entry itself needs one continuation level.
+            active_config["mybatis_boundary_offsets"] = set()
+        items.extend(rule._find_violations(sql_text, active_config))
+    for item in items:
+        guest_start = item["ws_start"]
+        guest_end = item["ws_end"]
+        original_whitespace = sql_text[guest_start:guest_end]
+        replacement = item["replacement"]
+        if not original_whitespace.isspace() or (
+            replacement and not replacement.isspace()
+        ):
+            continue
+        if guest_start >= guest_end or guest_end > len(mapping):
+            continue
+        if any(
+            mapping[index] - mapping[index - 1] != 1
+            for index in range(guest_start + 1, guest_end)
+        ):
+            continue
+        source_start = mapping[guest_start]
+        source_end = mapping[guest_end - 1] + 1
+        if any(
+            max(source_start, tag_start) < min(source_end, tag_end)
+            for tag_start, tag_end in tag_ranges
+        ):
+            continue
+        indentation_only = (
+            original_whitespace.count("\n")
+            == replacement.count("\n")
+        )
+        if not indentation_only and any(
+            range_start < source_start < range_end
+            or range_start < source_end < range_end
+            for range_start, range_end, _ in dynamic_ranges
+        ):
+            continue
+        edits.append(
+            (source_start, source_end, replacement)
+        )
+    return edits
+
+
+def dynamic_subquery_source_edits(
+    sql_text: str,
+    mapping: List[int],
+    content: str,
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Map indentation-only subquery repairs to their exact XML lines."""
+    from mir.rules.sql.subquery_indent import SubqueryIndentRule
+
+    rule = SubqueryIndentRule()
+    lines = sql_text.splitlines(keepends=True)
+    line_offsets = []
+    offset = 0
+    for line in lines:
+        line_offsets.append(offset)
+        offset += len(line)
+
+    edits = []
+    for item in rule._find_violations(sql_text, rule_config):
+        if item.get("type") == "compact_join_opener":
+            continue
+        if item["first_sub_tok"]["line"] == item["open_tok"]["line"]:
+            continue
+        start_line = item["open_line"] + 1
+        close_line = item["close_line"]
+        clause_lines = item["clause_lines"]
+        for line_number in range(start_line, close_line + 1):
+            raw_line = lines[line_number - 1].rstrip("\r\n")
+            if not raw_line.strip():
+                continue
+            body = raw_line.lstrip(" \t")
+            guest_indent = raw_line[: len(raw_line) - len(body)]
+            if line_number == close_line:
+                expected = item["close_indent"]
+            elif line_number in clause_lines:
+                expected = item["content_indent"]
+            elif guest_indent.startswith(item["content_indent"]):
+                continue
+            else:
+                expected = item["content_indent"]
+            if guest_indent == expected:
+                continue
+            guest_body_start = line_offsets[line_number - 1] + len(guest_indent)
+            if guest_body_start >= len(mapping):
+                continue
+            source_body_start = mapping[guest_body_start]
+            # Synthetic SQL separators and repeated fragment expansion can
+            # make a guest line number point into the middle of its source
+            # token.  Never treat that offset as indentation: doing so would
+            # consume the first source character (for example SELECT ->
+            # ELECT).  Exact character identity is required before changing
+            # the source prefix.
+            if (
+                source_body_start >= len(content)
+                or content[source_body_start] != sql_text[guest_body_start]
+            ):
+                continue
+            source_line_start = content.rfind("\n", 0, source_body_start) + 1
+            source_prefix = content[source_line_start:source_body_start]
+            if source_prefix.strip():
+                continue
+            edits.append(
+                (source_line_start, source_body_start, expected)
+            )
     return edits
 
 
@@ -939,6 +1070,38 @@ class XmlMybatisSqlRule(BaseRule):
                     content,
                     inner_config,
                 )
+                join_config = dict(inner_config)
+                join_config.update(bridge_state)
+                layout_edits.extend(
+                    dynamic_sql_indent_source_edits(
+                        sql_text,
+                        mapping,
+                        tag_ranges,
+                        dynamic_indent_ranges,
+                        join_config,
+                    )
+                )
+                layout_edits.extend(
+                    dynamic_subquery_source_edits(
+                        sql_text,
+                        mapping,
+                        content,
+                        join_config,
+                    )
+                )
+                # Direct source-layout helpers are authorized to move only
+                # whitespace.  Expanded MyBatis SQL can contain synthetic or
+                # repeated mappings, so enforce that invariant again at the
+                # common boundary before combining their edits with semantic
+                # guest-rule fixes.
+                layout_edits = [
+                    (start, end, replacement)
+                    for start, end, replacement in layout_edits
+                    if (
+                        (start == end or content[start:end].isspace())
+                        and (not replacement or replacement.isspace())
+                    )
+                ]
                 edits = fix_embedded_content(
                     guest_language="sql",
                     guest_text=sql_text,
