@@ -4359,6 +4359,42 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
 
+    def test_xml_mybatis_dynamic_window_before_dynamic_projection_is_valid(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="items">\n'
+            '        INSERT INTO sample_rank (batch_id, row_number, item_id)\n'
+            '            SELECT\n'
+            '                #{batchId},\n'
+            '                row_number() OVER (\n'
+            '                    ORDER BY\n'
+            '                        <choose>\n'
+            '                            <when test="byName">item_name, item_id</when>\n'
+            '                            <otherwise>item_id</otherwise>\n'
+            '                        </choose>\n'
+            '                ),\n'
+            '                <choose>\n'
+            '                    <when test="byName">item_name</when>\n'
+            '                    <otherwise>item_id</otherwise>\n'
+            '                </choose>\n'
+            '            FROM sample_item\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertNotIn(
+            "IR-window-layout",
+            [violation.rule_id for violation, _, _ in second.violations],
+        )
+
     def test_xml_mybatis_include_semantics_do_not_starve_host_layout(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

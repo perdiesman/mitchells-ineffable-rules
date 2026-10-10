@@ -2793,6 +2793,21 @@ def compact_dynamic_order_by_edits(
     return edits
 
 
+def has_dynamic_window_choose(
+    content: str,
+    source_range: tuple[int, int],
+) -> bool:
+    """Return whether a window body is supplied by a MyBatis choose block."""
+    start, end = source_range
+    fragment = content[start:end]
+    return bool(re.search(
+        r"\bOVER[ \t\r\n]*\((?:(?!\bOVER\b).)*?"
+        r"<choose\b.*?</choose>[ \t\r\n]*\)",
+        fragment,
+        re.IGNORECASE | re.DOTALL,
+    ))
+
+
 def dynamic_window_source_edits(
     content: str,
     source_range: tuple[int, int],
@@ -4698,12 +4713,45 @@ class XmlMybatisSqlRule(BaseRule):
                         "is_fixable": True,
                     })
 
+                dynamic_window_owned = has_dynamic_window_choose(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                )
+                dynamic_window_edits = dynamic_window_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                changed_dynamic_window_edits = [
+                    edit
+                    for edit in dynamic_window_edits
+                    if content[edit[0]:edit[1]] != edit[2]
+                ]
+                if changed_dynamic_window_edits:
+                    first_start = min(
+                        start for start, _, _ in changed_dynamic_window_edits
+                    )
+                    violations.append({
+                        "rule_id": "IR-window-layout",
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "Format the MyBatis-controlled window clause in "
+                            "physical XML source order."
+                        ),
+                        "is_fixable": True,
+                    })
+
                 excluded_guest_rule_ids = set()
                 # Exact source-mapped WHERE checks above own physical XML
                 # layout. Guest WHERE findings can point through a dynamic tag
                 # or reusable fragment to whitespace that the host fixer must
                 # intentionally leave unchanged.
                 excluded_guest_rule_ids.add("IR-where-multi")
+                if dynamic_window_owned:
+                    # Flattening mutually exclusive ORDER BY branches makes
+                    # the guest SQL window look malformed. The source-aware
+                    # checker above owns this construct.
+                    excluded_guest_rule_ids.add("IR-window-layout")
                 if has_dynamic_case_branches(
                     content, (el["start_offset"], el["end_offset"])
                 ):
@@ -5645,6 +5693,11 @@ class XmlMybatisSqlRule(BaseRule):
                 # same logical newline at both sides of a source-map boundary,
                 # producing doubled blank lines in otherwise static SQL.
                 excluded_guest_rule_ids.add("IR-where-multi")
+                if has_dynamic_window_choose(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                ):
+                    excluded_guest_rule_ids.add("IR-window-layout")
                 if has_dynamic_case_branches(
                     content, (el["start_offset"], el["end_offset"])
                 ):
