@@ -2066,8 +2066,7 @@ class TestRunnerIntegration(unittest.TestCase):
             '<mapper namespace="GenericMapper">\n'
             '    <select id="items">\n'
             '        SELECT data.item_id\n'
-            '        FROM\n'
-            '            (\n'
+            '        FROM (\n'
             '                SELECT item.item_id\n'
             '                FROM\n'
             '                    sample_item item\n'
@@ -2094,8 +2093,13 @@ class TestRunnerIntegration(unittest.TestCase):
         first = process_document(config, xml_content, "generic.xml", "xml")
         second = process_document(config, first.content, "generic.xml", "xml")
 
-        self.assertEqual(first.content, xml_content)
-        self.assertEqual(second.content, xml_content)
+        expected = xml_content.replace(
+            "        FROM (\n",
+            "        FROM\n            (\n",
+        )
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
     def test_xml_mybatis_keeps_optional_where_condition_in_its_tag(self):
@@ -2614,6 +2618,52 @@ class TestRunnerIntegration(unittest.TestCase):
             '                    county_code IN\n'
             '                        <foreach collection="codes" item="code" open="(" close=")" separator=",">#{code}</foreach>\n'
             '            )\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_reanchors_static_subquery_lines_after_dynamic_tag(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM (\n'
+            '                SELECT item_id\n'
+            '                FROM sample_item\n'
+            '                WHERE\n'
+            '                    enabled\n'
+            '                    <if test="ownerId != null">AND owner_id = #{ownerId}</if>\n'
+            '        AND visible\n'
+            '        ORDER BY item_id\n'
+            '        <if test="limit != null">LIMIT #{limit}</if>\n'
+            '            ) visible_item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM (\n'
+            '                SELECT item_id\n'
+            '                FROM sample_item\n'
+            '                WHERE\n'
+            '                    enabled\n'
+            '                    <if test="ownerId != null">AND owner_id = #{ownerId}</if>\n'
+            '                    AND visible\n'
+            '                ORDER BY item_id\n'
+            '                <if test="limit != null">LIMIT #{limit}</if>\n'
+            '            ) visible_item\n'
             '    </select>\n'
             '</mapper>'
         )

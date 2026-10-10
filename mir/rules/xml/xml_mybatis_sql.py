@@ -844,6 +844,12 @@ def dynamic_sql_indent_source_edits(
             isinstance(source_rule, WhereMultiRule)
             and item["token"]["start"]
             in dynamic_offsets
+            and any(
+                range_start
+                < mapping[item["token"]["start"]]
+                < range_end
+                for range_start, range_end, _ in dynamic_ranges
+            )
             and max(
                 (
                     token["start"]
@@ -855,11 +861,10 @@ def dynamic_sql_indent_source_edits(
                 default=-1,
             ) not in dynamic_offsets
         ):
-            # The XML indentation rule owns a boolean whose token begins just
-            # after an opening dynamic tag. In source form the tag represents
-            # the guest SQL line break, so mapping WHERE's synthetic newline
-            # back into the tag body would over-indent the element and cycle
-            # with the structural XML layout.
+            # The XML indentation rule owns a boolean physically inside a
+            # dynamic tag. A token merely following a closing tag also has a
+            # boundary marker in the guest view, but remains ordinary SQL and
+            # must still align with the surrounding WHERE.
             continue
         dynamic_indent = max(
             (
@@ -873,6 +878,50 @@ def dynamic_sql_indent_source_edits(
             head, tail = replacement.rsplit("\n", 1)
             if not tail.strip() and len(tail) < dynamic_indent:
                 replacement = head + "\n" + (" " * dynamic_indent)
+        if (
+            isinstance(source_rule, WhereMultiRule)
+            and "\n" in replacement
+            and item["token"]["type"] == "KEYWORD"
+            and item["token"]["value"].upper() in {"AND", "OR"}
+            and 0 <= item["token"]["start"] < len(mapping)
+            and not any(
+                range_start
+                < mapping[item["token"]["start"]]
+                < range_end
+                for range_start, range_end, _ in dynamic_ranges
+            )
+        ):
+            # A preceding dynamic condition contributes its XML indentation
+            # to the guest SQL. Anchor the next physical boolean from the
+            # nearest source WHERE instead of inheriting that synthetic depth.
+            token_source = mapping[item["token"]["start"]]
+            search_line_start = source_content.rfind(
+                "\n", 0, token_source
+            ) + 1
+            where_indent = None
+            while search_line_start > source_start:
+                previous_end = search_line_start - 1
+                previous_start = source_content.rfind(
+                    "\n", 0, previous_end
+                ) + 1
+                previous_line = source_content[previous_start:previous_end]
+                previous_body = previous_line.lstrip(" \t")
+                if re.match(r"WHERE\b", previous_body, re.IGNORECASE):
+                    where_indent = previous_line[:
+                        len(previous_line) - len(previous_body)
+                    ]
+                    break
+                if re.match(
+                    r"(?:SELECT|FROM|GROUP\s+BY|ORDER\s+BY|HAVING|"
+                    r"UNION|INTERSECT|EXCEPT)\b",
+                    previous_body,
+                    re.IGNORECASE,
+                ):
+                    break
+                search_line_start = previous_start
+            if where_indent is not None:
+                head, _ = replacement.rsplit("\n", 1)
+                replacement = head + "\n" + where_indent + "    "
         if (
             isinstance(source_rule, JoinOnMultiRule)
             and "\n" in replacement
@@ -1223,7 +1272,6 @@ def dynamic_subquery_source_edits(
         line_offsets.append(offset)
         offset += len(line)
 
-    dynamic_offsets = rule_config.get("mybatis_dynamic_offsets", set())
     dynamic_source_ranges = rule_config.get(
         "mybatis_dynamic_indent_ranges", []
     )
@@ -1344,6 +1392,15 @@ def dynamic_subquery_source_edits(
                 continue
             body = raw_line.lstrip(" \t")
             guest_indent = raw_line[: len(raw_line) - len(body)]
+            if (
+                line_number != close_line
+                and line_number not in clause_lines
+                and re.match(r"(?:AND|OR)\b", body, re.IGNORECASE)
+            ):
+                # WHERE/JOIN layout owns boolean continuations. Replacing
+                # their prefix with the generic subquery content indentation
+                # would fight the extra continuation level those rules add.
+                continue
             if line_number == close_line and not close_shares_content:
                 expected = item["close_indent"] + (" " * source_indent_delta)
             elif line_number in clause_lines:
@@ -1356,15 +1413,13 @@ def dynamic_subquery_source_edits(
             if guest_body_start >= len(mapping):
                 continue
             if (
-                (
-                    guest_body_start in dynamic_offsets
-                    or is_dynamic_source_offset(guest_body_start)
-                )
-                and not (
-                    open_guest_offset in dynamic_offsets
-                    or is_dynamic_source_offset(open_guest_offset)
-                )
+                is_dynamic_source_offset(guest_body_start)
+                and not is_dynamic_source_offset(open_guest_offset)
             ):
+                # SQL physically nested in a dynamic element keeps its XML
+                # indentation. Merely following a closing tag is different:
+                # the expanded view marks that first token as a boundary, but
+                # it is still ordinary source SQL owned by this subquery.
                 continue
             source_body_start = mapping[guest_body_start]
             # Synthetic SQL separators and repeated fragment expansion can
@@ -1528,14 +1583,8 @@ def dynamic_subquery_source_edits(
         ):
             continue
         if (
-            (
-                sql_tokens[select_index]["start"] in dynamic_offsets
-                or is_dynamic_source_offset(sql_tokens[select_index]["start"])
-            )
-            and not (
-                open_token["start"] in dynamic_offsets
-                or is_dynamic_source_offset(open_token["start"])
-            )
+            is_dynamic_source_offset(sql_tokens[select_index]["start"])
+            and not is_dynamic_source_offset(open_token["start"])
         ):
             # A dynamic tag supplies an alternative SELECT inside an outer
             # CTE/derived-table parenthesis. Its extra source indentation is
@@ -1572,14 +1621,8 @@ def dynamic_subquery_source_edits(
                 and token["value"].upper() in clause_keywords
             ):
                 if (
-                    (
-                        token["start"] in dynamic_offsets
-                        or is_dynamic_source_offset(token["start"])
-                    )
-                    and not (
-                        open_token["start"] in dynamic_offsets
-                        or is_dynamic_source_offset(open_token["start"])
-                    )
+                    is_dynamic_source_offset(token["start"])
+                    and not is_dynamic_source_offset(open_token["start"])
                 ):
                     # The outer CTE/derived-table parenthesis owns its static
                     # clauses, but a nested MyBatis branch owns the additional
@@ -3060,6 +3103,13 @@ class XmlMybatisSqlRule(BaseRule):
                         for idx, after_tag in enumerate(is_after_tag)
                         if after_tag
                     },
+                    "mybatis_nested_dynamic_offsets": mapped_offsets_in_ranges(
+                        mapping,
+                        [
+                            (start, end)
+                            for start, end, _ in dynamic_indent_ranges
+                        ],
+                    ),
                     "mybatis_foreach_offsets": mapped_offsets_in_ranges(
                         mapping, foreach_ranges
                     ),
@@ -3249,6 +3299,13 @@ class XmlMybatisSqlRule(BaseRule):
                         "mybatis_dynamic_offsets": {
                             idx for idx, after_tag in enumerate(is_after_tag) if after_tag
                         },
+                        "mybatis_nested_dynamic_offsets": mapped_offsets_in_ranges(
+                            mapping,
+                            [
+                                (start, end)
+                                for start, end, _ in dynamic_indent_ranges
+                            ],
+                        ),
                         "mybatis_foreach_offsets": mapped_offsets_in_ranges(
                             mapping, foreach_ranges
                         ),
@@ -3514,6 +3571,13 @@ class XmlMybatisSqlRule(BaseRule):
                     "mybatis_dynamic_offsets": {
                         idx for idx, after_tag in enumerate(is_after_tag) if after_tag
                     },
+                    "mybatis_nested_dynamic_offsets": mapped_offsets_in_ranges(
+                        mapping,
+                        [
+                            (start, end)
+                            for start, end, _ in dynamic_indent_ranges
+                        ],
+                    ),
                     "mybatis_foreach_offsets": mapped_offsets_in_ranges(
                         mapping, foreach_ranges
                     ),

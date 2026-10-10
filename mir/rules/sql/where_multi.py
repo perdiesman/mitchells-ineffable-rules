@@ -47,6 +47,9 @@ class WhereMultiRule(BaseRule):
         n = len(tokens)
         trellis_ranges = []
         mybatis_dynamic_offsets = rule_config.get("mybatis_dynamic_offsets", set())
+        mybatis_nested_dynamic_offsets = rule_config.get(
+            "mybatis_nested_dynamic_offsets", mybatis_dynamic_offsets
+        )
         if rule_config.get("_template_dialect") == "trellis":
             from mir.rules.sql.trellis_utils import analyze_trellis
 
@@ -426,7 +429,7 @@ class WhereMultiRule(BaseRule):
                             
                         first_condition_indent = expected_indent
                         if (
-                            fc_tok["start"] in mybatis_dynamic_offsets
+                            fc_tok["start"] in mybatis_nested_dynamic_offsets
                             and not where_is_dynamic
                         ):
                             first_condition_indent += "    "
@@ -447,7 +450,10 @@ class WhereMultiRule(BaseRule):
                             ws_tok = tokens[actual_idx - 1]
 
                         boolean_indent = expected_indent
-                        if actual_idx in dynamic_boolean_indices and not where_is_dynamic:
+                        if (
+                            t["start"] in mybatis_nested_dynamic_offsets
+                            and not where_is_dynamic
+                        ):
                             boolean_indent += "    "
                         expected_replacement = "\n" + boolean_indent
                         whitespace_matches = bool(
