@@ -100,7 +100,8 @@ class TestRunnerIntegration(unittest.TestCase):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
             '    <select id="items">\n'
-            '        SELECT extraordinarily_long_item_identifier, extraordinarily_long_item_name, extraordinarily_long_item_description, extraordinarily_long_item_status\n'
+            '        SELECT extraordinarily_long_item_identifier, extraordinarily_long_item_name, extraordinarily_long_item_description, extraordinarily_long_item_status,\n'
+            '            item_id\n'
             '        FROM sample_item\n'
             '    </select>\n'
             '</mapper>'
@@ -112,7 +113,8 @@ class TestRunnerIntegration(unittest.TestCase):
             '            extraordinarily_long_item_identifier,\n'
             '            extraordinarily_long_item_name,\n'
             '            extraordinarily_long_item_description,\n'
-            '            extraordinarily_long_item_status\n'
+            '            extraordinarily_long_item_status,\n'
+            '            item_id\n'
             '        FROM sample_item\n'
             '    </select>\n'
             '</mapper>'
@@ -127,6 +129,105 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_expands_long_values_inside_foreach(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="items">\n'
+            '        <foreach collection="items" item="item">\n'
+            '            INSERT INTO sample_item (item_id, item_name, item_description, item_status, created_at, updated_by)\n'
+            '            VALUES (#{item.id}, #{item.name}, #{item.description}, #{item.status}, #{item.createdAt}, #{item.updatedBy});\n'
+            '        </foreach>\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '            VALUES (#{item.id}, #{item.name}, #{item.description}, #{item.status}, #{item.createdAt}, #{item.updatedBy});',
+            '            VALUES (\n'
+            '                #{item.id},\n'
+            '                #{item.name},\n'
+            '                #{item.description},\n'
+            '                #{item.status},\n'
+            '                #{item.createdAt},\n'
+            '                #{item.updatedBy}\n'
+            '            );',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_line_length_splits_adjacent_compact_dynamic_tags(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        WHERE <if test="ownerId != null">owner_id = #{ownerId}</if> <if test="status != null">AND item_status = #{status}</if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '</if> <if test="status != null">',
+            '</if>\n        <if test="status != null">',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_mybatis_where_container_aligns_after_join_conditions(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item.item_id\n'
+            '        FROM\n'
+            '            sample_item item\n'
+            '            LEFT JOIN sample_owner owner ON owner.owner_id = item.owner_id\n'
+            '                AND owner.enabled\n'
+            '                <where>\n'
+            '                    <if test="status != null">item.status = #{status}</if>\n'
+            '                </where>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '                <where>\n'
+            '                    <if test="status != null">item.status = #{status}</if>\n'
+            '                </where>',
+            '        <where>\n'
+            '            <if test="status != null">item.status = #{status}</if>\n'
+            '        </where>',
+        ).replace(
+            '            LEFT JOIN sample_owner owner ON owner.owner_id = item.owner_id\n'
+            '                AND owner.enabled',
+            '            LEFT JOIN sample_owner owner ON owner.owner_id = item.owner_id AND owner.enabled',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
 
     def test_xml_mybatis_moves_dynamic_projection_after_select(self):
         xml_content = (
@@ -1778,13 +1879,20 @@ class TestRunnerIntegration(unittest.TestCase):
             '            sample_item item\n'
             '            INNER JOIN (\n'
             '                    <include refid="OwnerTotals" />\n'
-            '                ) owner ON owner.owner_id = item.owner_id\n'
+            '                ) AS owner ON owner.owner_id = item.owner_id\n'
             '        WHERE item.enabled = FALSE\n'
+            '            AND item.created_at &gt;= #{start} AND item.created_at &lt;= #{end}\n'
             '    </select>\n'
             '</mapper>'
         )
-        expected = xml_content.replace("INNER JOIN", "JOIN").replace(
-            "item.enabled = FALSE", "NOT item.enabled"
+        expected = (
+            xml_content.replace("INNER JOIN", "JOIN")
+            .replace(") AS owner", ") owner")
+            .replace("item.enabled = FALSE", "NOT item.enabled")
+            .replace(
+                "item.created_at &gt;= #{start} AND item.created_at &lt;= #{end}",
+                "item.created_at BETWEEN #{start} AND #{end}",
+            )
         )
         config = Config()
         config.profile = "commit"

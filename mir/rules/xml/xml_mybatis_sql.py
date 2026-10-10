@@ -515,6 +515,25 @@ def get_dynamic_indent_ranges(
     return ranges
 
 
+def adjacent_dynamic_sibling_gap_ranges(
+    content: str,
+    source_range: tuple[int, int],
+) -> List[tuple[int, int]]:
+    """Return newline gaps between adjacent dynamic XML alternatives."""
+    start, end = source_range
+    fragment = content[start:end]
+    return [
+        (start + match.start("gap"), start + match.end("gap"))
+        for match in re.finditer(
+            r"</(?:if|when|otherwise|foreach)>"
+            r"(?P<gap>[ \t]*\n[ \t]*)"
+            r"<(?:if|when|otherwise|foreach)\b",
+            fragment,
+            re.IGNORECASE,
+        )
+    ]
+
+
 def get_mybatis_protected_signatures(
     content: str, target: tuple[str, str] | None = None
 ) -> tuple:
@@ -1049,17 +1068,46 @@ def host_semantic_source_edits(
     inside the host. One rule is returned at a time so protected signatures
     and later layout passes remain independently auditable.
     """
+    from html import unescape
+
     from mir.rules.sql.boolean_comparison import BooleanComparisonRule
+    from mir.rules.sql.between import BetweenRule
     from mir.rules.sql.redundant_keywords import RedundantKeywordsRule
+    from mir.rules.sql.table_alias_as import TableAliasAsRule
 
     disabled = rule_config.get("_rules_to_disable", set())
     enabled = rule_config.get("_rules_to_enable", set())
     disable_all = rule_config.get("_disable_all", False)
     source_start, source_end = source_range
-    for rule in (BooleanComparisonRule(), RedundantKeywordsRule()):
+    for rule in (
+        BooleanComparisonRule(),
+        RedundantKeywordsRule(),
+        TableAliasAsRule(),
+        BetweenRule(),
+    ):
         if rule.rule_id in disabled or (disable_all and rule.rule_id not in enabled):
             continue
-        findings = rule._find_violations(sql_text)
+        if isinstance(rule, BetweenRule):
+            findings = rule._find_violations(sql_text, rule_config)
+        elif isinstance(rule, TableAliasAsRule):
+            findings = []
+            for item in rule._find_violations(sql_text):
+                token = item["as_tok"]
+                whitespace_before = item["ws_before"]
+                whitespace_after = item["ws_after"]
+                findings.append({
+                    "start_offset": (
+                        whitespace_before["start"]
+                        if whitespace_before else token["start"]
+                    ),
+                    "end_offset": (
+                        whitespace_after["end"]
+                        if whitespace_after else token["end"]
+                    ),
+                    "replacement": " ",
+                })
+        else:
+            findings = rule._find_violations(sql_text)
         mapped_findings = []
         source_edits = []
         for finding in findings:
@@ -1068,15 +1116,21 @@ def host_semantic_source_edits(
             if not (0 <= guest_start < guest_end <= len(mapping)):
                 continue
             if any(
-                mapping[index] - mapping[index - 1] != 1
+                mapping[index] <= mapping[index - 1]
                 for index in range(guest_start + 1, guest_end)
             ):
                 continue
             edit_start = mapping[guest_start]
             edit_end = mapping[guest_end - 1] + 1
+            trailing_entity = re.match(
+                r"&(?:gt|lt|amp|quot|apos);",
+                content[mapping[guest_end - 1]:],
+            )
+            if trailing_entity:
+                edit_end = mapping[guest_end - 1] + trailing_entity.end()
             if not (
                 source_start <= edit_start < edit_end <= source_end
-                and content[edit_start:edit_end]
+                and unescape(content[edit_start:edit_end])
                 == sql_text[guest_start:guest_end]
             ):
                 continue
@@ -1086,7 +1140,7 @@ def host_semantic_source_edits(
             ):
                 continue
             replacement = finding["replacement"]
-            source_edits.append((edit_start, edit_end, replacement))
+            source_edits.append((edit_start, edit_end, xml_encode(replacement)))
             mapped_findings.append((guest_start, guest_end, replacement))
         if not source_edits:
             continue
@@ -3086,6 +3140,7 @@ def expand_long_physical_select_edits(
     )
     edits = []
     cursor = content.rfind("\n", 0, start) + 1
+    in_select_projection = False
     while cursor < end:
         line_end = content.find("\n", cursor, end)
         if line_end == -1:
@@ -3093,6 +3148,11 @@ def expand_long_physical_select_edits(
         line = content[cursor:line_end]
         body = line.lstrip(" \t")
         indent = line[: len(line) - len(body)]
+        upper_body = body.upper()
+        if re.match(r"^SELECT\b", upper_body):
+            in_select_projection = True
+        elif re.match(r"^(?:FROM|INTO)\b", upper_body):
+            in_select_projection = False
         if (
             len(line) > max_length
             and "<" not in body
@@ -3138,15 +3198,21 @@ def expand_long_physical_select_edits(
             ]
             if select_index is not None and comma_offsets:
                 projection_start = tokens[select_index]["end"]
-                boundaries = comma_offsets + [projection_end]
+                trailing_comma = not body[
+                    comma_offsets[-1] + 1:projection_end
+                ].strip()
+                split_offsets = (
+                    comma_offsets[:-1] if trailing_comma else comma_offsets
+                )
+                boundaries = split_offsets + [projection_end]
                 expressions = []
                 part_start = projection_start
                 for boundary in boundaries:
-                    expression = body[part_start:boundary].strip()
+                    expression = body[part_start:boundary].strip().rstrip(",")
                     if expression:
                         expressions.append(expression)
                     part_start = boundary + 1
-                if len(expressions) == len(comma_offsets) + 1:
+                if len(expressions) == len(split_offsets) + 1:
                     continuation = indent + "    "
                     replacement = (
                         indent
@@ -3158,9 +3224,41 @@ def expand_long_physical_select_edits(
                             for index, expression in enumerate(expressions)
                         )
                     )
+                    if trailing_comma:
+                        replacement += ","
                     if clause_index is not None:
                         replacement += "\n" + indent + body[projection_end:].strip()
                     edits.append((cursor, line_end, replacement))
+        elif (
+            in_select_projection
+            and len(line) > max_length
+            and "<" not in body
+        ):
+            tokens = tokenize_sql(body)
+            depths = get_token_depths(tokens)
+            comma_offsets = [
+                token["start"]
+                for index, token in enumerate(tokens)
+                if token["type"] == "COMMA" and depths[index] == 0
+            ]
+            if comma_offsets:
+                trailing_comma = not body[comma_offsets[-1] + 1:].strip()
+                split_offsets = (
+                    comma_offsets[:-1] if trailing_comma else comma_offsets
+                )
+                parts = []
+                part_start = 0
+                for comma_offset in split_offsets:
+                    parts.append(body[part_start:comma_offset].strip())
+                    part_start = comma_offset + 1
+                final = body[part_start:].strip().rstrip(",")
+                if final:
+                    parts.append(final)
+                if len(parts) == len(split_offsets) + 1 and all(parts):
+                    replacement = (",\n" + indent).join(parts)
+                    if trailing_comma:
+                        replacement += ","
+                    edits.append((cursor, line_end, indent + replacement))
         if line_end >= end:
             break
         cursor = line_end + 1
@@ -3366,6 +3464,137 @@ def expand_long_physical_case_edits(
                         + line[tokens[then_index]["start"]:]
                     )
                     edits.append((cursor, line_end, replacement))
+        if line_end >= end:
+            break
+        cursor = line_end + 1
+    return edits
+
+
+def expand_long_physical_line_edits(
+    content: str,
+    source_range: tuple[int, int],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Format overlong tag-free expressions that can be mapped exactly."""
+    from mir.rules.sql.additive_wrap import AdditiveWrapRule
+    from mir.rules.sql.line_length import LineLengthRule
+    from mir.rules.sql.multiline_function_layout import MultilineFunctionLayoutRule
+    from mir.rules.sql.sql_utils import get_token_depths, source_text_length, tokenize_sql
+
+    start, end = source_range
+    max_length = LineLengthRule().get_config_value(
+        rule_config, "max_length", default_value=120
+    )
+    edits = []
+    cursor = content.rfind("\n", 0, start) + 1
+    while cursor < end:
+        line_end = content.find("\n", cursor, end)
+        if line_end == -1:
+            line_end = end
+        line = content[cursor:line_end]
+        body = line.lstrip(" \t")
+        indent = line[: len(line) - len(body)]
+        replacement = line
+        line_tokens = tokenize_sql(body) if "<" not in body else []
+        has_additive = any(
+            token["type"] == "OPERATOR" and token["value"] in {"+", "||"}
+            for token in line_tokens
+        )
+        is_overlong = source_text_length(line, rule_config) > max_length
+        if (
+            "<" not in body
+            and (is_overlong or has_additive)
+        ):
+            values_match = (
+                re.match(r"(?i)^VALUES\s*\(", body) if is_overlong else None
+            )
+            if values_match:
+                tokens = tokenize_sql(body)
+                depths = get_token_depths(tokens)
+                open_index = next(
+                    (
+                        index
+                        for index, token in enumerate(tokens)
+                        if token["type"] == "PAREN" and token["value"] == "("
+                    ),
+                    None,
+                )
+                close_index = next(
+                    (
+                        index
+                        for index in range(len(tokens) - 1, -1, -1)
+                        if tokens[index]["type"] == "PAREN"
+                        and tokens[index]["value"] == ")"
+                        and open_index is not None
+                        and depths[index] == depths[open_index]
+                    ),
+                    None,
+                )
+                if open_index is not None and close_index is not None:
+                    inner_start = tokens[open_index]["end"]
+                    inner_end = tokens[close_index]["start"]
+                    comma_offsets = [
+                        token["start"]
+                        for index, token in enumerate(tokens)
+                        if open_index < index < close_index
+                        and token["type"] == "COMMA"
+                        and depths[index] == depths[open_index] + 1
+                    ]
+                    parts = []
+                    part_start = inner_start
+                    for comma_offset in comma_offsets:
+                        parts.append(body[part_start:comma_offset].strip())
+                        part_start = comma_offset + 1
+                    parts.append(body[part_start:inner_end].strip())
+                    if len(parts) > 1 and all(parts):
+                        argument_indent = indent + "    "
+                        suffix = body[tokens[close_index]["end"]:]
+                        replacement = (
+                            indent
+                            + body[:tokens[open_index]["end"]]
+                            + "\n"
+                            + (",\n" + argument_indent).join(
+                                argument_indent + part if index == 0 else part
+                                for index, part in enumerate(parts)
+                            )
+                            + "\n"
+                            + indent
+                            + ")"
+                            + suffix
+                        )
+            has_predicate_syntax = any(
+                (
+                    token["type"] == "KEYWORD"
+                    and token["value"].upper()
+                    in {"WHERE", "AND", "OR", "BETWEEN", "ON", "HAVING"}
+                )
+                or (
+                    token["type"] == "OPERATOR"
+                    and token["value"] in {"=", "!=", "<>", ">", "<", ">=", "<="}
+                )
+                for token in line_tokens
+            )
+            if (
+                replacement == line
+                and has_additive
+                and not has_predicate_syntax
+            ):
+                replacement = AdditiveWrapRule().fix(
+                    line, "embedded.sql", rule_config
+                )
+            if (
+                replacement == line
+                and is_overlong
+                and not has_predicate_syntax
+            ):
+                replacement = LineLengthRule().fix(
+                    line, "embedded.sql", rule_config
+                )
+                replacement = MultilineFunctionLayoutRule().fix(
+                    replacement, "embedded.sql", rule_config
+                )
+        if replacement != line:
+            edits.append((cursor, line_end, replacement))
         if line_end >= end:
             break
         cursor = line_end + 1
@@ -4038,7 +4267,10 @@ class XmlMybatisSqlRule(BaseRule):
                         + dynamic_where_edits
                         + physical_where_edits
                     )
-                ]
+                ] + adjacent_dynamic_sibling_gap_ranges(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                )
                 changed_mapped_indent_edits = [
                     edit
                     for edit in mapped_indent_edits
@@ -4198,6 +4430,17 @@ class XmlMybatisSqlRule(BaseRule):
                     (el["start_offset"], el["end_offset"]),
                     inner_config,
                 )
+                for physical_edit in expand_long_physical_line_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                ):
+                    if not any(
+                        max(physical_edit[0], existing[0])
+                        < min(physical_edit[1], existing[1])
+                        for existing in long_select_edits
+                    ):
+                        long_select_edits.append(physical_edit)
                 if long_select_edits:
                     first_start = min(start for start, _, _ in long_select_edits)
                     violations.append({
@@ -5048,6 +5291,17 @@ class XmlMybatisSqlRule(BaseRule):
                     (el["start_offset"], el["end_offset"]),
                     inner_config,
                 )
+                for physical_edit in expand_long_physical_line_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                ):
+                    if not any(
+                        max(physical_edit[0], existing[0])
+                        < min(physical_edit[1], existing[1])
+                        for existing in long_select_edits
+                    ):
+                        long_select_edits.append(physical_edit)
                 layout_edits.extend(long_select_edits)
                 physical_case_edits = physical_case_indent_source_edits(
                     content,
@@ -5138,6 +5392,12 @@ class XmlMybatisSqlRule(BaseRule):
                     )
                     if content[start:end] != replacement
                 ]
+                protected_source_indent_spans.extend(
+                    adjacent_dynamic_sibling_gap_ranges(
+                        content,
+                        (el["start_offset"], el["end_offset"]),
+                    )
+                )
 
                 def overlaps_protected_source_indent(edit) -> bool:
                     edit_start, edit_end, _ = edit
@@ -5381,6 +5641,13 @@ class XmlMybatisSqlRule(BaseRule):
                     edits = datatype_case_edits
                     applied_rules.clear()
                     applied_rules.add("IR-datatype-case")
+                elif long_select_edits:
+                    # Exact physical-line expansion must land before a broad
+                    # guest reflow; otherwise repetitive projections can make
+                    # the combined source-map signature ambiguous.
+                    edits = long_select_edits
+                    applied_rules.clear()
+                    applied_rules.add("IR-column-layout")
                 elif (
                     physical_case_edits
                     or long_case_edits

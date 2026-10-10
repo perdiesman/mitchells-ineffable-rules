@@ -45,6 +45,11 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
         
     # 3. If it's an intermediate tag like <when> or <otherwise>
     tag_name = t["value"][1:].lower()
+    if tag_name in {"where", "set"}:
+        # These MyBatis containers materialize top-level SQL clauses. Their
+        # indentation is owned by the statement, not by the final JOIN/SELECT
+        # continuation immediately preceding the tag.
+        return " " * base_query_indent
     if tag_name in ("when", "otherwise"):
         # Parent should be <choose>
         choose_el = None
@@ -199,7 +204,7 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
                         extra_indent_keywords = {
                             "FROM", "WHERE", "SELECT", "HAVING", "ON", "USING", "VALUES", "SET", 
                             "IN", "JOIN", "LEFT", "RIGHT", "INNER", "CROSS", "FULL", "WITH",
-                            "CASE", "THEN", "ELSE", "BEGIN", "EXCEPTION", "BY",
+                            "CASE", "THEN", "ELSE", "BEGIN", "EXCEPTION", "BY", "IS",
                             "(", "+", "-", "/", "||"
                         }
                         if last_char in extra_indent_keywords or last_word in extra_indent_keywords:
@@ -1014,19 +1019,30 @@ class XmlIndentRule(BaseRule):
                             )
                             continue
                         first_word = line_text.strip().split(None, 1)[0].upper()
-                        is_bind_body = line_text.strip().startswith(("#{", "${", ":"))
+                        is_bind_body = bool(re.match(
+                            r"^(?:#\{|\$\{)[^}]+\},?$",
+                            line_text.strip(),
+                        ))
                         is_logical_continuation = first_word in {"AND", "OR"}
                         open_parenthesis_depth = 0
+                        opening_tag_end = content.find(
+                            ">", dynamic_parent["token"]["start"]
+                        )
+                        dynamic_prefix_tokens = []
+                        if 0 <= opening_tag_end < text_line_start:
+                            dynamic_prefix_tokens = tokenize_sql(
+                                content[opening_tag_end + 1:text_line_start]
+                            )
+                            open_parenthesis_depth = sum(
+                                1 if item["value"] == "(" else -1
+                                for item in dynamic_prefix_tokens
+                                if item["type"] == "PAREN"
+                            )
                         has_local_logical_clause = False
                         local_logical_indent = None
                         if is_logical_continuation:
-                            opening_tag_end = content.find(
-                                ">", dynamic_parent["token"]["start"]
-                            )
                             if 0 <= opening_tag_end < text_line_start:
-                                prefix_tokens = tokenize_sql(
-                                    content[opening_tag_end + 1:text_line_start]
-                                )
+                                prefix_tokens = dynamic_prefix_tokens
                                 has_local_logical_clause = any(
                                     item["type"] == "KEYWORD"
                                     and item["value"].upper() in {"WHERE", "ON", "HAVING"}
@@ -1102,6 +1118,8 @@ class XmlIndentRule(BaseRule):
                             or (
                                 defer_sql_text
                                 and is_bind_body
+                                and dynamic_parent["tag"] == "foreach"
+                                and open_parenthesis_depth <= 0
                                 and actual_indent != minimum_indent
                             )
                             or malformed_dynamic_indent

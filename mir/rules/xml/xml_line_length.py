@@ -1,6 +1,22 @@
+import re
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.xml.xml_utils import tokenize_xml
+
+
+def _unbreakable_single_attribute_tag(line: str, max_length: int) -> bool:
+    """Return whether XML syntax cannot wrap the only attribute any shorter."""
+    match = re.match(
+        r'^(?P<indent>[ \t]*)<[A-Za-z_:][\w:.-]*\s+'
+        r'(?P<attribute>[A-Za-z_:][\w:.-]*="[^"]*")\s*/>\s*$',
+        line,
+    )
+    if match is None:
+        return False
+    shortest_attribute_line = (
+        len(match.group("indent")) + 4 + len(match.group("attribute"))
+    )
+    return shortest_attribute_line > max_length
 
 class XmlLineLengthRule(BaseRule):
     commit_profile = True
@@ -39,7 +55,10 @@ class XmlLineLengthRule(BaseRule):
         violations = []
         lines = content.splitlines()
         for idx, line in enumerate(lines, start=1):
-            if len(line) > max_length:
+            if (
+                len(line) > max_length
+                and not _unbreakable_single_attribute_tag(line, max_length)
+            ):
                 violations.append(Violation(
                     rule_id=self.rule_id,
                     line_number=idx,
@@ -121,6 +140,40 @@ class XmlLineLengthRule(BaseRule):
         if not any_violating and not has_inconsistent_foreach:
             return content
 
+        # Two individually compact dynamic tags can make their shared physical
+        # line overlong. Split the whitespace between sibling tags first; on
+        # the next pass each tag can remain in its readable inline form.
+        adjacent_tag_edits = []
+        ordered_elements = sorted(elements, key=lambda item: item["start_offset"])
+        for current, following in zip(ordered_elements, ordered_elements[1:]):
+            if (
+                current["tag"] not in {"foreach", "if", "when", "otherwise"}
+                or following["tag"] not in {"foreach", "if", "when", "otherwise"}
+                or current["end_offset"] > following["start_offset"]
+            ):
+                continue
+            current_line = content.count("\n", 0, current["start_offset"])
+            following_line = content.count("\n", 0, following["start_offset"])
+            if (
+                current_line != following_line
+                or current_line >= len(lines)
+                or len(lines[current_line]) <= max_length
+            ):
+                continue
+            gap = content[current["end_offset"]:following["start_offset"]]
+            if not gap or not gap.isspace() or "\n" in gap:
+                continue
+            line = lines[current_line]
+            indent = line[: len(line) - len(line.lstrip(" \t"))]
+            adjacent_tag_edits.append(
+                (current["end_offset"], following["start_offset"], "\n" + indent)
+            )
+        if adjacent_tag_edits:
+            chars = list(content)
+            for start, end, replacement in sorted(adjacent_tag_edits, reverse=True):
+                chars[start:end] = list(replacement)
+            return "".join(chars)
+
         block_edits = []
         for element in elements:
             if (
@@ -155,17 +208,43 @@ class XmlLineLengthRule(BaseRule):
                 continue
             line = lines[start_line]
             indent = line[: len(line) - len(line.lstrip(" \t"))]
+            line_start = content.rfind("\n", 0, element["start_offset"]) + 1
+            line_end = content.find("\n", element["end_offset"])
+            if line_end == -1:
+                line_end = len(content)
+            prefix = content[line_start:element["start_offset"]]
+            suffix = content[element["end_offset"]:line_end]
+            edit_start = element["start_offset"]
+            edit_end = element["end_offset"]
+            tag_indent = indent
+            leading = ""
+            trailing = ""
+            if prefix.strip():
+                gap_start = element["start_offset"]
+                while gap_start > line_start and content[gap_start - 1] in " \t":
+                    gap_start -= 1
+                edit_start = gap_start
+                tag_indent = indent + "    "
+                leading = "\n" + tag_indent
+            if suffix.strip():
+                gap_end = element["end_offset"]
+                while gap_end < line_end and content[gap_end] in " \t":
+                    gap_end += 1
+                edit_end = gap_end
+                trailing = "\n" + tag_indent
             replacement = (
-                opening.rstrip()
+                leading
+                + opening.rstrip()
                 + "\n"
-                + indent
+                + tag_indent
                 + "    "
                 + inner.strip()
                 + "\n"
-                + indent
+                + tag_indent
                 + closing.lstrip()
+                + trailing
             )
-            block_edits.append((element["start_offset"], element["end_offset"], replacement))
+            block_edits.append((edit_start, edit_end, replacement))
 
         if block_edits:
             chars = list(content)
@@ -274,8 +353,11 @@ class XmlLineLengthRule(BaseRule):
             formatted_b = "".join(option_b_parts)
             
             a_fits = True
-            for a_line in formatted_a.splitlines():
-                if len(a_line) > max_length:
+            for line_index, a_line in enumerate(formatted_a.splitlines()):
+                physical_length = len(a_line) + (
+                    len(indent) if line_index == 0 else 0
+                )
+                if physical_length > max_length:
                     a_fits = False
                     break
                     

@@ -227,6 +227,20 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertLessEqual(len(source), 120)
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
 
+    def test_additive_wrap_uses_first_operator_within_absolute_limit(self):
+        source = (
+            "                                    random() * total_count / "
+            "(1 / (upper_bound - lower_bound)) + lower_bound * total_count"
+        )
+        expected = source.replace(
+            " + lower_bound",
+            "\n                                        + lower_bound",
+        )
+        rule = AdditiveWrapRule()
+
+        self.assertTrue(rule.check(source, "generic.sql", {}))
+        self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
+
     def test_additive_wrap_uses_join_limit_after_multiline_target(self):
         source = (
             "                ) generated_time ON recorded_at BETWEEN generated_time "

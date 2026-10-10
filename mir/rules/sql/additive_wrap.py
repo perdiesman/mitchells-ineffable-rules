@@ -397,7 +397,19 @@ class AdditiveWrapRule(BaseRule):
                 )
                 eligible = [item for item in remaining if item[1]["start"] <= limit]
                 if not eligible:
-                    break
+                    # The first legal operator can fall just beyond the
+                    # preferred additive threshold while still producing a
+                    # first line within the absolute continuation limit. In
+                    # that case it is the only useful wrap point.
+                    next_candidate = remaining[0] if remaining else None
+                    if (
+                        next_candidate is None
+                        or line_max_length != max_length
+                        or next_candidate[1]["start"]
+                        > line_start + continuation_max_length
+                    ):
+                        break
+                    eligible = [next_candidate]
                 index, operator, _ = eligible[-1]
                 whitespace = (
                     tokens[index - 1]
