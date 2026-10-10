@@ -65,17 +65,33 @@ class TriggerLayoutRule(BaseRule):
                     
                 # Find the ending semicolon of this statement
                 semi_idx = None
+                boundary_idx = n
                 for idx in range(trigger_idx + 1, n):
                     # But stop if we see another CREATE/ALTER/DROP statement
                     if tokens[idx]["type"] == "KEYWORD" and tokens[idx]["value"].upper() in ("CREATE", "ALTER", "DROP"):
+                        boundary_idx = idx
                         break
                     if tokens[idx]["type"] == "SEMI":
                         semi_idx = idx
                         break
                         
                 if semi_idx is None:
-                    i = trigger_idx + 1
-                    continue
+                    # Legacy dumps sometimes omit terminators between trigger
+                    # declarations. A following top-level statement starter,
+                    # like EOF, is an unambiguous recovery boundary. Preserve
+                    # the missing terminator and format only the source tokens
+                    # that belong to this trigger.
+                    semi_idx = next(
+                        (
+                            idx
+                            for idx in range(boundary_idx - 1, trigger_idx, -1)
+                            if tokens[idx]["type"] not in ("WHITESPACE", "COMMENT")
+                        ),
+                        None,
+                    )
+                    if semi_idx is None:
+                        i = trigger_idx + 1
+                        continue
                     
                 stmt_tokens = tokens[i : semi_idx + 1]
                 active_tokens = [tok for tok in stmt_tokens if tok["type"] not in ("WHITESPACE", "COMMENT")]

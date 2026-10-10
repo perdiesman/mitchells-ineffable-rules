@@ -302,7 +302,20 @@ class LineLengthRule(BaseRule):
             if previous_index is None:
                 continue
             owner = list_tokens[previous_index]
-            if (
+            preceding_active = [
+                list_tokens[index]
+                for index in range(max(0, previous_index - 7), previous_index)
+                if list_tokens[index]["type"] not in ("WHITESPACE", "COMMENT")
+            ]
+            is_insert_target = (
+                owner["type"] in ("IDENTIFIER", "KEYWORD")
+                and any(
+                    item["type"] == "KEYWORD"
+                    and item["value"].upper() == "INTO"
+                    for item in preceding_active
+                )
+            )
+            if not is_insert_target and (
                 owner["type"] != "KEYWORD"
                 or owner["value"].upper() not in {"IN", "TABLE", "VALUES"}
             ):

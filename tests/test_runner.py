@@ -574,6 +574,55 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
 
+    def test_sql_line_length_expands_long_insert_column_list(self):
+        sql_content = (
+            "INSERT INTO sample_item_history (item_identifier, item_description, "
+            "item_validation_status, item_processing_timestamp, item_archive_location)\n"
+            "VALUES (1, 'description', 'ready', now(), 'archive');\n"
+        )
+        expected = (
+            "INSERT INTO sample_item_history (\n"
+            "    item_identifier,\n"
+            "    item_description,\n"
+            "    item_validation_status,\n"
+            "    item_processing_timestamp,\n"
+            "    item_archive_location\n"
+            ")\n"
+            "VALUES (1, 'description', 'ready', now(), 'archive');\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(config, first.content, "generic.sql", "sql")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_commit_profile_wraps_long_comment_on_literal_unchanged(self):
+        sql_content = (
+            "COMMENT ON COLUMN sample_item.extraordinarily_long_status_name IS "
+            "'Status assigned after the item has completed validation and review.';\n"
+        )
+        expected = (
+            "COMMENT ON COLUMN sample_item.extraordinarily_long_status_name\n"
+            "    IS 'Status assigned after the item has completed validation and review.';\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(config, first.content, "generic.sql", "sql")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_commit_profile_wraps_long_create_trigger(self):
         sql_content = (
             "CREATE TRIGGER update_sample_item_after_change AFTER INSERT OR UPDATE "
@@ -585,6 +634,59 @@ class TestRunnerIntegration(unittest.TestCase):
             "    AFTER INSERT OR UPDATE ON sample_item\n"
             "    FOR EACH ROW\n"
             "    EXECUTE FUNCTION update_sample_item_change_history();\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(config, first.content, "generic.sql", "sql")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_commit_profile_wraps_final_trigger_without_semicolon(self):
+        sql_content = (
+            "CREATE TRIGGER update_sample_item_after_change AFTER INSERT OR UPDATE "
+            "ON sample_item FOR EACH ROW EXECUTE FUNCTION "
+            "update_sample_item_change_history()\n"
+        )
+        expected = (
+            "CREATE TRIGGER update_sample_item_after_change\n"
+            "    AFTER INSERT OR UPDATE ON sample_item\n"
+            "    FOR EACH ROW\n"
+            "    EXECUTE FUNCTION update_sample_item_change_history()\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(config, first.content, "generic.sql", "sql")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_commit_profile_recovers_adjacent_unterminated_triggers(self):
+        sql_content = (
+            "CREATE TRIGGER delete_sample_item AFTER DELETE ON sample_item FOR "
+            "EACH STATEMENT EXECUTE FUNCTION refresh_all_sample_item_materialized_views()\n"
+            "CREATE TRIGGER insert_sample_item AFTER INSERT ON sample_item FOR "
+            "EACH STATEMENT EXECUTE FUNCTION refresh_all_sample_item_materialized_views()\n"
+        )
+        expected = (
+            "CREATE TRIGGER delete_sample_item\n"
+            "    AFTER DELETE ON sample_item\n"
+            "    FOR EACH STATEMENT\n"
+            "    EXECUTE FUNCTION refresh_all_sample_item_materialized_views()\n"
+            "CREATE TRIGGER insert_sample_item\n"
+            "    AFTER INSERT ON sample_item\n"
+            "    FOR EACH STATEMENT\n"
+            "    EXECUTE FUNCTION refresh_all_sample_item_materialized_views()\n"
         )
         config = Config()
         config.profile = "commit"
