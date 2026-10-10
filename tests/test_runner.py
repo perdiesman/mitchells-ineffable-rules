@@ -3186,6 +3186,66 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_update_from_relations_do_not_expand_single_set_assignment(self):
+        sql_content = (
+            "UPDATE sample_target AS target\n"
+            "SET target_value = source.source_value\n"
+            "FROM\n"
+            "    sample_source AS source,\n"
+            "    sample_scope AS scope\n"
+            "WHERE source.scope_id = scope.id AND target.id = source.target_id;\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+        expected = sql_content.replace(" AS source", " source").replace(
+            " AS scope", " scope"
+        )
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_long_select_with_addition_does_not_cycle_layout(self):
+        sql_content = (
+            "SELECT 2024, 101, 'North District', 'ND', 1000, 2000, "
+            "3000, 4000, 5000, 6000, 'PREFIX_' || 101 || '_ND'\n"
+            "FROM sample_inventory;\n"
+        )
+        expected = (
+            "SELECT\n"
+            "    2024,\n"
+            "    101,\n"
+            "    'North District',\n"
+            "    'ND',\n"
+            "    1000,\n"
+            "    2000,\n"
+            "    3000,\n"
+            "    4000,\n"
+            "    5000,\n"
+            "    6000,\n"
+            "    'PREFIX_' || 101\n"
+            "        || '_ND'\n"
+            "FROM sample_inventory;\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_dynamic_boundary_does_not_capture_following_where(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

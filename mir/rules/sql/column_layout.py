@@ -128,15 +128,36 @@ class ColumnLayoutRule(BaseRule):
         max_length: int,
         rule_config: Dict[str, Any],
     ) -> int:
-        if not any(re.search(r"\bCASE\b", expression, re.IGNORECASE) for expression in expressions):
-            return max_length
-        case_max_length = self.get_config_value(
-            rule_config,
-            "case_max_line_length",
-            default_value=110,
-            fallbacks=[(CaseWhenWrapRule, "max_line_length")],
+        expression_limit = max_length
+        if any(
+            re.search(r"\bCASE\b", expression, re.IGNORECASE)
+            for expression in expressions
+        ):
+            case_max_length = self.get_config_value(
+                rule_config,
+                "case_max_line_length",
+                default_value=110,
+                fallbacks=[(CaseWhenWrapRule, "max_line_length")],
+            )
+            expression_limit = min(expression_limit, case_max_length)
+
+        has_additive_expression = any(
+            token["type"] == "OPERATOR" and token["value"] in {"+", "||"}
+            for expression in expressions
+            if not re.search(r"\bCASE\b", expression, re.IGNORECASE)
+            for token in tokenize_sql(expression)
         )
-        return min(max_length, case_max_length)
+        if has_additive_expression:
+            from mir.rules.sql.additive_wrap import AdditiveWrapRule
+
+            additive_max_length = self.get_config_value(
+                rule_config,
+                "additive_max_line_length",
+                default_value=100,
+                fallbacks=[(AdditiveWrapRule, "max_line_length")],
+            )
+            expression_limit = min(expression_limit, additive_max_length)
+        return expression_limit
 
     def _parse_clauses(self, content: str) -> List[dict]:
         """

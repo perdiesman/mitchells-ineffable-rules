@@ -60,7 +60,8 @@ class SetMultiRule(BaseRule):
                     break
                 if (
                     candidate["type"] == "KEYWORD"
-                    and candidate["value"].upper() in {"WHERE", "RETURNING"}
+                    and candidate["value"].upper()
+                    in {"FROM", "WHERE", "RETURNING"}
                 ):
                     clause_end = index
                     break
