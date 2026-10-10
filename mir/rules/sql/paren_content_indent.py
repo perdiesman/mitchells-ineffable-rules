@@ -3,6 +3,45 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren, get_token_depths, is_values_multi
 from mir.rules.sql.table_function_indent import table_function_parens
 
+
+def is_insert_column_opening(tokens: List[dict], open_index: int) -> bool:
+    """Return whether ``(`` starts an INSERT target-column list."""
+    index = open_index - 1
+    saw_table_name = False
+    while index >= 0:
+        token = tokens[index]
+        if token["type"] in ("WHITESPACE", "COMMENT"):
+            index -= 1
+            continue
+        if token["type"] in ("IDENTIFIER", "DOT"):
+            saw_table_name = saw_table_name or token["type"] == "IDENTIFIER"
+            index -= 1
+            continue
+        return bool(
+            saw_table_name
+            and token["type"] == "KEYWORD"
+            and token["value"].upper() == "INTO"
+        )
+    return False
+
+
+def insert_column_lines(tokens: List[dict]) -> set[int]:
+    """Return source lines whose indentation is owned by an INSERT list."""
+    lines = set()
+    for index, token in enumerate(tokens):
+        if (
+            token["type"] != "PAREN"
+            or token["value"] != "("
+            or not is_insert_column_opening(tokens, index)
+        ):
+            continue
+        close_index = find_matching_paren(tokens, index)
+        if close_index is None:
+            continue
+        lines.update(range(token["line"] + 1, tokens[close_index]["line"] + 1))
+    return lines
+
+
 class ParenContentIndentRule(BaseRule):
     rule_id = "IR-paren-content-indent"
     description = "Content inside multi-line parentheses should be indented 4 spaces relative to the opening parenthesis, and the closing parenthesis should align with it."
@@ -109,7 +148,7 @@ class ParenContentIndentRule(BaseRule):
             if prev_tok:
                 val_up = prev_tok["value"].upper()
                 is_val_multi = (val_up == "VALUES" and is_values_multi(tokens, open_idx))
-                if not is_val_multi and (prev_tok["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST", "IN", "ANY", "SOME")):
+                if not is_val_multi and not is_insert_column_opening(tokens, open_idx) and (prev_tok["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST", "IN", "ANY", "SOME")):
                     is_func_like = True
 
             if inner[1] == "content":
@@ -125,6 +164,7 @@ class ParenContentIndentRule(BaseRule):
         
         # Check opening parenthesis position
         tokens = tokenize_sql(content)
+        exact_indent_lines = insert_column_lines(tokens)
         for i, tok in enumerate(tokens):
             if tok["type"] == "PAREN" and tok["value"] == "(":
                 prev_tok = None
@@ -188,7 +228,7 @@ class ParenContentIndentRule(BaseRule):
             actual_indent = line_text[:len(line_text) - len(line_text.lstrip())]
             
             is_close_line = line_text.lstrip().startswith(")")
-            if is_close_line:
+            if is_close_line or line_no in exact_indent_lines:
                 mismatch = actual_indent != expected_indent
             else:
                 mismatch = not actual_indent.startswith(expected_indent)
@@ -249,6 +289,7 @@ class ParenContentIndentRule(BaseRule):
             return content
             
         lines = content.splitlines()
+        exact_indent_lines = insert_column_lines(tokenize_sql(content))
         for line_no in range(1, len(lines) + 1):
             if line_no in expected_indents:
                 expected_indent = expected_indents[line_no]
@@ -256,7 +297,7 @@ class ParenContentIndentRule(BaseRule):
                 actual_indent = line_text[:len(line_text) - len(line_text.lstrip())]
                 
                 is_close_line = line_text.lstrip().startswith(")")
-                if is_close_line:
+                if is_close_line or line_no in exact_indent_lines:
                     mismatch = actual_indent != expected_indent
                 else:
                     mismatch = not actual_indent.startswith(expected_indent)

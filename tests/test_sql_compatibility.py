@@ -1021,6 +1021,29 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(ParenMultiRule().check(content, "generic.sql", {}), [])
         self.assertEqual(ParenSingleRule().check(content, "generic.sql", {}), [])
 
+    def test_insert_target_columns_align_with_insert_statement(self):
+        source = (
+            "        INSERT INTO sample.target_item (\n"
+            "                item_id,\n"
+            "                item_name\n"
+            "            )\n"
+            "            SELECT item_id, item_name FROM pending_item;"
+        )
+        expected = (
+            "        INSERT INTO sample.target_item(\n"
+            "            item_id,\n"
+            "            item_name\n"
+            "        )\n"
+            "            SELECT item_id, item_name FROM pending_item;"
+        )
+        rule = ParenContentIndentRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
+
     def test_multiline_lateral_and_exists_subqueries_are_indented(self):
         source = (
             "SELECT item.item_id\n"

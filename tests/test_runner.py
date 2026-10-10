@@ -2071,6 +2071,103 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
 
+    def test_xml_mybatis_formats_dynamic_window_ordering(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="items">\n'
+            '        INSERT INTO sample_item (\n'
+            '                item_id,\n'
+            '                row_number\n'
+            '            )\n'
+            '            SELECT\n'
+            '                item_id,\n'
+            '                row_number() OVER (ORDER BY\n'
+            '                <choose>\n'
+            '                    <when test="orderByName">item_name, item_id</when>\n'
+            '                    <when test="orderByAll">\n'
+            '                            item_name, item_state, item_region, item_count, recorded_at, item_id\n'
+            '                    </when>\n'
+            '                </choose>\n'
+            '                )\n'
+            '            FROM sample_item\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="items">\n'
+            '        INSERT INTO sample_item (\n'
+            '            item_id,\n'
+            '            row_number\n'
+            '        )\n'
+            '            SELECT\n'
+            '                item_id,\n'
+            '                row_number() OVER (\n'
+            '                    ORDER BY\n'
+            '                        <choose>\n'
+            '                            <when test="orderByName">item_name, item_id</when>\n'
+            '                            <when test="orderByAll">\n'
+            '                                item_name, item_state, item_region, item_count, recorded_at, item_id\n'
+            '                            </when>\n'
+            '                        </choose>\n'
+            '                )\n'
+            '            FROM sample_item\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_mybatis_include_semantics_do_not_starve_host_layout(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="sourceItems">\n'
+            '        SELECT item_id, null::int AS item_count\n'
+            '        FROM sample_item\n'
+            '        WHERE owner_id = #{ownerId}\n'
+            '    </sql>\n'
+            '    <insert id="copyItems">\n'
+            '        INSERT INTO copied_item (\n'
+            '                item_id\n'
+            '            )\n'
+            '            <include refid="sourceItems" />\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="sourceItems">\n'
+            '        SELECT item_id, null::INTEGER AS item_count\n'
+            '        FROM sample_item\n'
+            '        WHERE owner_id = #{ownerId}\n'
+            '    </sql>\n'
+            '    <insert id="copyItems">\n'
+            '        INSERT INTO copied_item (item_id)\n'
+            '        <include refid="sourceItems" />\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_case_continuation_inside_choose_converges(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

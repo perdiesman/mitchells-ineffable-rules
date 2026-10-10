@@ -1333,6 +1333,135 @@ def compact_dynamic_order_by_edits(
     return edits
 
 
+def dynamic_window_source_edits(
+    content: str,
+    source_range: tuple[int, int],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Format window ORDER BY clauses whose fields come from MyBatis tags."""
+    import re
+
+    from mir.rules.sql.line_length import LineLengthRule
+    from mir.rules.sql.sql_utils import get_token_depths, source_text_length, tokenize_sql
+
+    start, end = source_range
+    fragment = content[start:end]
+    lines = fragment.splitlines(keepends=True)
+    offsets = []
+    offset = start
+    for line in lines:
+        offsets.append(offset)
+        offset += len(line)
+    max_length = LineLengthRule().get_config_value(
+        rule_config,
+        "max_length",
+        default_value=120,
+    )
+    opening = re.compile(
+        r"\bOVER[ \t]*\((?P<inside>[ \t]*)ORDER[ \t]+BY"
+        r"(?P<after>[ \t]*\r?\n)(?P<choose_indent>[ \t]*)(?=<choose\b)",
+        re.IGNORECASE,
+    )
+    edits = []
+    for match in opening.finditer(fragment):
+        line_index = fragment.count("\n", 0, match.start())
+        line = lines[line_index].rstrip("\r\n")
+        base_indent = line[: len(line) - len(line.lstrip(" \t"))]
+        window_indent = base_indent + "    "
+        choose_indent = window_indent + "    "
+        when_indent = choose_indent + "    "
+        body_indent = when_indent + "    "
+
+        edits.append((
+            start + match.start("inside"),
+            start + match.end("inside"),
+            "\n" + window_indent,
+        ))
+        edits.append((
+            start + match.start("after"),
+            start + match.end("choose_indent"),
+            "\n" + choose_indent,
+        ))
+
+        choose_line = line_index + 1
+        depth = 0
+        in_multiline_when = False
+        close_line = None
+        for candidate_index in range(choose_line, len(lines)):
+            raw = lines[candidate_index].rstrip("\r\n")
+            body = raw.lstrip(" \t")
+            if not body:
+                continue
+            lower = body.lower()
+            expected = None
+            if lower.startswith("<choose"):
+                depth += 1
+                expected = choose_indent if depth == 1 else when_indent
+            elif lower.startswith("</choose"):
+                expected = choose_indent if depth == 1 else when_indent
+                depth -= 1
+                if depth == 0:
+                    close_line = candidate_index
+            elif depth == 1 and lower.startswith("<when"):
+                expected = when_indent
+                in_multiline_when = not lower.rstrip().endswith("</when>")
+            elif depth == 1 and lower.startswith("</when"):
+                expected = when_indent
+                in_multiline_when = False
+            elif depth == 1 and in_multiline_when and not body.startswith("<"):
+                expected = body_indent
+
+            if expected is not None:
+                line_start = offsets[candidate_index]
+                indent_end = line_start + len(raw) - len(body)
+                if content[line_start:indent_end] != expected:
+                    edits.append((line_start, indent_end, expected))
+
+            if (
+                depth == 1
+                and in_multiline_when
+                and not body.startswith("<")
+                and source_text_length(body_indent + body, rule_config) > max_length
+            ):
+                body_tokens = tokenize_sql(body)
+                body_depths = get_token_depths(body_tokens)
+                for token_index, token in enumerate(body_tokens):
+                    if token["type"] != "COMMA" or body_depths[token_index] != 0:
+                        continue
+                    next_index = token_index + 1
+                    while (
+                        next_index < len(body_tokens)
+                        and body_tokens[next_index]["type"] == "WHITESPACE"
+                    ):
+                        next_index += 1
+                    next_start = (
+                        body_tokens[next_index]["start"]
+                        if next_index < len(body_tokens)
+                        else token["end"]
+                    )
+                    source_body_start = offsets[candidate_index] + len(raw) - len(body)
+                    edits.append((
+                        source_body_start + token["end"],
+                        source_body_start + next_start,
+                        "\n" + body_indent,
+                    ))
+
+            if close_line is not None:
+                next_index = close_line + 1
+                while next_index < len(lines) and not lines[next_index].strip():
+                    next_index += 1
+                if next_index < len(lines):
+                    closing = lines[next_index].rstrip("\r\n")
+                    closing_body = closing.lstrip(" \t")
+                    if closing_body.startswith(")"):
+                        line_start = offsets[next_index]
+                        indent_end = line_start + len(closing) - len(closing_body)
+                        if content[line_start:indent_end] != base_indent:
+                            edits.append((line_start, indent_end, base_indent))
+                break
+    return edits
+
+
 def compact_static_order_by_edits(
     content: str,
     source_range: tuple[int, int],
@@ -1927,6 +2056,13 @@ class XmlMybatisSqlRule(BaseRule):
                     if bridge_state["mybatis_dynamic_indent_ranges"]
                     else ([], sql_text)
                 )
+                null_source_edits = [
+                    edit
+                    for edit in null_source_edits
+                    if el["start_offset"] <= edit[0] <= edit[1] <= el["end_offset"]
+                ]
+                if not null_source_edits:
+                    null_fixed_text = sql_text
                 paren_source_edits, paren_fixed_text = (
                     dynamic_paren_single_source_edits(
                         sql_text,
@@ -1939,6 +2075,13 @@ class XmlMybatisSqlRule(BaseRule):
                     )
                     else ([], sql_text)
                 )
+                paren_source_edits = [
+                    edit
+                    for edit in paren_source_edits
+                    if el["start_offset"] <= edit[0] <= edit[1] <= el["end_offset"]
+                ]
+                if not paren_source_edits:
+                    paren_fixed_text = sql_text
                 from mir.engine.embedded_bridge import fix_embedded_content
                 layout_edits = dynamic_column_layout_edits(
                     sql_text,
@@ -1995,6 +2138,27 @@ class XmlMybatisSqlRule(BaseRule):
                     inner_config,
                 )
                 layout_edits.extend(dynamic_order_edits)
+                dynamic_window_edits = dynamic_window_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                if dynamic_window_edits:
+                    layout_edits = [
+                        edit
+                        for edit in layout_edits
+                        if not any(
+                            max(edit[0], window_edit[0])
+                            < min(edit[1], window_edit[1])
+                            or (
+                                edit[0] == edit[1]
+                                and window_edit[0] <= edit[0] <= window_edit[1]
+                            )
+                            for window_edit in dynamic_window_edits
+                        )
+                    ]
+                    layout_edits.extend(dynamic_window_edits)
+                    applied_rules.add("IR-window-layout")
                 static_order_edits = compact_static_order_by_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
@@ -2035,6 +2199,7 @@ class XmlMybatisSqlRule(BaseRule):
                     post_choose_edits
                     + dynamic_body_edits
                     + subquery_source_edits
+                    + dynamic_window_edits
                 )
                 layout_edits = [
                     edit
@@ -2061,28 +2226,59 @@ class XmlMybatisSqlRule(BaseRule):
                         )
                     )
                 ]
+                excluded_guest_rule_ids = (
+                    {
+                        "IR-join-on-multi",
+                        "IR-null-coalesce",
+                        "IR-paren-single",
+                        "IR-subquery-indent",
+                    }
+                    if bridge_state["mybatis_dynamic_indent_ranges"]
+                    else set()
+                )
+                if any(
+                    source_offset < el["start_offset"]
+                    or source_offset > el["end_offset"]
+                    for source_offset in mapping
+                ):
+                    # Included SQL definitions are formatted in their own
+                    # element pass. Applying a semantic rewrite to their
+                    # expansion here cannot map inside the host statement and
+                    # would stop all later layout rules for that host.
+                    from mir.engine.rules_loader import load_rules_for_language
+
+                    excluded_guest_rule_ids.update(
+                        rule.rule_id
+                        for rule in load_rules_for_language("sql")
+                        if rule.commit_semantic_rewrite
+                    )
                 edits = fix_embedded_content(
                     guest_language="sql",
                     guest_text=sql_text,
                     mapping=mapping,
                     file_path=file_path,
                     rule_config=inner_config,
-                    excluded_rule_ids=(
-                        {
-                            "IR-join-on-multi",
-                            "IR-null-coalesce",
-                            "IR-paren-single",
-                            "IR-subquery-indent",
-                        }
-                        if bridge_state["mybatis_dynamic_indent_ranges"]
-                        else None
-                    ),
+                    excluded_rule_ids=excluded_guest_rule_ids or None,
                     require_embedded_safe=True,
                     extra_fix_args=bridge_state,
                 )
+                # Expanded <include> content maps back to its reusable <sql>
+                # definition, which is formatted as its own element. A host
+                # statement must never claim those out-of-range edits or let
+                # them discard layout changes that belong to the host.
+                edits = [
+                    edit
+                    for edit in edits
+                    if el["start_offset"] <= edit[0] <= edit[1] <= el["end_offset"]
+                ]
                 edits = [
                     edit for edit in edits
                     if not overlaps_protected_source_indent(edit)
+                ]
+                layout_edits = [
+                    edit
+                    for edit in layout_edits
+                    if el["start_offset"] <= edit[0] <= edit[1] <= el["end_offset"]
                 ]
                 edits = layout_edits + edits
                 if null_source_edits:
