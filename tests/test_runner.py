@@ -15,6 +15,7 @@ from mir.rules.xml.xml_mybatis_sql import (
     join_case_source_edits,
     physical_case_indent_source_edits,
 )
+from mir.rules.xml.xml_line_length import XmlLineLengthRule
 
 class TestRunnerIntegration(unittest.TestCase):
     def setUp(self):
@@ -245,6 +246,39 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
+
+    def test_xml_line_length_wraps_dollar_quoted_sql_at_clause_whitespace(self):
+        content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT *\n'
+            '        FROM crosstab(\n'
+            '            $$\n'
+            '            FROM (SELECT extraordinarily_long_error_type AS error_type FROM generic_error_type generic_error_type) AS error_types\n'
+            '            WHERE generic_error.recorded_timestamp &gt;= CAST(#{intervalStart} AS TIMESTAMP) AND generic_error.recorded_timestamp &lt;= CAST(#{intervalEnd} AS TIMESTAMP)\n'
+            '            $$\n'
+            '        ) result\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = content.replace(
+            '            FROM (SELECT extraordinarily_long_error_type AS error_type FROM generic_error_type generic_error_type) AS error_types',
+            '            FROM (SELECT extraordinarily_long_error_type AS error_type\n'
+            '                FROM generic_error_type generic_error_type) AS error_types',
+        ).replace(
+            '            WHERE generic_error.recorded_timestamp &gt;= CAST(#{intervalStart} AS TIMESTAMP) AND generic_error.recorded_timestamp &lt;= CAST(#{intervalEnd} AS TIMESTAMP)',
+            '            WHERE generic_error.recorded_timestamp &gt;= CAST(#{intervalStart} AS TIMESTAMP)\n'
+            '                AND generic_error.recorded_timestamp &lt;= CAST(#{intervalEnd} AS TIMESTAMP)',
+        )
+        rule = XmlLineLengthRule()
+        config = {"max_length": 120}
+
+        first = rule.fix(content, "generic.xml", config)
+        second = rule.fix(first, "generic.xml", config)
+
+        self.assertEqual(first, expected)
+        self.assertEqual(second, expected)
+        self.assertFalse(rule.check(first, "generic.xml", config))
 
     def test_xml_mybatis_where_container_aligns_after_join_conditions(self):
         xml_content = (

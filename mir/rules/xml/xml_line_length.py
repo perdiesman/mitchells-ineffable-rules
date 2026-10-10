@@ -19,13 +19,60 @@ def _unbreakable_single_attribute_tag(line: str, max_length: int) -> bool:
     )
     return shortest_attribute_line > max_length
 
+
+def _wrap_dollar_quoted_sql_lines(content: str, max_length: int) -> str:
+    """Wrap SQL text inside dollar quotes without rewriting its syntax."""
+    delimiter_pattern = re.compile(r"\$\$|\$[A-Za-z_][A-Za-z0-9_]*\$")
+    break_pattern = re.compile(
+        r"\s+(?=(?:FROM|WHERE|AND|OR|JOIN|GROUP\s+BY|ORDER\s+BY)\b)",
+        re.IGNORECASE,
+    )
+    active_delimiter = None
+    fixed_lines = []
+    changed = False
+
+    for line in content.splitlines(keepends=True):
+        line_body = line.rstrip("\r\n")
+        ending = line[len(line_body):]
+        delimiters = list(delimiter_pattern.finditer(line_body))
+        inside_at_start = active_delimiter is not None
+
+        if inside_at_start and not delimiters and len(line_body) > max_length:
+            indent = line_body[: len(line_body) - len(line_body.lstrip(" \t"))]
+            stripped = line_body[len(indent):]
+            continuation_indent = indent + "    "
+            candidates = []
+            for match in break_pattern.finditer(stripped):
+                first = indent + stripped[:match.start()].rstrip()
+                second = continuation_indent + stripped[match.end():].lstrip()
+                if len(first) <= max_length and len(second) <= max_length:
+                    candidates.append((max(len(first), len(second)), first, second))
+            if candidates:
+                _, first, second = min(candidates, key=lambda item: item[0])
+                fixed_lines.append(first + "\n" + second + ending)
+                changed = True
+            else:
+                fixed_lines.append(line)
+        else:
+            fixed_lines.append(line)
+
+        for match in delimiters:
+            delimiter = match.group(0)
+            if active_delimiter is None:
+                active_delimiter = delimiter
+            elif delimiter == active_delimiter:
+                active_delimiter = None
+
+    return "".join(fixed_lines) if changed else content
+
 class XmlLineLengthRule(BaseRule):
     commit_profile = True
     rule_id = "IR-xml-line-length"
     description = (
         "XML lines must not exceed the configured maximum length, and repeated "
         "MyBatis foreach forms use the same expanded layout; overlong inline "
-        "dynamic SQL blocks expand without changing their expressions."
+        "dynamic SQL blocks expand without changing their expressions. SQL "
+        "inside dollar quotes wraps only at existing clause whitespace."
     )
     category = "general"
     is_fixable = "yes"
@@ -140,6 +187,10 @@ class XmlLineLengthRule(BaseRule):
         )
         if not any_violating and not has_inconsistent_foreach:
             return content
+
+        dollar_quoted_fixed = _wrap_dollar_quoted_sql_lines(content, max_length)
+        if dollar_quoted_fixed != content:
+            return dollar_quoted_fixed
 
         comment_edits = []
         for comment in re.finditer(r"<!--(?P<body>.*?)-->", content, re.DOTALL):
