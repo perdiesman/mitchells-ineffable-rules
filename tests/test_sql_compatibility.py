@@ -698,6 +698,28 @@ class TestSqlCompatibility(unittest.TestCase):
             expected,
         )
 
+    def test_long_overlaps_row_wraps_before_nested_calls(self):
+        source = (
+            "    AND (valid_from, valid_to) OVERLAPS "
+            "(timezone('utc', :interval_start), "
+            "timezone('utc', :interval_end_with_a_long_name))"
+        )
+        expected = (
+            "    AND (valid_from, valid_to) OVERLAPS (\n"
+            "        timezone('utc', :interval_start),\n"
+            "        timezone('utc', :interval_end_with_a_long_name)\n"
+            "    )"
+        )
+        rule = ParenthesizedExpressionWrapRule()
+
+        fixed = rule.fix(source, "generic.sql", {"max_line_length": 100})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(
+            rule.fix(fixed, "generic.sql", {"max_line_length": 100}),
+            expected,
+        )
+
     def test_short_where_compacts_independently_of_the_previous_from_line(self):
         source = (
             "FROM outage_data.materialized_zip_additional_information\n"

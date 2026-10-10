@@ -193,10 +193,52 @@ class ParenthesizedExpressionWrapRule(BaseRule):
                 continue
             line = lines[line_index]
             first_on_line = first_active_by_line.get(token["line"])
-            if first_on_line != open_index:
-                continue
             close_index = find_matching_paren(tokens, open_index)
             if close_index is None:
+                continue
+
+            previous_active_index = next(
+                (
+                    index
+                    for index in range(open_index - 1, -1, -1)
+                    if tokens[index]["type"] not in {"WHITESPACE", "COMMENT"}
+                ),
+                None,
+            )
+            overlaps_group = bool(
+                previous_active_index is not None
+                and tokens[previous_active_index]["type"] == "KEYWORD"
+                and tokens[previous_active_index]["value"].upper() == "OVERLAPS"
+            )
+            overlaps_commas = direct_commas(open_index, close_index)
+            if overlaps_group and overlaps_commas:
+                line_start = content.rfind("\n", 0, token["start"]) + 1
+                line_end = content.find("\n", tokens[close_index]["end"])
+                if line_end == -1:
+                    line_end = len(content)
+                source_line = content[line_start:line_end]
+                if (
+                    tokens[close_index]["line"] != token["line"]
+                    or source_text_length(source_line, rule_config) > max_length
+                ):
+                    prefix = content[line_start:token["start"]]
+                    base_indent = prefix[
+                        : len(prefix) - len(prefix.lstrip(" \t"))
+                    ]
+                    item_indent = base_indent + "    "
+                    add_whitespace_edit(
+                        open_index, "\n" + item_indent, before=False
+                    )
+                    for comma_index in overlaps_commas:
+                        add_whitespace_edit(
+                            comma_index, "\n" + item_indent, before=False
+                        )
+                    add_whitespace_edit(
+                        close_index, "\n" + base_indent, before=True
+                    )
+                continue
+
+            if first_on_line != open_index:
                 continue
 
             if find_boolean_operator_indices(
