@@ -125,6 +125,25 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
                     ):
                         return candidate[: len(candidate) - len(candidate.lstrip(" \t"))]
 
+    if tag_name == "include":
+        for k in range(t["line"] - 2, query_line - 1, -1):
+            previous = lines[k]
+            if not previous.strip():
+                continue
+            if re.search(
+                r"\b(?:(?:(?:LEFT|RIGHT|FULL)(?:\s+OUTER)?|INNER|CROSS)\s+)?"
+                r"(?:JOIN|FROM)\s*\(\s*$",
+                previous,
+                re.IGNORECASE,
+            ):
+                previous_indent = previous[
+                    : len(previous) - len(previous.lstrip(" \t"))
+                ]
+                # A relation's closing parenthesis is one continuation level
+                # beyond JOIN/FROM; its included query is one level deeper.
+                return previous_indent + " " * (indent_size * 2)
+            break
+
     # Look at preceding lines within the query block
     curr_line = t["line"]
     target_indent = None
@@ -473,6 +492,37 @@ class XmlIndentRule(BaseRule):
                         "message": "Dynamic DISTINCT ON keys should use multiline column layout.",
                         "structural": True,
                     })
+        include_relation = re.compile(
+            r"(?im)^([ \t]*)((?:(?:LEFT|RIGHT|FULL)(?:[ \t]+OUTER)?|INNER|CROSS)?"
+            r"[ \t]*JOIN|FROM)[ \t]*\([ \t]*(<include\b[^>]+/>)[ \t]*\)"
+            r"[ \t]*(\S[^\r\n]*)$"
+        )
+        for match in include_relation.finditer(content):
+            if not any(start < match.start() < end for start, end in query_ranges):
+                continue
+            indent = match.group(1)
+            expected = (
+                indent
+                + match.group(2).strip()
+                + " (\n"
+                + indent
+                + " " * (indent_size * 2)
+                + match.group(3)
+                + "\n"
+                + indent
+                + " " * indent_size
+                + ") "
+                + match.group(4)
+            )
+            if match.group(0) != expected:
+                violations.append({
+                    "line": content.count("\n", 0, match.start()) + 1,
+                    "start_offset": match.start(),
+                    "end_offset": match.end(),
+                    "replacement": expected,
+                    "message": "A reusable SQL relation should use derived-table indentation.",
+                    "structural": True,
+                })
         for token_index, token in enumerate(tokens):
             if token["type"] != "TAG_OPEN_START" or token["value"][1:].lower() != "include":
                 continue

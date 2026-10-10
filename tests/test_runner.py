@@ -1107,6 +1107,36 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
 
+    def test_xml_indent_expands_derived_table_include(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item.item_id\n'
+            '        FROM\n'
+            '            sample_item item\n'
+            '            LEFT JOIN (<include refid="OwnerTotals" />            ) owner '\
+            'ON owner.item_id = item.item_id\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '            LEFT JOIN (<include refid="OwnerTotals" />            ) owner '\
+            'ON owner.item_id = item.item_id',
+            '            LEFT JOIN (\n'
+            '                    <include refid="OwnerTotals" />\n'
+            '                ) owner ON owner.item_id = item.item_id',
+        )
+        config = Config()
+        config.fix = True
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-indent"]
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+
     def test_xml_mybatis_commit_profile_applies_declared_boolean_rewrites(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
