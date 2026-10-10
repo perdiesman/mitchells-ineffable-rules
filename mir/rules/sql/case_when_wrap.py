@@ -1,6 +1,7 @@
 from typing import Any, Dict, List
 
 from mir.engine.rule_interface import BaseRule, Violation
+from mir.rules.sql.line_length import LineLengthRule
 from mir.rules.sql.sql_utils import (
     find_boolean_operator_indices,
     get_token_depths,
@@ -21,11 +22,12 @@ class CaseWhenWrapRule(BaseRule):
     is_fixable = "yes"
     enabled_by_default = True
 
-    default_config = {"max_line_length": 110}
+    default_config = {"max_line_length": 120}
     config_options = {
         "max_line_length": {
-            "default": 110,
+            "default": 120,
             "description": "Line length threshold for wrapping a WHEN/THEN arm.",
+            "fallback": "IR-line-length:max_length",
         }
     }
 
@@ -58,7 +60,8 @@ class CaseWhenWrapRule(BaseRule):
         max_length = self.get_config_value(
             rule_config,
             "max_line_length",
-            default_value=110,
+            default_value=120,
+            fallbacks=[(LineLengthRule, "max_length")],
         )
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)

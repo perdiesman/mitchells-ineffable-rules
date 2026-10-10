@@ -661,19 +661,25 @@ def dynamic_sql_indent_source_edits(
         guest_end = item["ws_end"]
         original_whitespace = sql_text[guest_start:guest_end]
         replacement = item["replacement"]
-        if not original_whitespace.isspace() or (
+        if (original_whitespace and not original_whitespace.isspace()) or (
             replacement and not replacement.isspace()
         ):
             continue
-        if guest_start >= guest_end or guest_end > len(mapping):
+        if guest_start > guest_end or guest_end > len(mapping):
             continue
         if any(
             mapping[index] - mapping[index - 1] != 1
             for index in range(guest_start + 1, guest_end)
         ):
             continue
-        source_start = mapping[guest_start]
-        source_end = mapping[guest_end - 1] + 1
+        if guest_start == guest_end:
+            if guest_start >= len(mapping):
+                continue
+            source_start = mapping[guest_start]
+            source_end = source_start
+        else:
+            source_start = mapping[guest_start]
+            source_end = mapping[guest_end - 1] + 1
         if any(
             max(source_start, tag_start) < min(source_end, tag_end)
             for tag_start, tag_end in tag_ranges

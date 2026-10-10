@@ -74,7 +74,7 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
         self.assertEqual(rule.check(source, "generic.sql", {}), [])
 
-    def test_column_layout_uses_case_limit_for_compaction(self):
+    def test_column_layout_uses_full_line_limit_for_case_compaction(self):
         source = (
             "            SELECT\n"
             "                item_id,\n"
@@ -82,10 +82,16 @@ class TestSqlCompatibility(unittest.TestCase):
             "                CASE WHEN run_count = 1 THEN 1 ELSE run_count + 1 END AS required_count\n"
             "            FROM sample_item"
         )
+        expected = (
+            "            SELECT item_id, slot_number, "
+            "CASE WHEN run_count = 1 THEN 1 ELSE run_count + 1 END AS required_count\n"
+            "            FROM sample_item"
+        )
         rule = ColumnLayoutRule()
 
-        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
-        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+        fixed = rule.fix(source, "generic.sql", {})
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
 
     def test_plpgsql_message_level_can_be_a_sql_identifier(self):
         source = "WITH info AS (SELECT item_id FROM sample_item) SELECT * FROM info;"
@@ -186,6 +192,20 @@ class TestSqlCompatibility(unittest.TestCase):
         rule = AdditiveWrapRule()
 
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+
+    def test_case_after_additive_operator_stays_on_expression_line(self):
+        from mir.rules.sql.case_layout import CaseLayoutRule
+
+        source = (
+            "    base_count_with_descriptive_name + CASE\n"
+            "        WHEN include_additional_count THEN additional_count_with_descriptive_name\n"
+            "        ELSE 0\n"
+            "    END"
+        )
+        rule = CaseLayoutRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
 
     def test_nullable_equality_accepts_reversed_equality_operands(self):
         source = (
@@ -764,14 +784,24 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(CaseWhenWrapRule().fix(source, "generic.sql", {}), source)
 
+    def test_case_arm_uses_the_full_configured_line_length(self):
+        source = (
+            "                                WHEN event.recorded_at = "
+            "timezone('utc', :interval_start_time) THEN 'current_event'"
+        )
+        self.assertGreater(len(source), 110)
+        self.assertLessEqual(len(source), 120)
+
+        self.assertEqual(CaseWhenWrapRule().fix(source, "generic.sql", {}), source)
+
     def test_long_case_condition_aligns_root_boolean_and_then(self):
         source = (
             "                WHEN TRUE = ANY(SELECT unnest(collected_counts) IS NULL) "
             "AND array_length(collected_counts, 1) > 1 THEN 'mixed'"
         )
         expected = (
-            "                WHEN TRUE = ANY(SELECT unnest(collected_counts) IS NULL)\n"
-            "                    AND array_length(collected_counts, 1) > 1\n"
+            "                WHEN TRUE = ANY(SELECT unnest(collected_counts) IS NULL) "
+            "AND array_length(collected_counts, 1) > 1\n"
             "                    THEN 'mixed'"
         )
 
@@ -782,10 +812,7 @@ class TestSqlCompatibility(unittest.TestCase):
             "                    WHEN u.active AND coalesce(su.active, true) "
             "THEN coalesce(ucc.collected_count, ucc.model_count, 0)"
         )
-        expected = (
-            "                    WHEN u.active AND coalesce(su.active, true)\n"
-            "                        THEN coalesce(ucc.collected_count, ucc.model_count, 0)"
-        )
+        expected = source
 
         self.assertEqual(CaseWhenWrapRule().fix(source, "generic.sql", {}), expected)
 

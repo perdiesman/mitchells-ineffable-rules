@@ -10,7 +10,7 @@ Keep WHEN and THEN on one line when they fit; otherwise put THEN on an indented 
 - **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
-  - `max_line_length` (Default: `110`): Line length threshold for wrapping a WHEN/THEN arm.
+  - `max_line_length` (Default: `120`): Line length threshold for wrapping a WHEN/THEN arm. *Note: Value dynamically inherited from rule [`IR-line-length`](../general/IR-line-length.md) -> `max_length` if not configured.*
 
 #### ❌ Violating Example
 ```sql

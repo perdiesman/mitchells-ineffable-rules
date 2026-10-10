@@ -2456,6 +2456,32 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_multiline_update_starts_set_on_its_own_line(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <update id="copyValue">\n'
+            '        UPDATE sample_item item SET\n'
+            '            item_value = source.item_value\n'
+            '        FROM sample_source source\n'
+            '        WHERE source.item_id = item.item_id AND item.item_value != source.item_value;\n'
+            '    </update>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '        UPDATE sample_item item SET\n            item_value',
+            '        UPDATE sample_item item\n        SET item_value',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_dynamic_boundary_does_not_capture_following_where(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
@@ -3047,6 +3073,23 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(branch_second.content, branch_first.content)
         self.assertFalse(branch_first.diagnostics)
 
+        optional_suffix = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="orderedItems">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        ORDER BY item_name <if test="thenDate">, recorded_at</if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        suffix_result = process_document(
+            config, optional_suffix, "generic.xml", "xml"
+        )
+        self.assertIn(
+            'ORDER BY item_name <if test="thenDate">',
+            suffix_result.content,
+        )
+
     def test_xml_mybatis_preserves_inline_dynamic_single_from(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
@@ -3130,6 +3173,37 @@ class TestRunnerIntegration(unittest.TestCase):
         second = process_document(config, first.content, "generic.xml", "xml")
 
         self.assertIn(join_line, first.content)
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_expands_parenthesized_join_condition(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item.item_id\n'
+            '        <if test="named">, item.item_name</if>\n'
+            '        FROM\n'
+            '            sample_item item\n'
+            '            JOIN sample_count count ON count.item_id = item.item_id\n'
+            '                AND (NOT #{byGroup}\n'
+            '                    OR count.group_id = item.group_id)\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected_group = (
+            '                AND (\n'
+            '                    NOT #{byGroup}\n'
+            '                    OR count.group_id = item.group_id\n'
+            '                )\n'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertIn(expected_group, first.content)
         self.assertEqual(second.content, first.content)
         self.assertFalse(first.diagnostics)
 

@@ -5,7 +5,7 @@ Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Data Modification Rules
-- **Commit Profile**: No
+- **Commit Profile**: Yes
 - **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:

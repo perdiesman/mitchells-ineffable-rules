@@ -212,6 +212,17 @@ def is_fixed_text_xml_safe(
         if range_index >= len(sorted_ranges):
             continue
         tag_start, tag_end = sorted_ranges[range_index]
+        if (
+            end == tag_start
+            and start < end
+            and original_xml[start:end].isspace()
+            and replacement == ""
+        ):
+            # Whitespace immediately before an inline dynamic tag separates
+            # the surrounding SQL token from optional SQL emitted by that
+            # tag. Removing it produces hard-to-read forms such as
+            # ``column<if ...>`` and can merge tokens for other directives.
+            return False
         if start == end:
             # An insertion at a tag's opening boundary is ambiguous: synthetic
             # MyBatis SQL (for example a <where> prefix) maps there and must

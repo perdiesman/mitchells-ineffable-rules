@@ -1,3 +1,4 @@
+import re
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.case_when_wrap import CaseWhenWrapRule
@@ -180,8 +181,11 @@ class CaseLayoutRule(BaseRule):
                     
             prefix_body = line_prefix.strip()
             is_additive_continuation = prefix_body in {"+", "-", "*", "/", "||"}
+            follows_inline_operator = bool(
+                re.search(r"(?:\+|-|\*|/|\|\|)\s*$", prefix_body)
+            )
             is_inline = prefix_body != "" and not is_additive_continuation
-            if is_inline:
+            if is_inline and not follows_inline_operator:
                 case_indent = select_indent + "    "
             else:
                 case_indent = select_indent
@@ -205,7 +209,7 @@ class CaseLayoutRule(BaseRule):
             needs_fix = False
             rebuilt_parts = []
             
-            if is_inline:
+            if is_inline and not follows_inline_operator:
                 rebuilt_parts.append("\n" + case_indent + "CASE")
                 needs_fix = True
             else:
@@ -238,7 +242,6 @@ class CaseLayoutRule(BaseRule):
                         
                         # Split condition tokens on boolean AND/OR at depth 0;
                         # BETWEEN's delimiter AND belongs to the same condition.
-                        import re
                         cond_parts = []
                         current_part = []
                         cond_depths = get_token_depths(cond_tokens)
