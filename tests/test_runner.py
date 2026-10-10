@@ -1738,6 +1738,106 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_shared_clauses_do_not_inherit_choose_branch_indent(self):
+        self.maxDiff = None
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM (\n'
+            '            <choose>\n'
+            '                <when test="archived">\n'
+            '                    SELECT item_id, owner_id\n'
+            '                    FROM archived_item\n'
+            '                </when>\n'
+            '                <otherwise>\n'
+            '                    SELECT item_id, owner_id\n'
+            '                    FROM current_item\n'
+            '                </otherwise>\n'
+            '            </choose>\n'
+            '                    JOIN sample_owner owner ON owner.owner_id = item_id\n'
+            '                    LEFT JOIN sample_group item_group ON item_group.owner_id = owner.owner_id\n'
+            '                        AND item_group.enabled\n'
+            '                WHERE owner.enabled\n'
+            '                GROUP BY item_id\n'
+            '        ) items\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '                    JOIN sample_owner',
+            '                JOIN sample_owner',
+        ).replace(
+            '                    LEFT JOIN sample_group',
+            '                LEFT JOIN sample_group',
+        ).replace(
+            '                        AND item_group.enabled',
+            '                    AND item_group.enabled',
+        ).replace(
+            '                WHERE owner.enabled',
+            '            WHERE owner.enabled',
+        ).replace(
+            '                GROUP BY item_id',
+            '            GROUP BY item_id',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.disable_all = True
+        config.rules_to_enable = [
+            "IR-xml-mybatis-sql",
+            "IR-from-multi",
+            "IR-join-on-multi",
+            "IR-clause-alignment",
+        ]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_shared_from_choice_aligns_following_clauses(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM\n'
+            '            <choose>\n'
+            '                <when test="archived">archived_item item</when>\n'
+            '                <otherwise>current_item item</otherwise>\n'
+            '            </choose>\n'
+            '                JOIN sample_owner owner ON owner.owner_id = item.owner_id\n'
+            '            WHERE owner.enabled\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '                JOIN sample_owner',
+            '            JOIN sample_owner',
+        ).replace(
+            '            WHERE owner.enabled',
+            '        WHERE owner.enabled',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.disable_all = True
+        config.rules_to_enable = [
+            "IR-xml-mybatis-sql",
+            "IR-from-multi",
+            "IR-join-on-multi",
+            "IR-clause-alignment",
+        ]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_repeated_foreach_uses_expanded_layout_consistently(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

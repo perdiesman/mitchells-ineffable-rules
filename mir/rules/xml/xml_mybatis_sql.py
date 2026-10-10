@@ -771,6 +771,101 @@ def dynamic_subquery_source_edits(
     return edits
 
 
+def post_choose_clause_source_edits(
+    content: str,
+    source_range: tuple[int, int],
+) -> List[tuple[int, int, str]]:
+    """Anchor shared JOIN and clause lines after mutually exclusive sources."""
+    import re
+
+    start, end = source_range
+    fragment = content[start:end]
+    lines = fragment.splitlines(keepends=True)
+    offsets = []
+    offset = start
+    for line in lines:
+        offsets.append(offset)
+        offset += len(line)
+
+    join_pattern = re.compile(
+        r"^(?:(?:LEFT|RIGHT|FULL|INNER|OUTER|CROSS|NATURAL)\s+)?JOIN\b",
+        re.IGNORECASE,
+    )
+    clause_pattern = re.compile(
+        r"^(?:WHERE|GROUP\s+BY|ORDER\s+BY|HAVING)\b",
+        re.IGNORECASE,
+    )
+    edits: List[tuple[int, int, str]] = []
+    for index, raw_line in enumerate(lines):
+        line = raw_line.rstrip("\r\n")
+        close_match = re.match(r"^([ \t]*)</choose>[ \t]*$", line)
+        if close_match is None:
+            continue
+        base_indent = close_match.group(1)
+        nesting = 1
+        open_index = index - 1
+        while open_index >= 0:
+            body = lines[open_index].strip().lower()
+            if body.startswith("</choose"):
+                nesting += 1
+            elif body.startswith("<choose"):
+                nesting -= 1
+                if nesting == 0:
+                    break
+            open_index -= 1
+        previous_index = open_index - 1
+        while previous_index >= 0 and not lines[previous_index].strip():
+            previous_index -= 1
+        follows_shared_from = bool(
+            previous_index >= 0
+            and re.match(
+                r"^FROM[ \t]*$",
+                lines[previous_index].strip(),
+                re.IGNORECASE,
+            )
+        )
+        join_indent = (
+            base_indent if follows_shared_from else base_indent + "    "
+        )
+        clause_indent = (
+            base_indent[:-4]
+            if follows_shared_from and base_indent.endswith("    ")
+            else base_indent
+        )
+        candidate_index = index + 1
+        while candidate_index < len(lines) and not lines[candidate_index].strip():
+            candidate_index += 1
+        if candidate_index >= len(lines):
+            continue
+        if not join_pattern.match(lines[candidate_index].lstrip(" \t")):
+            continue
+
+        in_join = True
+        for line_index in range(candidate_index, len(lines)):
+            candidate = lines[line_index].rstrip("\r\n")
+            body = candidate.lstrip(" \t")
+            if not body:
+                continue
+            if body.startswith("<") or body.startswith(")"):
+                break
+            if join_pattern.match(body):
+                expected = join_indent
+                in_join = True
+            elif clause_pattern.match(body):
+                expected = clause_indent
+                in_join = False
+            elif in_join and re.match(r"^(?:AND|OR)\b", body, re.IGNORECASE):
+                expected = join_indent + "    "
+            elif not in_join and re.match(r"^(?:AND|OR)\b", body, re.IGNORECASE):
+                expected = clause_indent + "    "
+            else:
+                break
+            line_start = offsets[line_index]
+            indent_end = line_start + len(candidate) - len(body)
+            edits.append((line_start, indent_end, expected))
+    return edits
+
+
 def resolve_source_edits(
     edits: List[tuple[int, int, str]],
 ) -> List[tuple[int, int, str]]:
@@ -1133,6 +1228,28 @@ class XmlMybatisSqlRule(BaseRule):
                         ),
                         "is_fixable": True,
                     })
+                post_choose_edits = post_choose_clause_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                )
+                changed_post_choose_edits = [
+                    edit
+                    for edit in post_choose_edits
+                    if content[edit[0]:edit[1]] != edit[2]
+                ]
+                if changed_post_choose_edits:
+                    first_start = min(
+                        start for start, _, _ in changed_post_choose_edits
+                    )
+                    violations.append({
+                        "rule_id": self.rule_id,
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "Shared JOIN and clause lines after <choose> must "
+                            "align with their enclosing query."
+                        ),
+                        "is_fixable": True,
+                    })
                 order_edits = compact_dynamic_order_by_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
@@ -1336,6 +1453,11 @@ class XmlMybatisSqlRule(BaseRule):
                     content,
                     inner_config,
                 )
+                post_choose_edits = post_choose_clause_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                )
+                layout_edits = post_choose_edits + layout_edits
                 join_config = dict(inner_config)
                 join_config.update(bridge_state)
                 layout_edits.extend(
@@ -1375,6 +1497,30 @@ class XmlMybatisSqlRule(BaseRule):
                         tag_ranges,
                     )
                 )
+                protected_post_choose_spans = [
+                    (start, end) for start, end, _ in post_choose_edits
+                ]
+
+                def overlaps_post_choose_indent(edit) -> bool:
+                    edit_start, edit_end, _ = edit
+                    return any(
+                        max(edit_start, span_start) < min(edit_end, span_end)
+                        or (
+                            edit_start == edit_end
+                            and span_start <= edit_start <= span_end
+                        )
+                        for span_start, span_end in protected_post_choose_spans
+                    )
+
+                post_choose_edit_set = set(post_choose_edits)
+                layout_edits = [
+                    edit
+                    for edit in layout_edits
+                    if (
+                        edit in post_choose_edit_set
+                        or not overlaps_post_choose_indent(edit)
+                    )
+                ]
                 # Direct layout helpers are authorized to move only
                 # whitespace, except for exact structural compaction that
                 # preserves the complete SQL and XML token sequence.
@@ -1406,6 +1552,10 @@ class XmlMybatisSqlRule(BaseRule):
                     require_embedded_safe=True,
                     extra_fix_args=bridge_state,
                 )
+                edits = [
+                    edit for edit in edits
+                    if not overlaps_post_choose_indent(edit)
+                ]
                 edits = layout_edits + edits
                 statement_key = (el["tag"], el["attrs"]["id"])
                 original_signature_map[statement_key] = bridge_state[
