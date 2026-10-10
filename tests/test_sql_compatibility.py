@@ -365,6 +365,19 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
 
+    def test_parenthesized_expression_does_not_reflow_query_block_operators(self):
+        source = (
+            "(\n"
+            "    SELECT run_start_time\n"
+            "    FROM sample_summary\n"
+            "    WHERE run_start_time BETWEEN :end_time - '1 day'::interval\n"
+            "        AND :end_time\n"
+            ")"
+        )
+        rule = ParenthesizedExpressionWrapRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+
     def test_additive_continuations_align_and_join_a_stranded_operand(self):
         source = (
             "    first_value + second_value\n"

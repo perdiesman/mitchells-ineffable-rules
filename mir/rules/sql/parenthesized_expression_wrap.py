@@ -193,6 +193,26 @@ class ParenthesizedExpressionWrapRule(BaseRule):
                 continue
 
             if tokens[close_index]["line"] != token["line"]:
+                first_inner_active = next(
+                    (
+                        tokens[candidate]
+                        for candidate in range(open_index + 1, close_index)
+                        if tokens[candidate]["type"]
+                        not in ("WHITESPACE", "COMMENT")
+                    ),
+                    None,
+                )
+                if (
+                    first_inner_active is not None
+                    and first_inner_active["type"] == "KEYWORD"
+                    and first_inner_active["value"].upper()
+                    in {"SELECT", "WITH"}
+                ):
+                    # Query-block parentheses own many unrelated arithmetic
+                    # expressions. Each expression must be formatted in its
+                    # own local context rather than as one outer arithmetic
+                    # group.
+                    continue
                 base_indent = line[: len(line) - len(line.lstrip(" \t"))]
                 content_indent = base_indent + "    "
                 depth = 0
