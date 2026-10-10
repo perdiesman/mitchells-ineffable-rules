@@ -351,6 +351,7 @@ class ColumnLayoutRule(BaseRule):
                     list_str_char = None
                     list_single_comment = False
                     list_multi_comment = False
+                    recovery_boundary = False
                     
                     j = list_start
                     current_expr_start = list_start
@@ -418,14 +419,29 @@ class ColumnLayoutRule(BaseRule):
                                 j += 1
                             j_word = content[jw_start:j].lower()
                             
+                            statement_starters = {
+                                "alter", "create", "delete", "drop", "insert",
+                                "truncate", "update",
+                            }
                             if keyword.startswith("SELECT"):
-                                boundaries = {"from", "where", "group", "order", "limit", "offset", "union", "intersect", "except"}
+                                boundaries = {
+                                    "from", "where", "group", "order", "limit",
+                                    "offset", "union", "intersect", "except",
+                                    # Treat an unmistakable statement starter
+                                    # as a recovery boundary when legacy SQL
+                                    # omitted its preceding terminator. This
+                                    # keeps the following statement out of the
+                                    # prior SELECT list without pretending the
+                                    # malformed source is semantically valid.
+                                    *statement_starters,
+                                }
                             elif keyword.startswith("GROUP"):
                                 boundaries = {"having", "order", "limit", "offset", "union", "intersect", "except"}
                             else:
                                 boundaries = {"limit", "offset", "union", "intersect", "except"}
                                 
                             if j_word in boundaries:
+                                recovery_boundary = j_word in statement_starters
                                 j = jw_start
                                 break
                             
@@ -497,6 +513,13 @@ class ColumnLayoutRule(BaseRule):
                             line_start_idx = idx + 1
                             
                     if "--" in clause_text or "/*" in clause_text:
+                        i = list_end
+                        continue
+
+                    if recovery_boundary:
+                        # Preserve the malformed preceding clause byte for
+                        # byte. Only use the starter as a scan boundary so the
+                        # following independent statement can be formatted.
                         i = list_end
                         continue
                         

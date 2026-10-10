@@ -1,6 +1,6 @@
 # IR-line-length
 
-Lines must not exceed the configured maximum length.
+Lines must not exceed the configured maximum length. Overlong keyword-owned IN, VALUES, and TABLE lists wrap one item per line.
 
 - **Auto-Fixable**: Sometimes
 - **Enabled by Default**: Yes

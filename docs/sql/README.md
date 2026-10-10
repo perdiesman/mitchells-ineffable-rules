@@ -22,7 +22,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-eof-newline`](rules/general/IR-eof-newline.md) | Enforce that every SQL file ends with exactly one newline character. | Yes | [View Details](rules/general/IR-eof-newline.md) |
 | [`IR-indent`](rules/general/IR-indent.md) | Indent should be equal amounts of spaces (default 4). | Yes | [View Details](rules/general/IR-indent.md) |
 | [`IR-keyword-case`](rules/general/IR-keyword-case.md) | SQL keywords must be in uppercase. | Yes | [View Details](rules/general/IR-keyword-case.md) |
-| [`IR-line-length`](rules/general/IR-line-length.md) | Lines must not exceed the configured maximum length. | Sometimes | [View Details](rules/general/IR-line-length.md) |
+| [`IR-line-length`](rules/general/IR-line-length.md) | Lines must not exceed the configured maximum length. Overlong keyword-owned IN, VALUES, and TABLE lists wrap one item per line. | Sometimes | [View Details](rules/general/IR-line-length.md) |
 | [`IR-operator-spacing`](rules/general/IR-operator-spacing.md) | Operators should have a single space on both sides. | Yes | [View Details](rules/general/IR-operator-spacing.md) |
 | [`IR-redundant-keywords`](rules/general/IR-redundant-keywords.md) | Remove redundant implied keywords like INNER, LEFT/RIGHT OUTER, and non-window ASC while retaining explicit FULL OUTER JOIN. | Yes | [View Details](rules/general/IR-redundant-keywords.md) |
 | [`IR-statement-blank-lines`](rules/general/IR-statement-blank-lines.md) | Ensure at least one blank line between consecutive SQL statements. | Yes | [View Details](rules/general/IR-statement-blank-lines.md) |

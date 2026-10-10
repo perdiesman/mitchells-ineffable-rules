@@ -20,6 +20,28 @@ def _unbreakable_single_attribute_tag(line: str, max_length: int) -> bool:
     return shortest_attribute_line > max_length
 
 
+def _unbreakable_text_line(line: str, max_length: int) -> bool:
+    """Return whether wrapping opaque XML text would change its value."""
+    indent_length = len(line) - len(line.lstrip(" \t"))
+    stripped = line.strip()
+    if not stripped or any(character.isspace() for character in stripped):
+        return False
+
+    inline = re.fullmatch(
+        r"<(?P<tag>[A-Za-z_:][\w:.-]*)(?:\s[^>]*)?>"
+        r"(?P<text>[^<]+)</(?P=tag)>",
+        stripped,
+    )
+    if inline is not None:
+        text = inline.group("text")
+        return (
+            not any(character.isspace() for character in text)
+            and indent_length + len(text) > max_length
+        )
+
+    return "<" not in stripped and ">" not in stripped
+
+
 def _wrap_dollar_quoted_sql_lines(content: str, max_length: int) -> str:
     """Wrap SQL text inside dollar quotes without rewriting its syntax."""
     delimiter_pattern = re.compile(r"\$\$|\$[A-Za-z_][A-Za-z0-9_]*\$")
@@ -72,7 +94,8 @@ class XmlLineLengthRule(BaseRule):
         "XML lines must not exceed the configured maximum length, and repeated "
         "MyBatis foreach forms use the same expanded layout; overlong inline "
         "dynamic SQL blocks expand without changing their expressions. SQL "
-        "inside dollar quotes wraps only at existing clause whitespace."
+        "inside dollar quotes wraps only at existing clause whitespace. "
+        "Opaque XML text remains unchanged and is reported as non-fixable."
     )
     category = "general"
     is_fixable = "yes"
@@ -103,16 +126,16 @@ class XmlLineLengthRule(BaseRule):
         violations = []
         lines = content.splitlines()
         for idx, line in enumerate(lines, start=1):
-            if (
-                len(line) > max_length
-                and not _unbreakable_single_attribute_tag(line, max_length)
+            if len(line) > max_length and not _unbreakable_single_attribute_tag(
+                line, max_length
             ):
+                unbreakable_text = _unbreakable_text_line(line, max_length)
                 violations.append(Violation(
                     rule_id=self.rule_id,
                     line_number=idx,
                     message=f"Line {idx} exceeds maximum length of {max_length} characters (actual length: {len(line)}).",
                     offending_lines=[line],
-                    is_fixable=True
+                    is_fixable=not unbreakable_text,
                 ))
         from mir.rules.xml.xml_mybatis_sql import (
             get_all_elements_recursively,
@@ -174,7 +197,12 @@ class XmlLineLengthRule(BaseRule):
                 content[element["start_offset"]:first_inner].strip()
             )
 
-        any_violating = any(len(line) > max_length for line in lines)
+        any_violating = any(
+            len(line) > max_length
+            and not _unbreakable_single_attribute_tag(line, max_length)
+            and not _unbreakable_text_line(line, max_length)
+            for line in lines
+        )
         has_inconsistent_foreach = any(
             element["tag"] == "foreach"
             and element["inner_tokens"]

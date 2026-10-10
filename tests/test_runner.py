@@ -17,6 +17,7 @@ from mir.rules.xml.xml_mybatis_sql import (
 )
 from mir.rules.xml.xml_line_length import XmlLineLengthRule
 from mir.rules.xml.xml_indent import XmlIndentRule
+from mir.rules.xml.xml_utils import tokenize_xml
 
 class TestRunnerIntegration(unittest.TestCase):
     def setUp(self):
@@ -308,6 +309,43 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second, expected)
         self.assertFalse(rule.check(first, "generic.xml", config))
 
+    def test_xml_tokenizer_preserves_dotted_element_names(self):
+        content = (
+            "<org.example.component.extraordinarily.long.property>"
+            "1.2.3.RELEASE"
+            "</org.example.component.extraordinarily.long.property>"
+        )
+
+        tokens = tokenize_xml(content)
+
+        self.assertEqual(tokens[0]["type"], "TAG_OPEN_START")
+        self.assertEqual(
+            tokens[0]["value"],
+            "<org.example.component.extraordinarily.long.property",
+        )
+        self.assertFalse(any(token["type"] == "ATTR_NAME" for token in tokens))
+
+    def test_xml_line_length_preserves_unbreakable_text_values(self):
+        opaque = "A" * 180
+        content = (
+            '<properties>\n'
+            '    <org.example.component.version>1.2.3.RELEASE</org.example.component.version>\n'
+            f'    <certificate>{opaque}</certificate>\n'
+            f'    {opaque}\n'
+            '</properties>'
+        )
+        rule = XmlLineLengthRule()
+        config = {"max_length": 120}
+
+        first = rule.fix(content, "generic.xml", config)
+        second = rule.fix(first, "generic.xml", config)
+
+        self.assertEqual(first, content)
+        self.assertEqual(second, content)
+        violations = rule.check(first, "generic.xml", config)
+        self.assertEqual(len(violations), 2)
+        self.assertTrue(all(not violation.is_fixable for violation in violations))
+
     def test_xml_indent_keeps_statement_terminator_with_dynamic_close(self):
         content = (
             '<mapper namespace="GenericMapper">\n'
@@ -475,6 +513,61 @@ class TestRunnerIntegration(unittest.TestCase):
 
         first = process_document(config, xml_content, "generic.xml", "xml")
         second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_sql_column_layout_recovers_at_ddl_statement_starter(self):
+        sql_content = (
+            "SELECT first_value,\n"
+            "CREATE VIEW sample_view AS\n"
+            " SELECT sample_id, sample_name\n"
+            " FROM sample_item;\n"
+        )
+        expected = (
+            "SELECT first_value,\n"
+            "CREATE VIEW sample_view AS\n"
+            "SELECT sample_id, sample_name\n"
+            "FROM sample_item;\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(config, first.content, "generic.sql", "sql")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_sql_line_length_expands_long_in_value_list(self):
+        sql_content = (
+            "SELECT item_id FROM sample_item WHERE item_status IN "
+            "('scheduled_for_processing', 'currently_being_processed', "
+            "'completed_with_additional_review_required', "
+            "'archived_after_successful_processing');\n"
+        )
+        expected = (
+            "SELECT item_id\n"
+            "FROM sample_item\n"
+            "WHERE\n"
+            "    item_status IN (\n"
+            "        'scheduled_for_processing',\n"
+            "        'currently_being_processed',\n"
+            "        'completed_with_additional_review_required',\n"
+            "        'archived_after_successful_processing'\n"
+            "    );\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(config, first.content, "generic.sql", "sql")
 
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)

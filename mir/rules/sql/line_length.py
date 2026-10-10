@@ -54,7 +54,10 @@ class LineLengthRule(BaseRule):
     commit_profile = True
     embedded_safe = True
     rule_id = "IR-line-length"
-    description = "Lines must not exceed the configured maximum length."
+    description = (
+        "Lines must not exceed the configured maximum length. Overlong "
+        "keyword-owned IN, VALUES, and TABLE lists wrap one item per line."
+    )
     category = "general"
     is_fixable = "sometimes"
     exclude_recursive = True
@@ -273,6 +276,101 @@ class LineLengthRule(BaseRule):
         if range_edits:
             chars = list(content)
             for start, end, replacement in sorted(range_edits, reverse=True):
+                chars[start:end] = list(replacement)
+            content = "".join(chars)
+
+        # Expand long comma-separated SQL lists whose parentheses have clear
+        # keyword ownership. This covers IN predicates, VALUES rows, and
+        # RETURNS TABLE declarations without guessing at arbitrary grouping
+        # parentheses or changing any list item.
+        list_tokens = tokenize_sql(content)
+        list_edits = []
+        for open_index, opening in enumerate(list_tokens):
+            if opening["type"] != "PAREN" or opening["value"] != "(":
+                continue
+            close_index = find_matching_paren(list_tokens, open_index)
+            if close_index is None or list_tokens[close_index]["line"] != opening["line"]:
+                continue
+            previous_index = next(
+                (
+                    index
+                    for index in range(open_index - 1, -1, -1)
+                    if list_tokens[index]["type"] not in ("WHITESPACE", "COMMENT")
+                ),
+                None,
+            )
+            if previous_index is None:
+                continue
+            owner = list_tokens[previous_index]
+            if (
+                owner["type"] != "KEYWORD"
+                or owner["value"].upper() not in {"IN", "TABLE", "VALUES"}
+            ):
+                continue
+            active_inner = [
+                item
+                for item in list_tokens[open_index + 1:close_index]
+                if item["type"] not in ("WHITESPACE", "COMMENT")
+            ]
+            if (
+                not active_inner
+                or active_inner[0]["type"] == "KEYWORD"
+                and active_inner[0]["value"].upper() in {"SELECT", "WITH"}
+                or any(
+                    item["type"] == "COMMENT"
+                    for item in list_tokens[open_index + 1:close_index]
+                )
+            ):
+                continue
+            depth = 0
+            commas = []
+            for index in range(open_index + 1, close_index):
+                item = list_tokens[index]
+                if item["type"] == "PAREN":
+                    depth += 1 if item["value"] == "(" else -1
+                elif item["type"] == "COMMA" and depth == 0:
+                    commas.append(index)
+            if not commas:
+                continue
+            line_start = content.rfind("\n", 0, opening["start"]) + 1
+            line_end = content.find("\n", list_tokens[close_index]["end"])
+            if line_end == -1:
+                line_end = len(content)
+            physical_line = content[line_start:line_end]
+            if len(physical_line) <= max_length:
+                continue
+            indent = physical_line[: len(physical_line) - len(physical_line.lstrip())]
+            item_indent = indent + "    "
+
+            def replace_adjacent_whitespace(token_index, replacement, *, before):
+                adjacent = token_index - 1 if before else token_index + 1
+                if (
+                    0 <= adjacent < len(list_tokens)
+                    and list_tokens[adjacent]["type"] == "WHITESPACE"
+                ):
+                    whitespace = list_tokens[adjacent]
+                    start, end = whitespace["start"], whitespace["end"]
+                else:
+                    token = list_tokens[token_index]
+                    start = end = token["start"] if before else token["end"]
+                if content[start:end] != replacement:
+                    list_edits.append((start, end, replacement))
+
+            replace_adjacent_whitespace(
+                open_index, "\n" + item_indent, before=False
+            )
+            for comma_index in commas:
+                replace_adjacent_whitespace(
+                    comma_index, "\n" + item_indent, before=False
+                )
+            replace_adjacent_whitespace(
+                close_index, "\n" + indent, before=True
+            )
+        if list_edits:
+            chars = list(content)
+            for start, end, replacement in sorted(
+                set(list_edits), reverse=True
+            ):
                 chars[start:end] = list(replacement)
             content = "".join(chars)
         
