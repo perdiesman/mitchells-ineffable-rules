@@ -86,6 +86,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
+| [`IR-alter-table-layout`](rules/schema-definition/IR-alter-table-layout.md) | Long ALTER TABLE statements place the table action on a continuation line and expand constraint clauses without changing their tokens. | Yes | [View Details](rules/schema-definition/IR-alter-table-layout.md) |
 | [`IR-boolean-default`](rules/schema-definition/IR-boolean-default.md) | Enforce that boolean columns in table definitions explicitly define a DEFAULT constraint. | No | [View Details](rules/schema-definition/IR-boolean-default.md) |
 | [`IR-create-view-indent`](rules/schema-definition/IR-create-view-indent.md) | SELECT statements under a CREATE VIEW should be indented 4 spaces relative to the CREATE VIEW statement. | Yes | [View Details](rules/schema-definition/IR-create-view-indent.md) |
 | [`IR-table-field-spacing`](rules/schema-definition/IR-table-field-spacing.md) | Enforce exactly one space between column/field name and its data type. | Yes | [View Details](rules/schema-definition/IR-table-field-spacing.md) |

@@ -82,6 +82,20 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
         self.assertFalse(rule.check(fixed, "generic.sql", {}))
 
+    def test_multiline_function_layout_ignores_reference_column_lists(self):
+        source = (
+            "ALTER TABLE sample_item\n"
+            "    ADD CONSTRAINT sample_owner_fkey\n"
+            "        FOREIGN KEY (owner_id)\n"
+            "        REFERENCES sample_owner(\n"
+            "            owner_id\n"
+            "        );"
+        )
+        rule = MultilineFunctionLayoutRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertFalse(rule.check(source, "generic.sql", {}))
+
     def test_multiline_case_stays_with_its_leading_additive_operator(self):
         source = (
             "    first_label\n"

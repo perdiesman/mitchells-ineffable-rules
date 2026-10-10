@@ -110,6 +110,15 @@ class MultilineFunctionLayoutRule(BaseRule):
                 and token["value"].upper() == "INTO"
                 for token in preceding_active
             )
+            is_reference_target = any(
+                token["type"] == "KEYWORD"
+                and token["value"].upper() == "REFERENCES"
+                for token in preceding_active
+            )
+            if is_reference_target:
+                # A relation followed by its referenced columns is schema
+                # syntax, not a function call. Constraint layout owns it.
+                continue
             if (
                 tokens[name_index]["type"] == "KEYWORD"
                 and tokens[name_index]["value"].upper()

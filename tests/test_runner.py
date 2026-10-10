@@ -598,6 +598,30 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
 
+    def test_commit_profile_wraps_long_alter_table_constraint(self):
+        sql_content = (
+            "ALTER TABLE sample_item_history ADD CONSTRAINT "
+            "sample_item_history_owner_id_fkey FOREIGN KEY (owner_id) "
+            "REFERENCES sample_owner (owner_id);\n"
+        )
+        expected = (
+            "ALTER TABLE sample_item_history\n"
+            "    ADD CONSTRAINT sample_item_history_owner_id_fkey\n"
+            "        FOREIGN KEY (owner_id)\n"
+            "        REFERENCES sample_owner (owner_id);\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(config, first.content, "generic.sql", "sql")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_formats_overlaps_tuple_inside_choose(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
