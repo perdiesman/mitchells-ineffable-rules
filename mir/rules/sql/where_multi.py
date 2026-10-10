@@ -379,6 +379,73 @@ class WhereMultiRule(BaseRule):
                                             "replacement": " ",
                                         })
 
+                    # Split a condition that is still wider than the source
+                    # line limit after the clause layout is established. In
+                    # embedded XML the encoded comparison operator can be
+                    # several columns wider than the decoded SQL token, so use
+                    # the source-container measurement here as well.
+                    condition_starts = [i + 1] + boolean_indices
+                    condition_ends = boolean_indices + [clause_end]
+                    for condition_start, condition_end in zip(
+                        condition_starts, condition_ends
+                    ):
+                        active_start = next(
+                            (
+                                index
+                                for index in range(condition_start, condition_end)
+                                if tokens[index]["type"]
+                                not in {"WHITESPACE", "COMMENT"}
+                            ),
+                            None,
+                        )
+                        if active_start is None:
+                            continue
+                        condition_single = "".join(
+                            " " if item["type"] == "WHITESPACE" else item["value"]
+                            for item in tokens[active_start:condition_end]
+                        ).strip()
+                        condition_indent = (
+                            expected_indent
+                            + (
+                                "    "
+                                if tokens[active_start]["start"]
+                                in mybatis_dynamic_offsets
+                                and not where_is_dynamic
+                                else ""
+                            )
+                        )
+                        if (
+                            source_text_length(
+                                condition_indent + condition_single,
+                                rule_config,
+                            )
+                            <= max_len
+                        ):
+                            continue
+                        comparison_index = next(
+                            (
+                                index
+                                for index in range(active_start, condition_end - 1)
+                                if tokens[index]["type"] == "OPERATOR"
+                                and tokens[index]["value"]
+                                in {"=", "!=", "<>", "<", ">", "<=", ">="}
+                                and depths[index] == outer_depth
+                                and tokens[index + 1]["type"] == "WHITESPACE"
+                            ),
+                            None,
+                        )
+                        if comparison_index is None:
+                            continue
+                        whitespace = tokens[comparison_index + 1]
+                        expected_operand_ws = "\n" + condition_indent + "    "
+                        if whitespace["value"] != expected_operand_ws:
+                            violations.append({
+                                "token": tokens[comparison_index],
+                                "ws_start": whitespace["start"],
+                                "ws_end": whitespace["end"],
+                                "replacement": expected_operand_ws,
+                            })
+
                     # A condition that is too long may split after its binary
                     # operator. Keep the operand exactly one indentation level
                     # beyond the line containing that operator instead of

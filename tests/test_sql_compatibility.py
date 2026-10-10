@@ -705,6 +705,29 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
 
+    def test_multiline_where_wraps_comparison_at_encoded_source_limit(self):
+        source = (
+            "        WHERE\n"
+            "            account.enabled\n"
+            "            AND date_trunc('day', now() + make_interval(days => :maximum_days)) "
+            ">= date_trunc('day', account.expiration_date)\n"
+            "            AND audit.id IS NULL"
+        )
+        expected = (
+            "        WHERE\n"
+            "            account.enabled\n"
+            "            AND date_trunc('day', now() + make_interval(days => :maximum_days)) >=\n"
+            "                date_trunc('day', account.expiration_date)\n"
+            "            AND audit.id IS NULL"
+        )
+        rule = WhereMultiRule()
+        config = {"original_xml": "<mapper />", "max_line_length": 120}
+
+        fixed = rule.fix(source, "generic.xml", config)
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.xml", config), expected)
+
     def test_parenthesized_boolean_group_uses_where_continuations(self):
         source = (
             "WHERE\n"
