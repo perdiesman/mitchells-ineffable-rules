@@ -666,23 +666,30 @@ def dynamic_column_layout_edits(
             for offset in boundary_offsets
             if clause["list_start"] <= offset < clause["list_end"]
         )
-        if not points:
-            continue
-        # Every transition must follow an existing comma. This accepts an
-        # optional group of complete list items and rejects mutually exclusive
-        # branches whose expanded expressions sit beside one another.
-        comma_boundaries = 0
-        for offset in points:
-            cursor = offset - 1
-            while cursor >= clause["list_start"] and sql_text[cursor].isspace():
-                cursor -= 1
-            if cursor >= clause["list_start"] and sql_text[cursor] == ",":
-                comma_boundaries += 1
-        # A boundary immediately after a comma proves that the dynamic block
-        # contributes complete list items. Other points may be the close/open
-        # transition between mutually exclusive blocks and need not themselves
-        # follow commas.
-        if not comma_boundaries or not clause["expression_ranges"]:
+        if points:
+            # Every transition must follow an existing comma. This accepts an
+            # optional group of complete list items and rejects mutually
+            # exclusive branches whose expanded expressions sit beside one
+            # another.
+            comma_boundaries = 0
+            for offset in points:
+                cursor = offset - 1
+                while (
+                    cursor >= clause["list_start"]
+                    and sql_text[cursor].isspace()
+                ):
+                    cursor -= 1
+                if (
+                    cursor >= clause["list_start"]
+                    and sql_text[cursor] == ","
+                ):
+                    comma_boundaries += 1
+            # A boundary immediately after a comma proves that the dynamic
+            # block contributes complete list items. Other points may be the
+            # close/open transition between mutually exclusive blocks.
+            if not comma_boundaries:
+                continue
+        if not clause["expression_ranges"]:
             continue
 
         prefix = column_rule._format_prefix(

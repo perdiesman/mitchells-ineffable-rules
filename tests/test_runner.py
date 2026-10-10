@@ -12,6 +12,7 @@ from mir.engine.runner import process_document, remap_selected_lines, run_linter
 from mir.rules.sql.line_length import LineLengthRule
 from mir.rules.xml.xml_mybatis_sql import (
     between_delimiter_source_edits,
+    dynamic_column_layout_edits,
     get_mybatis_protected_signatures,
     join_case_source_edits,
     physical_case_indent_source_edits,
@@ -2779,6 +2780,34 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertNotIn(
             "IR-clause-alignment",
             [violation.rule_id for violation, _, _ in second.violations],
+        )
+
+    def test_source_mapped_static_projection_aligns_without_tag_boundary(self):
+        source = (
+            "    SELECT\n"
+            "    first_extraordinarily_long_projection_identifier,\n"
+            "    second_extraordinarily_long_projection_identifier,\n"
+            "    third_extraordinarily_long_projection_identifier"
+        )
+        mapping = list(range(len(source)))
+
+        edits = dynamic_column_layout_edits(
+            source,
+            mapping,
+            set(),
+            [],
+            [],
+            source,
+            {},
+        )
+        chars = list(source)
+        for start, end, replacement in sorted(edits, reverse=True):
+            chars[start:end] = list(replacement)
+        fixed = "".join(chars)
+
+        self.assertEqual(
+            fixed,
+            source.replace("\n    ", "\n        "),
         )
 
     def test_xml_mybatis_join_wrap_counts_encoded_operator_width(self):
