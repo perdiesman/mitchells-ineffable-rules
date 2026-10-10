@@ -982,6 +982,56 @@ def keyword_case_source_edits(
     return list(dict.fromkeys(edits))
 
 
+def function_case_source_edits(
+    sql_text: str,
+    mapping: List[int],
+    content: str,
+    source_range: tuple[int, int],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Map function-name case directly through dynamic XML boundaries."""
+    from mir.rules.sql.function_case import FunctionCaseRule
+
+    disabled = rule_config.get("_rules_to_disable", set())
+    enabled = rule_config.get("_rules_to_enable", set())
+    if "IR-function-case" in disabled or (
+        rule_config.get("_disable_all", False)
+        and "IR-function-case" not in enabled
+    ):
+        return []
+    all_configs = rule_config.get("_all_configs", {})
+    function_config = {}
+    for key in ("IR-function-case", "sql:IR-function-case"):
+        configured = all_configs.get(key, {})
+        if isinstance(configured, dict):
+            function_config.update(configured)
+    rule = FunctionCaseRule()
+    target_case = function_config.get("case", rule.default_config["case"])
+    calls = rule._find_function_calls(
+        sql_text, rule._get_exclusions(function_config)
+    )
+    source_start, source_end = source_range
+    edits = []
+    for guest_start, guest_end, name, _ in calls:
+        expected = name.lower() if target_case == "lowercase" else name.upper()
+        if name == expected or not (0 <= guest_start < guest_end <= len(mapping)):
+            continue
+        if any(
+            mapping[index] - mapping[index - 1] != 1
+            for index in range(guest_start + 1, guest_end)
+        ):
+            continue
+        edit_start = mapping[guest_start]
+        edit_end = mapping[guest_end - 1] + 1
+        if not (
+            source_start <= edit_start < edit_end <= source_end
+            and content[edit_start:edit_end] == name
+        ):
+            continue
+        edits.append((edit_start, edit_end, expected))
+    return list(dict.fromkeys(edits))
+
+
 def dynamic_subquery_source_edits(
     sql_text: str,
     mapping: List[int],
@@ -3100,6 +3150,13 @@ class XmlMybatisSqlRule(BaseRule):
                     (el["start_offset"], el["end_offset"]),
                     inner_config,
                 )
+                function_case_edits = function_case_source_edits(
+                    sql_text,
+                    mapping,
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
                 layout_edits = (
                     post_choose_edits
                     + join_case_edits
@@ -3107,6 +3164,7 @@ class XmlMybatisSqlRule(BaseRule):
                     + dynamic_body_edits
                     + top_level_clause_edits
                     + keyword_case_edits
+                    + function_case_edits
                     + layout_edits
                 )
                 join_config = dict(inner_config)
@@ -3272,6 +3330,7 @@ class XmlMybatisSqlRule(BaseRule):
                     dynamic_order_edits + static_order_edits
                     + dynamic_from_edits
                     + keyword_case_edits
+                    + function_case_edits
                 )
                 layout_edits = [
                     (start, end, replacement)
@@ -3299,6 +3358,9 @@ class XmlMybatisSqlRule(BaseRule):
                 if keyword_case_edits:
                     excluded_guest_rule_ids.add("IR-keyword-case")
                     applied_rules.add("IR-keyword-case")
+                if function_case_edits:
+                    excluded_guest_rule_ids.add("IR-function-case")
+                    applied_rules.add("IR-function-case")
                 if owns_runtime_where(el):
                     # MyBatis <where> owns prefix insertion/removal across
                     # mutually exclusive dynamic branches. Concatenating all

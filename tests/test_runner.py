@@ -1190,8 +1190,10 @@ class TestRunnerIntegration(unittest.TestCase):
             '    <insert id="items">\n'
             '        INSERT INTO sample_item (\n'
             '            item_id\n'
-            '            <if test="named">,\n'
-            '                item_name</if>\n'
+            '            <if test="named">\n'
+            '                    ,\n'
+            '                    item_name\n'
+            '            </if>\n'
             '        )\n'
             '        SELECT item_id, item_name FROM source_item\n'
             '    </insert>\n'
@@ -3652,6 +3654,35 @@ class TestRunnerIntegration(unittest.TestCase):
         config = Config()
         config.disable_all = True
         config.rules_to_enable = ["IR-xml-mybatis-sql", "IR-keyword-case"]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_maps_function_case_inside_dynamic_foreach(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="insertShapes">\n'
+            '        INSERT INTO sample_shape (shape)\n'
+            '        SELECT st_union(\n'
+            '            <foreach collection="shapes" item="shape">\n'
+            '                ST_geomfromgeojson(#{shape})\n'
+            '            </foreach>\n'
+            '        )\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            'ST_geomfromgeojson',
+            'st_geomfromgeojson',
+        )
+        config = Config()
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-mybatis-sql", "IR-function-case"]
         config.fix = True
 
         first = process_document(config, xml_content, "generic.xml", "xml")
