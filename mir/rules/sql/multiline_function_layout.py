@@ -1,7 +1,7 @@
 from typing import Any, Dict, List
 
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import find_matching_paren, tokenize_sql
+from mir.rules.sql.sql_utils import tokenize_sql
 from mir.rules.sql.table_function_indent import table_function_parens
 
 
@@ -49,6 +49,20 @@ class MultilineFunctionLayoutRule(BaseRule):
         indent_size = self.get_config_value(rule_config, "indent_size", 4)
         unit = " " * indent_size
         edits = []
+        previous_active_indices = [None] * len(tokens)
+        previous_active_index = None
+        paren_pairs = {}
+        paren_stack = []
+        for token_index, token in enumerate(tokens):
+            previous_active_indices[token_index] = previous_active_index
+            if token["type"] not in ("WHITESPACE", "COMMENT"):
+                previous_active_index = token_index
+            if token["type"] != "PAREN":
+                continue
+            if token["value"] == "(":
+                paren_stack.append(token_index)
+            elif token["value"] == ")" and paren_stack:
+                paren_pairs[paren_stack.pop()] = token_index
 
         def edit_whitespace(index: int, replacement: str, before: bool) -> None:
             whitespace_index = index - 1 if before else index + 1
@@ -80,24 +94,17 @@ class MultilineFunctionLayoutRule(BaseRule):
                 or open_index in table_openings
             ):
                 continue
-            name_index = next(
-                (
-                    candidate
-                    for candidate in range(open_index - 1, -1, -1)
-                    if tokens[candidate]["type"] not in ("WHITESPACE", "COMMENT")
-                ),
-                None,
-            )
+            name_index = previous_active_indices[open_index]
             if name_index is None or tokens[name_index]["type"] not in (
                 "IDENTIFIER",
                 "KEYWORD",
             ):
                 continue
-            preceding_active = [
-                tokens[candidate]
-                for candidate in range(name_index - 1, -1, -1)
-                if tokens[candidate]["type"] not in ("WHITESPACE", "COMMENT")
-            ][:4]
+            preceding_active = []
+            preceding_index = previous_active_indices[name_index]
+            while preceding_index is not None and len(preceding_active) < 4:
+                preceding_active.append(tokens[preceding_index])
+                preceding_index = previous_active_indices[preceding_index]
             is_insert_target = any(
                 token["type"] == "KEYWORD"
                 and token["value"].upper() == "INTO"
@@ -109,7 +116,7 @@ class MultilineFunctionLayoutRule(BaseRule):
                 not in {"COALESCE", "NULLIF", "VALUES"}
             ):
                 continue
-            close_index = find_matching_paren(tokens, open_index)
+            close_index = paren_pairs.get(open_index)
             if close_index is None or tokens[close_index]["line"] == opening["line"]:
                 continue
             first_inner_active = next(

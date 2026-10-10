@@ -300,6 +300,22 @@ class LineLengthRule(BaseRule):
                     for index in indices
                 ):
                     case_arm_lines.add(line_number)
+
+            next_active_indices = [None] * len(tokens)
+            next_active_index = None
+            for token_index in range(len(tokens) - 1, -1, -1):
+                next_active_indices[token_index] = next_active_index
+                if tokens[token_index]["type"] not in ("WHITESPACE", "COMMENT"):
+                    next_active_index = token_index
+            paren_pairs = {}
+            paren_stack = []
+            for token_index, token in enumerate(tokens):
+                if token["type"] != "PAREN":
+                    continue
+                if token["value"] == "(":
+                    paren_stack.append(token_index)
+                elif token["value"] == ")" and paren_stack:
+                    paren_pairs[paren_stack.pop()] = token_index
             
             # Find all function calls
             all_calls = []
@@ -317,14 +333,10 @@ class LineLengthRule(BaseRule):
                         }
                     ):
                         continue
-                    next_act_idx = None
-                    for j in range(i + 1, len(tokens)):
-                        if tokens[j]["type"] not in ("WHITESPACE", "COMMENT"):
-                            next_act_idx = j
-                            break
+                    next_act_idx = next_active_indices[i]
                     if next_act_idx is not None and tokens[next_act_idx]["type"] == "PAREN" and tokens[next_act_idx]["value"] == "(":
                         open_idx = next_act_idx
-                        close_idx = find_matching_paren(tokens, open_idx)
+                        close_idx = paren_pairs.get(open_idx)
                         if close_idx is not None:
                             all_calls.append({
                                 "start": tokens[open_idx]["start"],
@@ -338,22 +350,26 @@ class LineLengthRule(BaseRule):
             # physical line. A short wrapper on an earlier line must not hide
             # a nested call whose own argument line needs expansion.
             outer_calls = []
-            for i, call_a in enumerate(all_calls):
-                is_nested = False
-                for j, call_b in enumerate(all_calls):
-                    if i != j:
-                        if call_b["start"] <= call_a["start"] and call_a["end"] <= call_b["end"]:
-                            container_line_index = call_b["name_token"]["line"] - 1
-                            container_line = (
-                                lines[container_line_index]
-                                if container_line_index < len(lines)
-                                else ""
-                            )
-                            if len(container_line) > max_length:
-                                is_nested = True
-                                break
+            call_stack = []
+            for call in all_calls:
+                while call_stack and call["start"] >= call_stack[-1]["end"]:
+                    call_stack.pop()
+                is_nested = any(
+                    len(lines[parent["name_token"]["line"] - 1]) > max_length
+                    for parent in call_stack
+                    if parent["name_token"]["line"] <= len(lines)
+                )
                 if not is_nested:
-                    outer_calls.append(call_a)
+                    outer_calls.append(call)
+                call_stack.append(call)
+
+            last_call_start_by_line = {}
+            for call in all_calls:
+                line_number = call["name_token"]["line"]
+                last_call_start_by_line[line_number] = max(
+                    last_call_start_by_line.get(line_number, -1),
+                    call["start"],
+                )
                     
             # Generate edits for long lines
             edits = []
@@ -369,11 +385,11 @@ class LineLengthRule(BaseRule):
                 line = lines[line_idx] if line_idx < len(lines) else ""
                 if len(line) > max_length:
                     earlier_line_tokens = [
-                        item
-                        for item in tokens
-                        if item["line"] == call["name_token"]["line"]
-                        and item["start"] < call["name_token"]["start"]
-                        and item["type"] not in ("WHITESPACE", "COMMENT")
+                        tokens[index]
+                        for index in active_by_line.get(
+                            call["name_token"]["line"], []
+                        )
+                        if tokens[index]["start"] < call["name_token"]["start"]
                     ]
                     earlier_keywords = {
                         item["value"].upper()
@@ -388,11 +404,9 @@ class LineLengthRule(BaseRule):
                         # it move the predicate to a continuation before
                         # expanding a function that will fit on that line.
                         continue
-                    if any(
-                        later["name_token"]["line"] == call["name_token"]["line"]
-                        and later["start"] > call["end"]
-                        for later in all_calls
-                    ):
+                    if last_call_start_by_line.get(
+                        call["name_token"]["line"], -1
+                    ) > call["end"]:
                         # Prefer the last call on a physical line. For
                         # count(*) FILTER (...), expanding count(*) only
                         # makes noise while the FILTER predicate remains the

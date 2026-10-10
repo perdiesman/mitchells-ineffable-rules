@@ -311,14 +311,20 @@ class AdditiveWrapRule(BaseRule):
         for line in lines:
             line_starts.append(offset)
             offset += len(line)
+        tokens_by_line: Dict[int, List[tuple[int, dict]]] = {}
+        for index, token in enumerate(tokens):
+            tokens_by_line.setdefault(token["line"], []).append(
+                (index, token)
+            )
 
         edits = []
         for line_number, raw_line in enumerate(lines, start=1):
             line = raw_line.rstrip("\r\n")
+            line_tokens = tokens_by_line.get(line_number, [])
             line_keywords = {
                 token["value"].upper()
-                for token in tokens
-                if token["line"] == line_number and token["type"] == "KEYWORD"
+                for _, token in line_tokens
+                if token["type"] == "KEYWORD"
             }
             line_max_length = (
                 continuation_max_length
@@ -345,9 +351,7 @@ class AdditiveWrapRule(BaseRule):
             line_start = line_starts[line_number - 1]
             line_end = line_start + len(line)
             candidates = []
-            for index, token in enumerate(tokens):
-                if token["line"] != line_number:
-                    continue
+            for index, token in line_tokens:
                 if token["type"] != "OPERATOR" or token["value"] not in {"+", "||"}:
                     continue
                 previous = next(
@@ -369,9 +373,8 @@ class AdditiveWrapRule(BaseRule):
             first_active = next(
                 (
                     (index, token)
-                    for index, token in enumerate(tokens)
-                    if token["line"] == line_number
-                    and token["type"] not in {"WHITESPACE", "COMMENT"}
+                    for index, token in line_tokens
+                    if token["type"] not in {"WHITESPACE", "COMMENT"}
                 ),
                 None,
             )
