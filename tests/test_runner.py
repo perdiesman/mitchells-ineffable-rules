@@ -1841,6 +1841,46 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_reanchors_static_clauses_after_dynamic_projection(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item.item_id\n'
+            '        FROM\n'
+            '            sample_item item\n'
+            '            JOIN (\n'
+            '                    SELECT\n'
+            '                        owner.owner_id,\n'
+            '                        <if test="withCode">owner.owner_code</if>\n'
+            '\n'
+            '                FROM sample_owner owner\n'
+            '        WHERE owner.enabled\n'
+            '        UNION\n'
+            '                    SELECT archived_owner_id\n'
+            '                    FROM archived_owner\n'
+            '                ) owners ON owners.owner_id = item.owner_id\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '\n                FROM sample_owner owner\n'
+            '        WHERE owner.enabled\n'
+            '        UNION\n',
+            '                    FROM sample_owner owner\n'
+            '                    WHERE owner.enabled\n'
+            '                    UNION\n',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_shared_clauses_do_not_inherit_choose_branch_indent(self):
         self.maxDiff = None
         xml_content = (

@@ -1,6 +1,6 @@
 # IR-table-alias-as
 
-Table, subquery, and joined table-function aliases should not use AS; a standalone generate_series source should use AS.
+Table and subquery aliases should not use AS; preserve the author's optional AS spelling for set-returning function aliases.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes

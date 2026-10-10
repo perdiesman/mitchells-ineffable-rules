@@ -223,21 +223,21 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
         self.assertEqual(rule.check(source, "generic.sql", {}), [])
 
-    def test_standalone_set_returning_function_alias_uses_as(self):
+    def test_standalone_set_returning_function_alias_preserves_omitted_as(self):
         source = "SELECT * FROM generate_series(1, 3) item_number;"
-        expected = "SELECT * FROM generate_series(1, 3) AS item_number;"
+        expected = source
 
         rule = TableAliasAsRule()
 
         self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
         self.assertEqual(rule.fix(expected, "generic.sql", {}), expected)
 
-    def test_joined_set_returning_function_alias_omits_as(self):
+    def test_joined_set_returning_function_alias_preserves_as(self):
         source = (
             "SELECT * FROM sample_item "
             "CROSS JOIN generate_series(1, 3) AS item_number;"
         )
-        expected = source.replace(" AS item_number", " item_number")
+        expected = source
 
         rule = TableAliasAsRule()
 

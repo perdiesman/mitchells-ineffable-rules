@@ -966,6 +966,127 @@ def dynamic_subquery_source_edits(
     ]
 
 
+def dynamic_projection_subquery_source_edits(
+    sql_text: str,
+    mapping: List[int],
+    content: str,
+    dynamic_ranges: List[tuple[int, int, int]],
+) -> List[tuple[int, int, str]]:
+    """Anchor a derived query whose SELECT list crosses dynamic XML tags."""
+    from mir.rules.sql.sql_utils import (
+        find_matching_paren,
+        get_token_depths,
+        tokenize_sql,
+    )
+
+    tokens = tokenize_sql(sql_text)
+    depths = get_token_depths(tokens)
+    clause_keywords = {
+        "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "HAVING",
+        "LIMIT", "UNION", "INTERSECT", "EXCEPT",
+    }
+    edits = []
+
+    def source_offset(guest_offset: int) -> int | None:
+        if 0 <= guest_offset < len(mapping):
+            return mapping[guest_offset]
+        return None
+
+    def inside_dynamic(source: int) -> bool:
+        return any(start < source < end for start, end, _ in dynamic_ranges)
+
+    def indent_edit(token: dict, expected: str) -> None:
+        source = source_offset(token["start"])
+        if source is None or inside_dynamic(source):
+            return
+        line_start = content.rfind("\n", 0, source) + 1
+        prefix = content[line_start:source]
+        if not prefix.strip():
+            edits.append((line_start, source, expected))
+            if token["value"].upper() == "FROM" and line_start > 0:
+                previous_line_start = content.rfind(
+                    "\n", 0, max(0, line_start - 1)
+                ) + 1
+                if not content[previous_line_start:line_start].strip():
+                    edits.append((previous_line_start, line_start, ""))
+
+    for open_index, opening in enumerate(tokens):
+        if opening["type"] != "PAREN" or opening["value"] != "(":
+            continue
+        close_index = find_matching_paren(tokens, open_index)
+        if close_index is None:
+            continue
+        select_index = next(
+            (
+                index
+                for index in range(open_index + 1, close_index)
+                if tokens[index]["type"] not in {"WHITESPACE", "COMMENT"}
+            ),
+            None,
+        )
+        if (
+            select_index is None
+            or tokens[select_index]["type"] != "KEYWORD"
+            or tokens[select_index]["value"].upper() != "SELECT"
+            or tokens[select_index]["line"] == tokens[close_index]["line"]
+        ):
+            continue
+        subquery_depth = depths[select_index]
+        first_from = next(
+            (
+                index
+                for index in range(select_index + 1, close_index)
+                if depths[index] == subquery_depth
+                and tokens[index]["type"] == "KEYWORD"
+                and tokens[index]["value"].upper() == "FROM"
+            ),
+            None,
+        )
+        if first_from is None:
+            continue
+        select_source = source_offset(tokens[select_index]["start"])
+        from_source = source_offset(tokens[first_from]["start"])
+        if select_source is None or from_source is None or not any(
+            select_source < start < from_source
+            for start, _, _ in dynamic_ranges
+        ):
+            continue
+
+        open_source = source_offset(opening["start"])
+        if open_source is None:
+            continue
+        line_start = content.rfind("\n", 0, open_source) + 1
+        prefix = content[line_start:open_source]
+        open_indent = prefix[: len(prefix) - len(prefix.lstrip(" \t"))]
+        owner_is_relation = False
+        for previous_index in range(open_index - 1, -1, -1):
+            previous = tokens[previous_index]
+            if previous["line"] != opening["line"]:
+                break
+            if previous["type"] in {"WHITESPACE", "COMMENT"}:
+                continue
+            if previous["type"] == "KEYWORD" and previous["value"].upper() == "LATERAL":
+                continue
+            owner_is_relation = bool(
+                previous["type"] == "KEYWORD"
+                and previous["value"].upper() in {"FROM", "JOIN"}
+            )
+            break
+        close_indent = open_indent + ("    " if owner_is_relation else "")
+        content_indent = close_indent + "    "
+        for index in range(select_index, close_index):
+            token = tokens[index]
+            if (
+                depths[index] == subquery_depth
+                and token["type"] == "KEYWORD"
+                and token["value"].upper() in clause_keywords
+            ):
+                indent_edit(token, content_indent)
+        indent_edit(tokens[close_index], close_indent)
+
+    return edits
+
+
 def post_choose_clause_source_edits(
     content: str,
     source_range: tuple[int, int],
@@ -2121,6 +2242,14 @@ class XmlMybatisSqlRule(BaseRule):
                     content,
                     join_config,
                 )
+                dynamic_projection_edits = (
+                    dynamic_projection_subquery_source_edits(
+                        sql_text,
+                        mapping,
+                        content,
+                        dynamic_indent_ranges,
+                    )
+                )
                 if subquery_source_edits:
                     layout_edits = [
                         edit
@@ -2132,6 +2261,17 @@ class XmlMybatisSqlRule(BaseRule):
                         )
                     ]
                     layout_edits.extend(subquery_source_edits)
+                if dynamic_projection_edits:
+                    layout_edits = [
+                        edit
+                        for edit in layout_edits
+                        if not any(
+                            max(edit[0], source_edit[0])
+                            < min(edit[1], source_edit[1])
+                            for source_edit in dynamic_projection_edits
+                        )
+                    ]
+                layout_edits.extend(dynamic_projection_edits)
                 dynamic_order_edits = compact_dynamic_order_by_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
@@ -2182,6 +2322,7 @@ class XmlMybatisSqlRule(BaseRule):
                 protected_source_indent_spans = [
                     (start, end)
                     for start, end, _ in post_choose_edits + dynamic_body_edits
+                    + dynamic_projection_edits
                 ]
 
                 def overlaps_protected_source_indent(edit) -> bool:
@@ -2200,6 +2341,7 @@ class XmlMybatisSqlRule(BaseRule):
                     + dynamic_body_edits
                     + subquery_source_edits
                     + dynamic_window_edits
+                    + dynamic_projection_edits
                 )
                 layout_edits = [
                     edit
