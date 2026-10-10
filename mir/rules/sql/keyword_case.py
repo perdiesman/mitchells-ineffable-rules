@@ -8,7 +8,7 @@ KEYWORDS = [
     "set", "delete", "create", "table", "drop", "alter", "index",
     "left", "right", "inner", "outer", "as", "having", "union",
     "with", "distinct", "recursive", "case", "when", "then", "else", "end",
-    "lateral", "is", "is null"
+    "lateral", "is", "is null", "in"
 ]
 
 FUNCTION_KEYWORD_AMBIGUITIES = {"left", "right"}
