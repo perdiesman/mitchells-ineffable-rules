@@ -463,6 +463,7 @@ class XmlIndentRule(BaseRule):
         # WHEN line even when the embedded diff cannot identify the repeated
         # whitespace span unambiguously.
         active_case_indent = None
+        case_continuation_lines = set()
         case_line_starts = [0]
         case_line_starts.extend(
             offset + 1 for offset, char in enumerate(content) if char == "\n"
@@ -485,6 +486,7 @@ class XmlIndentRule(BaseRule):
             if active_case_indent is None:
                 continue
             if upper.startswith(("AND ", "OR ")):
+                case_continuation_lines.add(line_index + 1)
                 expected_indent = active_case_indent + " " * indent_size
                 if actual_indent != expected_indent:
                     violations.append({
@@ -620,6 +622,7 @@ class XmlIndentRule(BaseRule):
                             is_bind_body
                             or (
                                 is_logical_continuation
+                                and text_line not in case_continuation_lines
                                 and open_parenthesis_depth <= 0
                                 and not has_local_logical_clause
                                 and actual_indent != minimum_indent

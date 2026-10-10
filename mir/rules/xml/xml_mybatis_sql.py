@@ -824,9 +824,15 @@ def post_choose_clause_source_edits(
                 re.IGNORECASE,
             )
         )
-        join_indent = (
-            base_indent if follows_shared_from else base_indent + "    "
+        follows_derived_from = bool(
+            previous_index >= 0
+            and re.search(
+                r"\bFROM[ \t]*\([ \t]*$",
+                lines[previous_index].strip(),
+                re.IGNORECASE,
+            )
         )
+        join_indent = base_indent + ("    " if follows_derived_from else "")
         clause_indent = (
             base_indent[:-4]
             if follows_shared_from and base_indent.endswith("    ")
@@ -864,6 +870,58 @@ def post_choose_clause_source_edits(
             indent_end = line_start + len(candidate) - len(body)
             edits.append((line_start, indent_end, expected))
     return edits
+
+
+def dynamic_body_indent_source_edits(
+    content: str,
+    source_range: tuple[int, int],
+    dynamic_ranges: List[tuple[int, int, int]],
+) -> List[tuple[int, int, str]]:
+    """Keep SQL text at least one level inside its dynamic XML block."""
+    source_start, source_end = source_range
+    edits_by_span: dict[tuple[int, int], str] = {}
+    for range_start, range_end, expected_width in dynamic_ranges:
+        if not (
+            source_start < range_start < range_end < source_end
+        ):
+            continue
+        cursor = content.find("\n", range_start, range_end)
+        while cursor != -1 and cursor + 1 < range_end:
+            line_start = cursor + 1
+            line_end = content.find("\n", line_start, range_end)
+            if line_end == -1:
+                line_end = range_end
+            line = content[line_start:line_end]
+            body = line.lstrip(" \t")
+            indent_width = len(line) - len(body)
+            first_word = body.split(None, 1)[0].upper() if body else ""
+            protects_direct_clause = first_word in {
+                "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "HAVING",
+                "UNION", "INTERSECT", "EXCEPT", "UPDATE", "INSERT",
+                "DELETE", "VALUES", "SET", "RETURNING",
+            }
+            if (
+                body
+                and not body.startswith("<")
+                and (
+                    indent_width < expected_width
+                    or (
+                        indent_width == expected_width
+                        and protects_direct_clause
+                    )
+                )
+            ):
+                span = (line_start, line_start + indent_width)
+                replacement = " " * expected_width
+                if len(replacement) > len(edits_by_span.get(span, "")):
+                    edits_by_span[span] = replacement
+            if line_end >= range_end:
+                break
+            cursor = line_end
+    return [
+        (start, end, replacement)
+        for (start, end), replacement in edits_by_span.items()
+    ]
 
 
 def resolve_source_edits(
@@ -1250,6 +1308,29 @@ class XmlMybatisSqlRule(BaseRule):
                         ),
                         "is_fixable": True,
                     })
+                dynamic_body_edits = dynamic_body_indent_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    dynamic_indent_ranges,
+                )
+                changed_dynamic_body_edits = [
+                    edit
+                    for edit in dynamic_body_edits
+                    if content[edit[0]:edit[1]] != edit[2]
+                ]
+                if changed_dynamic_body_edits:
+                    first_start = min(
+                        start for start, _, _ in changed_dynamic_body_edits
+                    )
+                    violations.append({
+                        "rule_id": self.rule_id,
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "SQL text must remain one indentation level inside "
+                            "its dynamic XML block."
+                        ),
+                        "is_fixable": True,
+                    })
                 order_edits = compact_dynamic_order_by_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
@@ -1457,7 +1538,14 @@ class XmlMybatisSqlRule(BaseRule):
                     content,
                     (el["start_offset"], el["end_offset"]),
                 )
-                layout_edits = post_choose_edits + layout_edits
+                dynamic_body_edits = dynamic_body_indent_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    dynamic_indent_ranges,
+                )
+                layout_edits = (
+                    post_choose_edits + dynamic_body_edits + layout_edits
+                )
                 join_config = dict(inner_config)
                 join_config.update(bridge_state)
                 layout_edits.extend(
@@ -1497,11 +1585,12 @@ class XmlMybatisSqlRule(BaseRule):
                         tag_ranges,
                     )
                 )
-                protected_post_choose_spans = [
-                    (start, end) for start, end, _ in post_choose_edits
+                protected_source_indent_spans = [
+                    (start, end)
+                    for start, end, _ in post_choose_edits + dynamic_body_edits
                 ]
 
-                def overlaps_post_choose_indent(edit) -> bool:
+                def overlaps_protected_source_indent(edit) -> bool:
                     edit_start, edit_end, _ = edit
                     return any(
                         max(edit_start, span_start) < min(edit_end, span_end)
@@ -1509,16 +1598,18 @@ class XmlMybatisSqlRule(BaseRule):
                             edit_start == edit_end
                             and span_start <= edit_start <= span_end
                         )
-                        for span_start, span_end in protected_post_choose_spans
+                        for span_start, span_end in protected_source_indent_spans
                     )
 
-                post_choose_edit_set = set(post_choose_edits)
+                protected_source_edit_set = set(
+                    post_choose_edits + dynamic_body_edits
+                )
                 layout_edits = [
                     edit
                     for edit in layout_edits
                     if (
-                        edit in post_choose_edit_set
-                        or not overlaps_post_choose_indent(edit)
+                        edit in protected_source_edit_set
+                        or not overlaps_protected_source_indent(edit)
                     )
                 ]
                 # Direct layout helpers are authorized to move only
@@ -1554,7 +1645,7 @@ class XmlMybatisSqlRule(BaseRule):
                 )
                 edits = [
                     edit for edit in edits
-                    if not overlaps_post_choose_indent(edit)
+                    if not overlaps_protected_source_indent(edit)
                 ]
                 edits = layout_edits + edits
                 statement_key = (el["tag"], el["attrs"]["id"])

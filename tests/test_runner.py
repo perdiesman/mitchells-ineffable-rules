@@ -1838,6 +1838,132 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_complete_query_choice_aligns_shared_joins(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        WITH selected_items AS (\n'
+            '            <choose>\n'
+            '                <when test="archived">\n'
+            '                    SELECT item_id, owner_id\n'
+            '                    FROM archived_item\n'
+            '                </when>\n'
+            '                <otherwise>\n'
+            '                    SELECT item_id, owner_id\n'
+            '                    FROM current_item\n'
+            '                </otherwise>\n'
+            '            </choose>\n'
+            '                JOIN sample_owner owner ON owner.owner_id = owner_id\n'
+            '            WHERE owner.enabled\n'
+            '        )\n'
+            '        SELECT item_id\n'
+            '        FROM selected_items\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '                JOIN sample_owner',
+            '            JOIN sample_owner',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.disable_all = True
+        config.rules_to_enable = [
+            "IR-xml-mybatis-sql",
+            "IR-from-multi",
+            "IR-join-on-multi",
+            "IR-clause-alignment",
+        ]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_dynamic_branch_keeps_sql_inside_tag(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        WITH selected_items AS (\n'
+            '            SELECT item_id\n'
+            '            FROM current_item\n'
+            '            UNION ALL\n'
+            '            <choose>\n'
+            '                <when test="archived">\n'
+            '        SELECT item_id\n'
+            '        FROM\n'
+            '                        archived_item\n'
+            '        WHERE archived\n'
+            '                </when>\n'
+            '            </choose>\n'
+            '        )\n'
+            '        SELECT item_id\n'
+            '        FROM selected_items\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '        SELECT item_id\n'
+            '        FROM\n',
+            '                    SELECT item_id\n'
+            '                    FROM\n',
+        ).replace(
+            '        WHERE archived',
+            '                    WHERE archived',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-mybatis-sql"]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_case_continuation_inside_choose_converges(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        <choose>\n'
+            '            <when test="active">\n'
+            '                SELECT\n'
+            '                    CASE\n'
+            '                        WHEN item.active\n'
+            '                            AND item.visible\n'
+            '                            THEN item.item_id\n'
+            '                    END\n'
+            '                FROM sample_item item\n'
+            '            </when>\n'
+            '        </choose>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        expected = xml_content.replace(
+            '                        WHEN item.active\n'
+            '                            AND item.visible\n'
+            '                            THEN item.item_id',
+            '                        WHEN item.active AND item.visible THEN item.item_id',
+        )
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_repeated_foreach_uses_expanded_layout_consistently(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
