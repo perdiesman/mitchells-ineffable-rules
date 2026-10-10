@@ -45,6 +45,7 @@ class MultilineFunctionLayoutRule(BaseRule):
         tokens = tokenize_sql(content)
         lines = content.splitlines()
         table_openings = table_function_parens(tokens)
+        boundary_offsets = rule_config.get("mybatis_boundary_offsets", set())
         indent_size = self.get_config_value(rule_config, "indent_size", 4)
         unit = " " * indent_size
         edits = []
@@ -113,6 +114,8 @@ class MultilineFunctionLayoutRule(BaseRule):
                 if token["type"] == "PAREN":
                     depth += 1 if token["value"] == "(" else -1
                 elif token["type"] == "COMMA" and depth == 0:
+                    if token["start"] in boundary_offsets:
+                        continue
                     edit_whitespace(
                         candidate, "\n" + argument_indent, before=False
                     )

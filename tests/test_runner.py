@@ -1118,6 +1118,93 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(second.violations)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_external_query_include_preserves_parentheses(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT included_item.* FROM (\n'
+            '            <include refid="external.Mapper.Query" />\n'
+            '        ) AS included_item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertIn("(\n", first.content)
+        self.assertIn(") included_item", first.content)
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(
+            any(item[0].rule_id == "IR-paren-single" for item in first.violations)
+        )
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_foreach_join_expands_from_clause(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="items">\n'
+            '        <foreach collection="items" item="item" separator=" UNION ">\n'
+            '            SELECT source_item.item_id\n'
+            '            FROM (SELECT #{item.id} AS item_id\n'
+            '                FROM source_item_input\n'
+            '            ) source_item\n'
+            '                JOIN sample_item existing ON existing.item_id = source_item.item_id\n'
+            '        </foreach>\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertIn("            FROM\n                (", first.content)
+        self.assertIn("                (\n                    SELECT", first.content)
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_insert_columns_preserve_dynamic_body_indent(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="items">\n'
+            '        INSERT INTO sample_item (\n'
+            '                item_id\n'
+            '                <if test="named">,\n'
+            '                item_name</if>\n'
+            '            )\n'
+            '        SELECT item_id, item_name FROM source_item\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="items">\n'
+            '        INSERT INTO sample_item (\n'
+            '            item_id\n'
+            '            <if test="named">,\n'
+            '                item_name</if>\n'
+            '        )\n'
+            '        SELECT item_id, item_name FROM source_item\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_indent_keeps_optional_where_include_at_clause_indent(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

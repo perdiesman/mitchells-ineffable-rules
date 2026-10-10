@@ -140,6 +140,24 @@ def is_reusable_column_list(element: dict) -> bool:
     )
 
 
+def has_unresolved_include(element: dict, sql_defs: dict) -> bool:
+    """Return whether an include target is defined outside this mapper."""
+    tokens = element.get("inner_tokens", [])
+    for index, token in enumerate(tokens):
+        if token["type"] != "ATTR_NAME" or token["value"].lower() != "refid":
+            continue
+        if (
+            index + 2 >= len(tokens)
+            or tokens[index + 1]["type"] != "EQUAL"
+            or tokens[index + 2]["type"] != "ATTR_VALUE"
+        ):
+            continue
+        refid = tokens[index + 2]["value"].strip("'\"")
+        if refid not in sql_defs and refid.split(".")[-1] not in sql_defs:
+            return True
+    return False
+
+
 def _tokens_start_with_select(tokens: List[dict]) -> bool:
     """Return whether a dynamic branch starts with a complete SELECT."""
     for token in tokens:
@@ -717,12 +735,16 @@ def dynamic_sql_indent_source_edits(
         if (
             isinstance(source_rule, FromMultiRule)
             and not indentation_only
+            and item["token"]["value"] != "("
             and any(
-            range_start < source_start < range_end
-            or range_start < source_end < range_end
-            for range_start, range_end, _ in dynamic_ranges
+                range_start < source_start < range_end
+                or range_start < source_end < range_end
+                for range_start, range_end, _ in dynamic_ranges
             )
         ):
+            # A JOIN synthesized beyond a dynamic branch must not force its
+            # one-relation FROM to expand. A derived-table opener is different:
+            # its continuation is physically present in the same text body.
             continue
         dynamic_indent = max(
             (
@@ -991,7 +1013,28 @@ def dynamic_subquery_source_edits(
                 edits.append((source_start, source_end, item["replacement"]))
             continue
         if item["first_sub_tok"]["line"] == item["open_tok"]["line"]:
-            continue
+            guest_start = item["open_tok"]["end"]
+            guest_end = item["first_sub_tok"]["start"]
+            if 0 <= guest_start <= guest_end < len(mapping):
+                contiguous = all(
+                    mapping[index] - mapping[index - 1] == 1
+                    for index in range(guest_start + 1, guest_end)
+                )
+                source_start = mapping[guest_start]
+                source_end = (
+                    source_start
+                    if guest_start == guest_end
+                    else mapping[guest_end - 1] + 1
+                )
+                if (
+                    contiguous
+                    and not content[source_start:source_end].strip()
+                ):
+                    edits.append((
+                        source_start,
+                        source_end,
+                        "\n" + item["content_indent"],
+                    ))
         open_guest_offset = item["open_tok"]["start"]
         source_indent_delta = 0
         if open_guest_offset < len(mapping):
@@ -1427,11 +1470,22 @@ def dynamic_body_indent_source_edits(
                 "UNION", "INTERSECT", "EXCEPT", "UPDATE", "INSERT",
                 "DELETE", "VALUES", "SET", "RETURNING",
             }
+            closes_dynamic_inline = bool(
+                range_end <= line_end and re.search(
+                    r"</(?:if|foreach|when|otherwise|trim|where|set)>\s*$",
+                    body,
+                    re.IGNORECASE,
+                )
+            )
             if (
                 body
                 and not body.startswith("<")
                 and (
                     indent_width < expected_width
+                    or (
+                        closes_dynamic_inline
+                        and indent_width != expected_width
+                    )
                     or (
                         indent_width == expected_width
                         and protects_direct_clause
@@ -1922,6 +1976,11 @@ def preserve_inline_dynamic_from_edits(
                     and depths[index] == 0
                     for index, token in enumerate(relation_tokens)
                 )
+                relation_paren_balance = sum(
+                    1 if token["value"] == "(" else -1
+                    for token in relation_tokens
+                    if token["type"] == "PAREN"
+                )
                 following_join = False
                 scan_cursor = relation_end + 1
                 while scan_cursor < range_end:
@@ -1955,6 +2014,7 @@ def preserve_inline_dynamic_from_edits(
                     not has_top_level_comma
                     and not has_top_level_join
                     and not following_join
+                    and relation_paren_balance == 0
                     and "--" not in relation
                     and "/*" not in relation
                 ):
@@ -2360,17 +2420,23 @@ class XmlMybatisSqlRule(BaseRule):
                         "is_fixable": True,
                     })
 
+                excluded_guest_rule_ids = set()
+                if owns_runtime_where(el):
+                    excluded_guest_rule_ids.update(
+                        {"IR-where-multi", "IR-where-single"}
+                    )
+                if has_unresolved_include(el, sql_defs):
+                    # The expansion uses a scalar placeholder for definitions
+                    # owned by another mapper. Parenthesis simplification
+                    # cannot infer whether that placeholder is really a query.
+                    excluded_guest_rule_ids.add("IR-paren-single")
                 embedded_violations = check_embedded_content(
                     guest_language="sql",
                     guest_text=sql_text,
                     mapping=mapping,
                     file_path=file_path,
                     rule_config=inner_config,
-                    excluded_rule_ids=(
-                        {"IR-where-multi", "IR-where-single"}
-                        if owns_runtime_where(el)
-                        else None
-                    ),
+                    excluded_rule_ids=excluded_guest_rule_ids or None,
                     require_embedded_safe=True,
                     extra_check_args={
                         "ignored_comma_offsets": ignored_comma_offsets,
@@ -2832,9 +2898,14 @@ class XmlMybatisSqlRule(BaseRule):
                     for start, end, _ in post_choose_edits + dynamic_body_edits
                     + top_level_clause_edits
                     + dynamic_projection_edits
-                    + dynamic_from_edits
-                    + dynamic_order_edits
-                    + static_order_edits
+                ] + [
+                    (start, end)
+                    for start, end, replacement in (
+                        dynamic_from_edits
+                        + dynamic_order_edits
+                        + static_order_edits
+                    )
+                    if content[start:end] != replacement
                 ]
 
                 def overlaps_protected_source_indent(edit) -> bool:
@@ -2849,15 +2920,23 @@ class XmlMybatisSqlRule(BaseRule):
                     )
 
                 protected_source_edit_set = set(
-                    post_choose_edits
-                    + dynamic_body_edits
-                    + top_level_clause_edits
-                    + subquery_source_edits
-                    + dynamic_window_edits
-                    + dynamic_projection_edits
-                    + dynamic_from_edits
-                    + dynamic_order_edits
-                    + static_order_edits
+                    edit
+                    for edit in (
+                        post_choose_edits
+                        + dynamic_body_edits
+                        + top_level_clause_edits
+                        + subquery_source_edits
+                        + dynamic_window_edits
+                        + dynamic_projection_edits
+                    )
+                ) | set(
+                    edit
+                    for edit in (
+                        dynamic_from_edits
+                        + dynamic_order_edits
+                        + static_order_edits
+                    )
+                    if content[edit[0]:edit[1]] != edit[2]
                 )
                 layout_edits = [
                     edit
@@ -2896,6 +2975,8 @@ class XmlMybatisSqlRule(BaseRule):
                     if bridge_state["mybatis_dynamic_indent_ranges"]
                     else set()
                 )
+                if has_unresolved_include(el, sql_defs):
+                    excluded_guest_rule_ids.add("IR-paren-single")
                 if keyword_case_edits:
                     excluded_guest_rule_ids.add("IR-keyword-case")
                     applied_rules.add("IR-keyword-case")
