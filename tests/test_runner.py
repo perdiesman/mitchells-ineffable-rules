@@ -4165,6 +4165,31 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_empty_fragment_does_not_shift_safety_signatures(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="emptySource">\n'
+            '    </sql>\n'
+            '    <select id="items">\n'
+            '        select item_id from sample_item\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        expected = xml_content.replace(
+            "        select item_id from sample_item",
+            "        SELECT item_id FROM sample_item",
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_foreach_continuation_indentation(self):
         xml_content = (
             '<mapper namespace="MyMapper">\n'

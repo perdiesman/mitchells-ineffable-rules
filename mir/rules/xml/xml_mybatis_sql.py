@@ -3241,19 +3241,15 @@ class XmlMybatisSqlRule(BaseRule):
             chars[start:end] = list(new_text)
 
         fixed_content = remove_mybatis_sql_trailing_whitespace("".join(chars))
-        if lines_filter:
-            # A line-restricted pass expands only selected statements above,
-            # but final safety validation still covers the entire mapper.
-            original_signatures = get_mybatis_protected_signatures(content)
-            original_signature_map = {
-                (tag, statement_id): signature
-                for tag, statement_id, signature in original_signatures
-            }
-        else:
-            original_signatures = tuple(
-                (tag, statement_id, signature)
-                for (tag, statement_id), signature in original_signature_map.items()
-            )
+        # The formatting loop skips elements whose expanded SQL is empty, but
+        # final validation must still inventory them. Otherwise an empty
+        # reusable fragment shifts every following signature (or changes the
+        # count) and makes an unrelated safe edit appear destructive.
+        original_signatures = get_mybatis_protected_signatures(content)
+        original_signature_map.update({
+            (tag, statement_id): signature
+            for tag, statement_id, signature in original_signatures
+        })
         expected_signatures = tuple(
             (
                 tag,
