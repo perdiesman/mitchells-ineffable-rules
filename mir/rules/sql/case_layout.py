@@ -308,9 +308,14 @@ class CaseLayoutRule(BaseRule):
                             cond_parts.append(current_part)
                             
                         cond_strs = []
+                        condition_has_subquery = any(
+                            token["type"] == "KEYWORD"
+                            and token["value"].upper() == "SELECT"
+                            for token in cond_tokens
+                        )
                         for part in cond_parts:
                             part_str = "".join([t["value"] for t in part]).strip()
-                            if "\n" in part_str:
+                            if "\n" in part_str and not condition_has_subquery:
                                 condition_fragments = [
                                     line.rstrip()
                                     for line in part_str.splitlines()
@@ -361,7 +366,7 @@ class CaseLayoutRule(BaseRule):
                                         starts_with_operator
                                     )
                                 part_str += "".join(normalized_lines)
-                            else:
+                            elif "\n" not in part_str:
                                 part_str = re.sub(r"\s+", " ", part_str)
                             cond_strs.append(part_str)
                             
