@@ -1,6 +1,7 @@
 from typing import Any, Dict, List
 
 from mir.engine.rule_interface import BaseRule, Violation
+from mir.rules.sql.line_length import LineLengthRule
 from mir.rules.sql.sql_utils import find_matching_paren, get_token_depths, tokenize_sql
 
 
@@ -9,15 +10,21 @@ class WindowLayoutRule(BaseRule):
     embedded_safe = True
     rule_id = "IR-window-layout"
     description = (
-        "Multiline window expressions should indent OVER clauses, place each "
+        "Long or multiline window expressions should indent OVER clauses, place each "
         "PARTITION BY field on its own line, and align wrapper arguments."
     )
     category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
 
-    default_config = {}
-    config_options = {}
+    default_config = {"max_length": 120}
+    config_options = {
+        "max_length": {
+            "default": 120,
+            "description": "Maximum line length before expanding a window expression.",
+            "fallback": "IR-line-length:max_length",
+        }
+    }
 
     examples = [
         {
@@ -44,7 +51,15 @@ class WindowLayoutRule(BaseRule):
         "SELECT lag(item_count) OVER (ORDER BY recorded_at) FROM sample_item;"
     ]
 
-    def _find_edits(self, content: str) -> List[dict]:
+    def _find_edits(
+        self, content: str, rule_config: Dict[str, Any]
+    ) -> List[dict]:
+        max_length = self.get_config_value(
+            rule_config,
+            "max_length",
+            default_value=120,
+            fallbacks=[(LineLengthRule, "max_length")],
+        )
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
         lines = content.splitlines()
@@ -99,23 +114,31 @@ class WindowLayoutRule(BaseRule):
             if over_open is None or tokens[over_open]["value"] != "(":
                 continue
             over_close = find_matching_paren(tokens, over_open)
-            if over_close is None or tokens[over_close]["line"] == tokens[over_open]["line"]:
+            if over_close is None:
+                continue
+            if (
+                tokens[over_close]["line"] == tokens[over_open]["line"]
+                and len(lines[over_token["line"] - 1]) <= max_length
+            ):
                 continue
 
             wrapper_open = enclosing.get(over_index, ())[-1] if enclosing.get(over_index) else None
-            if wrapper_open is None:
-                continue
-            wrapper_name = next(
-                (
-                    candidate
-                    for candidate in range(wrapper_open - 1, -1, -1)
-                    if tokens[candidate]["type"]
-                    not in ("WHITESPACE", "COMMENT")
-                ),
-                None,
+            wrapper_name = (
+                next(
+                    (
+                        candidate
+                        for candidate in range(wrapper_open - 1, -1, -1)
+                        if tokens[candidate]["type"]
+                        not in ("WHITESPACE", "COMMENT")
+                    ),
+                    None,
+                )
+                if wrapper_open is not None
+                else None
             )
             if (
-                wrapper_name is None
+                wrapper_open is None
+                or wrapper_name is None
                 or tokens[wrapper_name]["type"]
                 not in ("IDENTIFIER", "KEYWORD")
                 or (
@@ -256,11 +279,15 @@ class WindowLayoutRule(BaseRule):
                 offending_lines=[lines[item["token"]["line"] - 1]],
                 is_fixable=True,
             )
-            for item in self._find_edits(content)
+            for item in self._find_edits(content, rule_config)
         ]
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
         chars = list(content)
-        for item in sorted(self._find_edits(content), key=lambda edit: edit["start"], reverse=True):
+        for item in sorted(
+            self._find_edits(content, rule_config),
+            key=lambda edit: edit["start"],
+            reverse=True,
+        ):
             chars[item["start"]:item["end"]] = list(item["replacement"])
         return "".join(chars)

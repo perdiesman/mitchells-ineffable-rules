@@ -1,6 +1,6 @@
 # IR-window-layout
 
-Multiline window expressions should indent OVER clauses, place each PARTITION BY field on its own line, and align wrapper arguments.
+Long or multiline window expressions should indent OVER clauses, place each PARTITION BY field on its own line, and align wrapper arguments.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
@@ -9,7 +9,8 @@ Multiline window expressions should indent OVER clauses, place each PARTITION BY
 - **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
-  - `enabled`: `true`
+  - `enabled` (Default: `true`): Enable or disable this rule.
+  - `max_length` (Default: `120`): Maximum line length before expanding a window expression. *Note: Value dynamically inherited from rule [`IR-line-length`](../general/IR-line-length.md) -> `max_length` if not configured.*
 
 #### ❌ Violating Example
 ```sql

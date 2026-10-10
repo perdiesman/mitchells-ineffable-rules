@@ -35,9 +35,38 @@ from mir.rules.sql.trailing_semicolon import TrailingSemicolonRule
 from mir.rules.sql.trailing_whitespace import TrailingWhitespaceRule
 from mir.rules.sql.unresolved_alias import UnresolvedAliasRule
 from mir.rules.sql.where_multi import WhereMultiRule
+from mir.rules.sql.window_layout import WindowLayoutRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_long_single_line_window_expands_by_clause(self):
+        source = (
+            "        row_number() over (partition BY sample_id, sample_region "
+            "ORDER BY extraordinarily_long_recorded_timestamp, "
+            "extraordinarily_long_sequence_number) AS row_number"
+        )
+        expected = (
+            "        row_number() over (\n"
+            "            partition BY\n"
+            "                sample_id,\n"
+            "                sample_region\n"
+            "            ORDER BY extraordinarily_long_recorded_timestamp, "
+            "extraordinarily_long_sequence_number\n"
+            "        ) AS row_number"
+        )
+        rule = WindowLayoutRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+
+        keyword_rule = KeywordCaseRule()
+        keyword_fixed = keyword_rule.fix(fixed, "generic.sql", {})
+        self.assertIn("row_number() OVER (", keyword_fixed)
+        self.assertIn("PARTITION BY", keyword_fixed)
+
     def test_constraint_parentheses_are_not_removed(self):
         source = (
             "CREATE TABLE sample_item (\n"

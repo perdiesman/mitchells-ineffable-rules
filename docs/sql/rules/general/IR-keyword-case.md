@@ -17,7 +17,7 @@ SQL keywords must be in uppercase.
 `left`, `right`
 
 #### Default `KEYWORDS`
-`alter`, `and`, `as`, `case`, `create`, `delete`, `distinct`, `drop`, `else`, `end`, `from`, `group by`, `having`, `in`, `index`, `inner`, `insert`, `into`, `is`, `is null`, `join`, `lateral`, `left`, `limit`, `on`, `or`, `order by`, `outer`, `recursive`, `right`, `select`, `set`, `table`, `then`, `union`, `update`, `values`, `when`, `where`, `with`
+`alter`, `and`, `as`, `case`, `create`, `delete`, `distinct`, `drop`, `else`, `end`, `from`, `group by`, `having`, `in`, `index`, `inner`, `insert`, `into`, `is`, `is null`, `join`, `lateral`, `left`, `limit`, `on`, `or`, `order by`, `outer`, `over`, `partition`, `recursive`, `right`, `select`, `set`, `table`, `then`, `union`, `update`, `values`, `when`, `where`, `with`
 
 #### ❌ Violating Example #1
 ```sql
