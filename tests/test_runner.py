@@ -2754,6 +2754,33 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content.count("            FROM\n"), 2)
         self.assertEqual(first.content.count("                staged st"), 2)
 
+    def test_xml_mybatis_insert_select_inside_foreach_uses_block_indent(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="save">\n'
+            '        <foreach collection="ids" item="id">\n'
+            '            INSERT INTO sample_log (item_id)\n'
+            '            SELECT #{id}\n'
+            '            FROM sample_item item\n'
+            '            WHERE item.id = #{id};\n'
+            '        </foreach>\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertNotIn(
+            "IR-clause-alignment",
+            [violation.rule_id for violation, _, _ in second.violations],
+        )
+
     def test_xml_mybatis_fragment_semantic_rewrite_updates_consumer_signatures(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

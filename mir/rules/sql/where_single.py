@@ -129,11 +129,21 @@ class WhereSingleRule(BaseRule):
                     dynamic_offsets = rule_config.get(
                         "mybatis_foreach_offsets", set()
                     )
-                    if any(
+                    clause_has_foreach = any(
                         token["start"] in dynamic_offsets
                         for token in clause_tokens
                         if token["type"] not in ("WHITESPACE", "COMMENT")
-                    ):
+                    )
+                    # A foreach that wraps the complete statement contributes
+                    # no runtime structure inside this WHERE. Only force the
+                    # condition onto its own line when the foreach is nested
+                    # within an otherwise static statement.
+                    statement_has_static_token = any(
+                        token["type"] not in ("WHITESPACE", "COMMENT")
+                        and token["start"] not in dynamic_offsets
+                        for token in tokens
+                    )
+                    if clause_has_foreach and statement_has_static_token:
                         should_wrap = True
                     prefix_before_where = content[line_start:tok["start"]].rstrip()
                     if prefix_before_where.strip():

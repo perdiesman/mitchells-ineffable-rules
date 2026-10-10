@@ -128,6 +128,7 @@ class ClauseAlignmentRule(BaseRule):
                     "space_start": space_start,
                     "indentation": indentation,
                     "is_first_on_line": is_first_on_line,
+                    "is_dynamic": token["start"] in dynamic_offsets,
                     # XML tags are absent from the expanded SQL. Without a
                     # boundary component, clauses in separate MyBatis
                     # branches appear to share a query scope and a static
@@ -181,6 +182,7 @@ class ClauseAlignmentRule(BaseRule):
                 ref_clause.get("insert_indent") + "    "
                 if ref_clause["keyword"] == "SELECT"
                 and ref_clause.get("insert_indent") is not None
+                and not ref_clause["is_dynamic"]
                 else ref_clause["indentation"]
             )
             
@@ -247,6 +249,7 @@ class ClauseAlignmentRule(BaseRule):
                 ref_clause.get("insert_indent") + "    "
                 if ref_clause["keyword"] == "SELECT"
                 and ref_clause.get("insert_indent") is not None
+                and not ref_clause["is_dynamic"]
                 else ref_clause["indentation"]
             )
             
