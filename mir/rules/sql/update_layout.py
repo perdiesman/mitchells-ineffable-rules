@@ -137,18 +137,28 @@ class UpdateLayoutRule(BaseRule):
                     expected = single_line
                 else:
                     if len(fields) > 1:
+                        statement_tail = (
+                            "\n" + base_indent + c4_str
+                            if where_tok
+                            else ";"
+                        )
                         expected = (
                             c1_str + "\n" +
                             base_indent + "SET\n" +
                             "\n".join(base_indent + "    " + f + "," for f in fields[:-1]) + "\n" +
-                            base_indent + "    " + fields[-1] + "\n" +
-                            base_indent + c4_str
+                            base_indent + "    " + fields[-1] +
+                            statement_tail
                         )
                     else:
+                        statement_tail = (
+                            "\n" + base_indent + c4_str
+                            if where_tok
+                            else ";"
+                        )
                         expected = (
                             c1_str + "\n" +
-                            base_indent + "SET " + fields[0] + "\n" +
-                            base_indent + c4_str
+                            base_indent + "SET " + fields[0] +
+                            statement_tail
                         )
                     
                 original = content[t["start"] : tokens[semi_idx]["end"]].strip()

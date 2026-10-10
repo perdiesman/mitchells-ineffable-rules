@@ -207,6 +207,25 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
         self.assertEqual(rule.check(source, "generic.sql", {}), [])
 
+    def test_multiline_update_keeps_semicolon_with_last_assignment(self):
+        from mir.rules.sql.update_layout import UpdateLayoutRule
+
+        source = (
+            "UPDATE sample_calculation\n"
+            "SET first_result = first_source,\n"
+            "    second_result = second_source\n"
+            ";"
+        )
+        expected = source.replace(
+            "SET first_result", "SET\n    first_result"
+        ).replace("second_source\n;", "second_source;")
+        rule = UpdateLayoutRule()
+
+        config = {"max_length": 60}
+        fixed = rule.fix(source, "generic.sql", config)
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", config), expected)
+
     def test_nullable_equality_accepts_reversed_equality_operands(self):
         source = (
             "((left_item.owner_id IS NULL AND right_item.owner_id IS NULL) OR "
