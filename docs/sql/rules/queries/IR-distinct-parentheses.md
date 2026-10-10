@@ -25,3 +25,7 @@ SELECT DISTINCT id, name FROM users;
 ```sql
 SELECT DISTINCT ON (company_id) id, name FROM users;
 ```
+
+```sql
+SELECT count(DISTINCT (state_id, utility_id)) FROM users;
+```

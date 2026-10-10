@@ -51,6 +51,223 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
 
+    def test_xml_line_length_expands_inline_dynamic_sql_body(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        WHERE enabled\n'
+            '            <if test="regionCodes != null">AND (#{regionCodes} = \'All\' OR extraordinarily_long_region_code = ANY (#{regionCodes}))</if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '        WHERE enabled\n',
+            '        WHERE\n            enabled\n',
+        ).replace(
+            '<if test="regionCodes != null">AND (#{regionCodes} = \'All\' OR extraordinarily_long_region_code = ANY (#{regionCodes}))</if>',
+            '<if test="regionCodes != null">\n'
+            '                AND (#{regionCodes} = \'All\' OR extraordinarily_long_region_code = ANY (#{regionCodes}))\n'
+            '            </if>',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_expands_long_physical_select_projection(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT extraordinarily_long_item_identifier, extraordinarily_long_item_name, extraordinarily_long_item_description, extraordinarily_long_item_status\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            extraordinarily_long_item_identifier,\n'
+            '            extraordinarily_long_item_name,\n'
+            '            extraordinarily_long_item_description,\n'
+            '            extraordinarily_long_item_status\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_moves_dynamic_projection_after_select(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT <if test="includeCode">\n'
+            '            item_code,\n'
+            '        </if>\n'
+            '        item_id\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            <if test="includeCode">\n'
+            '                item_code,\n'
+            '            </if>\n'
+            '            item_id\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_expands_dynamic_grouping_block(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        GROUP BY <if test="groupNames">item_code, item_name,</if>\n'
+            '            item_id\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        GROUP BY\n'
+            '            <if test="groupNames">\n'
+            '                item_code,\n'
+            '                item_name,\n'
+            '            </if>\n'
+            '            item_id\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_compacts_simple_physical_expressions(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            max(item_count) AS\n'
+            '            maximum_item_count,\n'
+            '            sum(other_count\n'
+            '            ) AS total_other_count\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT max(item_count) AS maximum_item_count, sum(other_count) AS total_other_count\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_formats_physical_and_dynamic_case_branches(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            CASE WHEN coalesce(summary.override_count, summary.item_count, 0) &gt; 0 THEN coalesce(summary.override_count, summary.item_count, 0)\n'
+            '            <if test="useFallback">\n'
+            '                ELSE CASE WHEN summary.coverage_count = 0 THEN null ELSE 0 END END\n'
+            '            </if>\n'
+            '                AS resolved_count,\n'
+            '            bool_or(\n'
+            '                CASE\n'
+            '                    WHEN summary.override_count IS NOT NULL THEN true\n'
+            '                    ELSE FALSE END\n'
+            '            ) AS has_override\n'
+            '        FROM sample_summary summary\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            CASE\n'
+            '                WHEN coalesce(summary.override_count, summary.item_count, 0) &gt; 0\n'
+            '                    THEN coalesce(summary.override_count, summary.item_count, 0)\n'
+            '                <if test="useFallback">\n'
+            '                    ELSE CASE WHEN summary.coverage_count = 0 THEN null ELSE 0 END END\n'
+            '                </if>\n'
+            '            AS resolved_count,\n'
+            '            bool_or(\n'
+            '                CASE\n'
+            '                    WHEN summary.override_count IS NOT NULL THEN true\n'
+            '                    ELSE FALSE\n'
+            '                END\n'
+            '            ) AS has_override\n'
+            '        FROM sample_summary summary\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_mybatis_sql_indent_uses_structural_xml_depth(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

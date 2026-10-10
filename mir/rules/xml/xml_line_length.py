@@ -7,7 +7,8 @@ class XmlLineLengthRule(BaseRule):
     rule_id = "IR-xml-line-length"
     description = (
         "XML lines must not exceed the configured maximum length, and repeated "
-        "MyBatis foreach forms use the same expanded layout."
+        "MyBatis foreach forms use the same expanded layout; overlong inline "
+        "dynamic SQL blocks expand without changing their expressions."
     )
     category = "general"
     is_fixable = "yes"
@@ -122,7 +123,10 @@ class XmlLineLengthRule(BaseRule):
 
         block_edits = []
         for element in elements:
-            if element["tag"] != "foreach" or not element["inner_tokens"]:
+            if (
+                element["tag"] not in {"foreach", "if", "when", "otherwise"}
+                or not element["inner_tokens"]
+            ):
                 continue
             if any(token["type"] == "TAG_OPEN_START" for token in element["inner_tokens"]):
                 continue
@@ -130,12 +134,16 @@ class XmlLineLengthRule(BaseRule):
             end_line = content.count("\n", 0, element["end_offset"])
             first_inner = element["inner_tokens"][0]["start"]
             signature = content[element["start_offset"]:first_inner].strip()
+            repeated_foreach = (
+                element["tag"] == "foreach"
+                and signature in multiline_foreach_signatures
+            )
             if (
                 start_line != end_line
                 or start_line >= len(lines)
                 or (
                     len(lines[start_line]) <= max_length
-                    and signature not in multiline_foreach_signatures
+                    and not repeated_foreach
                 )
             ):
                 continue

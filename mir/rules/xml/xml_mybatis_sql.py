@@ -3071,6 +3071,477 @@ def compact_static_select_edits(
     return edits
 
 
+def expand_long_physical_select_edits(
+    content: str,
+    source_range: tuple[int, int],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Expand a long, tag-free physical SELECT projection in MyBatis XML."""
+    from mir.rules.sql.line_length import LineLengthRule
+    from mir.rules.sql.sql_utils import get_token_depths, tokenize_sql
+
+    start, end = source_range
+    max_length = LineLengthRule().get_config_value(
+        rule_config, "max_length", default_value=120
+    )
+    edits = []
+    cursor = content.rfind("\n", 0, start) + 1
+    while cursor < end:
+        line_end = content.find("\n", cursor, end)
+        if line_end == -1:
+            line_end = end
+        line = content[cursor:line_end]
+        body = line.lstrip(" \t")
+        indent = line[: len(line) - len(body)]
+        if (
+            len(line) > max_length
+            and "<" not in body
+            and re.match(r"(?i)^SELECT\b", body)
+        ):
+            tokens = tokenize_sql(body)
+            depths = get_token_depths(tokens)
+            select_index = next(
+                (
+                    index
+                    for index, token in enumerate(tokens)
+                    if token["type"] == "KEYWORD"
+                    and token["value"].upper() == "SELECT"
+                    and depths[index] == 0
+                ),
+                None,
+            )
+            clause_index = next(
+                (
+                    index
+                    for index, token in enumerate(tokens)
+                    if select_index is not None
+                    and index > select_index
+                    and token["type"] == "KEYWORD"
+                    and token["value"].upper() in {"FROM", "INTO"}
+                    and depths[index] == 0
+                ),
+                None,
+            )
+            projection_end = (
+                tokens[clause_index]["start"]
+                if clause_index is not None
+                else len(body)
+            )
+            comma_offsets = [
+                token["start"]
+                for index, token in enumerate(tokens)
+                if select_index is not None
+                and index > select_index
+                and token["type"] == "COMMA"
+                and depths[index] == 0
+                and token["start"] < projection_end
+            ]
+            if select_index is not None and comma_offsets:
+                projection_start = tokens[select_index]["end"]
+                boundaries = comma_offsets + [projection_end]
+                expressions = []
+                part_start = projection_start
+                for boundary in boundaries:
+                    expression = body[part_start:boundary].strip()
+                    if expression:
+                        expressions.append(expression)
+                    part_start = boundary + 1
+                if len(expressions) == len(comma_offsets) + 1:
+                    continuation = indent + "    "
+                    replacement = (
+                        indent
+                        + "SELECT\n"
+                        + (",\n" + continuation).join(
+                            continuation + expression
+                            if index == 0
+                            else expression
+                            for index, expression in enumerate(expressions)
+                        )
+                    )
+                    if clause_index is not None:
+                        replacement += "\n" + indent + body[projection_end:].strip()
+                    edits.append((cursor, line_end, replacement))
+        if line_end >= end:
+            break
+        cursor = line_end + 1
+    return edits
+
+
+def physical_case_indent_source_edits(
+    content: str,
+    source_range: tuple[int, int],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Indent tag-free physical multiline CASE blocks from their CASE line."""
+    from mir.rules.sql.line_length import LineLengthRule
+    from mir.rules.sql.sql_utils import get_token_depths, tokenize_sql
+
+    max_length = LineLengthRule().get_config_value(
+        rule_config, "max_length", default_value=120
+    )
+    start, end = source_range
+    line_start = content.rfind("\n", 0, start) + 1
+    edits = []
+    case_indents: List[str] = []
+    while line_start < end:
+        line_end = content.find("\n", line_start, end)
+        if line_end == -1:
+            line_end = end
+        line = content[line_start:line_end]
+        body = line.lstrip(" \t")
+        indent = line[: len(line) - len(body)]
+        upper = body.upper()
+        if "<" in body:
+            case_indents.clear()
+        elif upper == "CASE":
+            case_indents.append(indent)
+        elif case_indents:
+            base = case_indents[-1]
+            expected = None
+            if upper.startswith("WHEN "):
+                expected = base + "    "
+                if len(line) > max_length:
+                    tokens = tokenize_sql(body)
+                    depths = get_token_depths(tokens)
+                    for index, token in enumerate(tokens):
+                        if (
+                            token["type"] == "KEYWORD"
+                            and token["value"].upper() in {"AND", "OR"}
+                            and depths[index] == 0
+                            and index > 0
+                            and tokens[index - 1]["type"] == "WHITESPACE"
+                        ):
+                            whitespace = tokens[index - 1]
+                            edits.append((
+                                line_start + len(indent) + whitespace["start"],
+                                line_start + len(indent) + whitespace["end"],
+                                "\n" + base + "        ",
+                            ))
+                            break
+            elif upper.startswith("THEN "):
+                expected = base + "        "
+            elif upper.startswith("ELSE"):
+                expected = base + "    "
+                tokens = tokenize_sql(body)
+                end_index = next(
+                    (
+                        index
+                        for index, token in enumerate(tokens)
+                        if token["type"] == "KEYWORD"
+                        and token["value"].upper() == "END"
+                    ),
+                    None,
+                )
+                if (
+                    end_index is not None
+                    and end_index > 0
+                    and tokens[end_index - 1]["type"] == "WHITESPACE"
+                ):
+                    whitespace = tokens[end_index - 1]
+                    edits.append((
+                        line_start + len(indent) + whitespace["start"],
+                        line_start + len(indent) + whitespace["end"],
+                        "\n" + base,
+                    ))
+                    case_indents.pop()
+            elif upper.startswith("END"):
+                expected = base
+                case_indents.pop()
+            if expected is not None and indent != expected:
+                edits.append((line_start, line_start + len(indent), expected))
+        if line_end >= end:
+            break
+        line_start = line_end + 1
+    return edits
+
+
+def expand_long_physical_case_edits(
+    content: str,
+    source_range: tuple[int, int],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Expand complete, tag-free CASE expressions on overlong XML lines."""
+    from mir.rules.sql.case_layout import CaseLayoutRule
+    from mir.rules.sql.case_when_wrap import CaseWhenWrapRule
+    from mir.rules.sql.line_length import LineLengthRule
+    from mir.rules.sql.multiline_function_layout import MultilineFunctionLayoutRule
+    from mir.rules.sql.sql_utils import get_token_depths, source_text_length, tokenize_sql
+
+    start, end = source_range
+    max_length = LineLengthRule().get_config_value(
+        rule_config, "max_length", default_value=120
+    )
+    edits = []
+    cursor = content.rfind("\n", 0, start) + 1
+    while cursor < end:
+        line_end = content.find("\n", cursor, end)
+        if line_end == -1:
+            line_end = end
+        line = content[cursor:line_end]
+        upper = line.upper()
+        if (
+            "<" not in line
+            and "CASE" in upper
+            and "WHEN" in upper
+            and "END" in upper
+            and source_text_length(line, rule_config) > max_length
+        ):
+            replacement = CaseLayoutRule().fix(line, "embedded.sql", rule_config)
+            replacement = CaseWhenWrapRule().fix(
+                replacement, "embedded.sql", rule_config
+            )
+            replacement = MultilineFunctionLayoutRule().fix(
+                replacement, "embedded.sql", rule_config
+            )
+            if replacement != line:
+                edits.append((cursor, line_end, replacement))
+        elif (
+            "<" not in line
+            and "CASE" in upper
+            and "WHEN" in upper
+            and "THEN" in upper
+            and "END" not in upper
+            and source_text_length(line, rule_config) > max_length
+        ):
+            tokens = tokenize_sql(line)
+            depths = get_token_depths(tokens)
+            case_index = next(
+                (
+                    index
+                    for index, token in enumerate(tokens)
+                    if token["type"] == "KEYWORD"
+                    and token["value"].upper() == "CASE"
+                ),
+                None,
+            )
+            when_index = next(
+                (
+                    index
+                    for index, token in enumerate(tokens)
+                    if case_index is not None
+                    and index > case_index
+                    and token["type"] == "KEYWORD"
+                    and token["value"].upper() == "WHEN"
+                    and depths[index] == depths[case_index]
+                ),
+                None,
+            )
+            then_index = next(
+                (
+                    index
+                    for index, token in enumerate(tokens)
+                    if when_index is not None
+                    and index > when_index
+                    and token["type"] == "KEYWORD"
+                    and token["value"].upper() == "THEN"
+                    and depths[index] == depths[when_index]
+                ),
+                None,
+            )
+            if case_index is not None and when_index is not None and then_index is not None:
+                indent = line[: len(line) - len(line.lstrip(" \t"))]
+                inner_indent = indent + "    "
+                then_indent = inner_indent + "    "
+                when_gap = tokens[when_index - 1]
+                then_gap = tokens[then_index - 1]
+                if (
+                    when_gap["type"] == "WHITESPACE"
+                    and then_gap["type"] == "WHITESPACE"
+                ):
+                    condition = line[
+                        tokens[when_index]["start"]:tokens[then_index]["start"]
+                    ].rstrip()
+                    replacement = (
+                        line[:when_gap["start"]]
+                        + "\n"
+                        + inner_indent
+                        + condition
+                        + "\n"
+                        + then_indent
+                        + line[tokens[then_index]["start"]:]
+                    )
+                    edits.append((cursor, line_end, replacement))
+        if line_end >= end:
+            break
+        cursor = line_end + 1
+    return edits
+
+
+def physical_case_source_ranges(
+    content: str,
+    source_range: tuple[int, int],
+) -> List[tuple[int, int]]:
+    """Return tag-free physical multiline CASE ranges owned by the helper."""
+    start, end = source_range
+    line_start = content.rfind("\n", 0, start) + 1
+    case_starts: List[int] = []
+    ranges = []
+    while line_start < end:
+        line_end = content.find("\n", line_start, end)
+        if line_end == -1:
+            line_end = end
+        body = content[line_start:line_end].lstrip(" \t")
+        upper = body.upper()
+        if "<" in body:
+            case_starts.clear()
+        elif upper == "CASE":
+            case_starts.append(line_start)
+        elif case_starts and upper.startswith("END"):
+            ranges.append((case_starts.pop(), line_end))
+        if line_end >= end:
+            break
+        line_start = line_end + 1
+    return ranges
+
+
+def compact_physical_expression_edits(
+    content: str,
+    source_range: tuple[int, int],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Compact simple physical expression breaks when the result fits."""
+    from mir.rules.sql.line_length import LineLengthRule
+    from mir.rules.sql.sql_utils import source_text_length
+
+    start, end = source_range
+    fragment = content[start:end]
+    max_length = LineLengthRule().get_config_value(
+        rule_config, "max_length", default_value=120
+    )
+    patterns = [
+        re.compile(
+            r"(?m)^(?P<indent>[ \t]*)(?P<head>[A-Za-z_][A-Za-z0-9_$]*"
+            r"\([^()\n<]*)(?P<gap>\n[ \t]*)(?P<tail>\)\s+AS\s+"
+            r"[A-Za-z_][A-Za-z0-9_$]*,?)$"
+        ),
+        re.compile(
+            r"(?m)^(?P<indent>[ \t]*)(?P<head>[^\n<]+\s+AS)"
+            r"(?P<gap>\n[ \t]*)(?P<tail>[A-Za-z_][A-Za-z0-9_$]*,?)$"
+        ),
+    ]
+    edits = []
+    occupied = []
+    for pattern in patterns:
+        for match in pattern.finditer(fragment):
+            if match.group("tail").rstrip(",").upper() in {
+                "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "HAVING",
+                "LIMIT", "UNION", "INTERSECT", "EXCEPT", "RETURNING",
+            }:
+                continue
+            absolute_span = (start + match.start(), start + match.end())
+            if any(
+                max(absolute_span[0], used_start)
+                < min(absolute_span[1], used_end)
+                for used_start, used_end in occupied
+            ):
+                continue
+            separator = " " if match.group("head").rstrip().endswith("AS") else ""
+            candidate = (
+                match.group("indent")
+                + match.group("head").rstrip()
+                + separator
+                + match.group("tail").lstrip()
+            )
+            if source_text_length(candidate, rule_config) <= max_length:
+                edits.append((
+                    start + match.start("gap"),
+                    start + match.end("gap"),
+                    separator,
+                ))
+                occupied.append(absolute_span)
+    return edits
+
+
+def has_dynamic_case_branches(
+    content: str,
+    source_range: tuple[int, int],
+) -> bool:
+    start, end = source_range
+    return bool(re.search(
+        r"(?is)<if\b[^>]*>\s*(?:ELSE|END)\b",
+        content[start:end],
+    ))
+
+
+def dynamic_case_branch_source_edits(
+    content: str,
+    source_range: tuple[int, int],
+    elements: List[dict],
+) -> List[tuple[int, int, str]]:
+    """Align XML-controlled ELSE branches with a preceding physical CASE."""
+    start, end = source_range
+    edits = []
+    for element in elements:
+        if element.get("tag") not in {"if", "when", "otherwise"}:
+            continue
+        if not (start <= element["start_offset"] < element["end_offset"] <= end):
+            continue
+        inner_tokens = element.get("inner_tokens", [])
+        if not inner_tokens:
+            continue
+        first_inner = inner_tokens[0]["start"]
+        last_inner = inner_tokens[-1]["end"]
+        if not content[first_inner:last_inner].lstrip().upper().startswith("ELSE"):
+            continue
+        opening_line_start = content.rfind("\n", 0, element["start_offset"]) + 1
+        search_end = max(0, opening_line_start - 1)
+        case_line_start = None
+        for _ in range(24):
+            candidate_start = content.rfind("\n", 0, search_end) + 1
+            candidate = content[candidate_start:search_end].strip().upper()
+            if candidate == "CASE":
+                case_line_start = candidate_start
+                break
+            if candidate.startswith(("FROM", "WHERE", "GROUP BY", "ORDER BY")):
+                break
+            if candidate_start == 0:
+                break
+            search_end = candidate_start - 1
+        if case_line_start is None:
+            continue
+        case_line_end = content.find("\n", case_line_start)
+        case_line = content[case_line_start:case_line_end]
+        case_indent = case_line[: len(case_line) - len(case_line.lstrip(" \t"))]
+        branch_indent = case_indent + "    "
+        body_indent = branch_indent + "    "
+
+        opening_prefix = content[opening_line_start:element["start_offset"]]
+        if opening_prefix != branch_indent:
+            edits.append((opening_line_start, element["start_offset"], branch_indent))
+
+        inner_text = content[first_inner:last_inner]
+        body_text_start = first_inner + len(inner_text) - len(inner_text.lstrip())
+        body_line_start = content.rfind("\n", 0, body_text_start) + 1
+        body_line_end = content.find("\n", body_line_start)
+        if body_line_end == -1:
+            body_line_end = last_inner
+        body_line = content[body_line_start:body_line_end]
+        body_actual = body_line[: len(body_line) - len(body_line.lstrip(" \t"))]
+        if body_actual != body_indent:
+            edits.append((body_line_start, body_line_start + len(body_actual), body_indent))
+
+        closing_start = content.rfind("</", last_inner, element["end_offset"])
+        if closing_start != -1:
+            closing_line_start = content.rfind("\n", 0, closing_start) + 1
+            closing_prefix = content[closing_line_start:closing_start]
+            if closing_prefix != branch_indent:
+                edits.append((closing_line_start, closing_start, branch_indent))
+
+            next_line_start = content.find("\n", element["end_offset"], end)
+            if next_line_start != -1:
+                next_line_start += 1
+                next_line_end = content.find("\n", next_line_start, end)
+                if next_line_end == -1:
+                    next_line_end = end
+                next_line = content[next_line_start:next_line_end]
+                next_text = next_line.lstrip(" \t")
+                if next_text.upper().startswith("AS "):
+                    actual = next_line[: len(next_line) - len(next_text)]
+                    if actual != case_indent:
+                        edits.append((next_line_start, next_line_start + len(actual), case_indent))
+    return list(dict.fromkeys(edits))
+
+
 def sql_trailing_whitespace_source_edits(
     content: str,
     sql_text: str,
@@ -3446,6 +3917,11 @@ class XmlMybatisSqlRule(BaseRule):
                     dynamic_indent_ranges,
                     inner_config,
                 )
+                physical_case_ranges = physical_case_source_ranges(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                )
+                physical_case_layout_ranges = list(physical_case_ranges)
                 changed_dynamic_body_edits = [
                     edit
                     for edit in dynamic_body_edits
@@ -3583,6 +4059,14 @@ class XmlMybatisSqlRule(BaseRule):
                         )
                         for range_start, range_end in dynamic_where_ranges
                     )
+                    and not any(
+                        max(edit[0], range_start) < min(edit[1], range_end)
+                        or (
+                            edit[0] == edit[1]
+                            and range_start <= edit[0] <= range_end
+                        )
+                        for range_start, range_end in physical_case_layout_ranges
+                    )
                 ]
                 if changed_mapped_indent_edits:
                     first_start = min(
@@ -3692,6 +4176,93 @@ class XmlMybatisSqlRule(BaseRule):
                         ),
                         "is_fixable": True,
                     })
+                long_select_edits = expand_long_physical_select_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                if long_select_edits:
+                    first_start = min(start for start, _, _ in long_select_edits)
+                    violations.append({
+                        "rule_id": "IR-column-layout",
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "Expand a long physical SELECT projection in "
+                            "MyBatis XML."
+                        ),
+                        "is_fixable": True,
+                    })
+                physical_case_edits = physical_case_indent_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                physical_case_edits = [
+                    edit
+                    for edit in physical_case_edits
+                    if not any(
+                        max(edit[0], compact_start) < min(edit[1], compact_end)
+                        or (
+                            edit[0] == edit[1]
+                            and compact_start <= edit[0] <= compact_end
+                        )
+                        for compact_start, compact_end, _ in static_select_edits
+                    )
+                ]
+                if not physical_case_edits:
+                    physical_case_ranges = []
+                if physical_case_edits:
+                    first_start = min(start for start, _, _ in physical_case_edits)
+                    violations.append({
+                        "rule_id": "IR-case-when-wrap",
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": "Indent a physical multiline CASE block.",
+                        "is_fixable": True,
+                    })
+                long_case_edits = expand_long_physical_case_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                if long_case_edits:
+                    first_start = min(start for start, _, _ in long_case_edits)
+                    violations.append({
+                        "rule_id": "IR-case-when-wrap",
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": "Expand an overlong physical CASE block.",
+                        "is_fixable": True,
+                    })
+                dynamic_case_edits = dynamic_case_branch_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    get_all_elements_recursively(el.get("children", [])),
+                )
+                if dynamic_case_edits:
+                    first_start = min(start for start, _, _ in dynamic_case_edits)
+                    violations.append({
+                        "rule_id": "IR-case-when-wrap",
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "Align an XML-controlled ELSE branch with its "
+                            "physical CASE block."
+                        ),
+                        "is_fixable": True,
+                    })
+                expression_compaction_edits = compact_physical_expression_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                if expression_compaction_edits:
+                    first_start = min(
+                        start for start, _, _ in expression_compaction_edits
+                    )
+                    violations.append({
+                        "rule_id": "IR-multiline-function-layout",
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": "Compact a physical expression when it fits.",
+                        "is_fixable": True,
+                    })
 
                 dynamic_projection_edits = (
                     dynamic_projection_subquery_source_edits(
@@ -3701,6 +4272,14 @@ class XmlMybatisSqlRule(BaseRule):
                         dynamic_indent_ranges,
                     )
                 )
+                dynamic_projection_edits = [
+                    edit
+                    for edit in dynamic_projection_edits
+                    if not any(
+                        max(edit[0], range_start) < min(edit[1], range_end)
+                        for range_start, range_end in physical_case_layout_ranges
+                    )
+                ]
                 changed_dynamic_projection_edits = [
                     edit
                     for edit in dynamic_projection_edits
@@ -3728,6 +4307,17 @@ class XmlMybatisSqlRule(BaseRule):
                 # or reusable fragment to whitespace that the host fixer must
                 # intentionally leave unchanged.
                 excluded_guest_rule_ids.add("IR-where-multi")
+                if has_dynamic_case_branches(
+                    content, (el["start_offset"], el["end_offset"])
+                ):
+                    excluded_guest_rule_ids.update(
+                        {
+                            "IR-as-spacing",
+                            "IR-case",
+                            "IR-case-when-wrap",
+                            "IR-column-layout",
+                        }
+                    )
                 if dynamic_indent_ranges:
                     # The expanded guest omits XML indentation and can report
                     # already-canonical subqueries. The exact source mapper
@@ -3825,6 +4415,9 @@ class XmlMybatisSqlRule(BaseRule):
                     ) or any(
                         start <= ev["mapped_offset"] < end
                         for start, end in tag_ranges
+                    ) or any(
+                        start <= ev["mapped_offset"] < end
+                        for start, end in physical_case_ranges
                     ) or (
                         mapped_line.lower().startswith("<include")
                         and mapped_line.endswith("/>")
@@ -4212,6 +4805,10 @@ class XmlMybatisSqlRule(BaseRule):
                     dynamic_indent_ranges,
                     inner_config,
                 )
+                physical_case_ranges = physical_case_source_ranges(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                )
                 owned_where_edits.extend(
                     edit
                     for edit in dynamic_where_edits + physical_where_edits
@@ -4288,6 +4885,14 @@ class XmlMybatisSqlRule(BaseRule):
                         )
                         for range_start, range_end in dynamic_where_ranges
                     )
+                    and not any(
+                        max(edit[0], range_start) < min(edit[1], range_end)
+                        or (
+                            edit[0] == edit[1]
+                            and range_start <= edit[0] <= range_end
+                        )
+                        for range_start, range_end in physical_case_ranges
+                    )
                 ]
                 where_source_edits = dynamic_where_edits + physical_where_edits
                 if where_source_edits:
@@ -4335,6 +4940,14 @@ class XmlMybatisSqlRule(BaseRule):
                         dynamic_indent_ranges,
                     )
                 )
+                dynamic_projection_edits = [
+                    edit
+                    for edit in dynamic_projection_edits
+                    if not any(
+                        max(edit[0], range_start) < min(edit[1], range_end)
+                        for range_start, range_end in physical_case_ranges
+                    )
+                ]
                 if subquery_source_edits:
                     layout_edits = [
                         edit
@@ -4403,6 +5016,72 @@ class XmlMybatisSqlRule(BaseRule):
                     inner_config,
                 )
                 layout_edits.extend(static_select_edits)
+                long_select_edits = expand_long_physical_select_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                layout_edits.extend(long_select_edits)
+                physical_case_edits = physical_case_indent_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                physical_case_edits = [
+                    edit
+                    for edit in physical_case_edits
+                    if not any(
+                        max(edit[0], compact_start) < min(edit[1], compact_end)
+                        or (
+                            edit[0] == edit[1]
+                            and compact_start <= edit[0] <= compact_end
+                        )
+                        for compact_start, compact_end, _ in static_select_edits
+                    )
+                ]
+                if not physical_case_edits:
+                    # A correctly indented CASE is not locally owned. Let the
+                    # embedded SQL rules compact it when the whole expression
+                    # fits on one physical line.
+                    physical_case_ranges = []
+                layout_edits.extend(physical_case_edits)
+                long_case_edits = expand_long_physical_case_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                layout_edits.extend(long_case_edits)
+                dynamic_case_edits = dynamic_case_branch_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    get_all_elements_recursively(el.get("children", [])),
+                )
+                layout_edits.extend(dynamic_case_edits)
+                expression_compaction_edits = compact_physical_expression_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                layout_edits.extend(expression_compaction_edits)
+                physical_case_edit_set = set(
+                    physical_case_edits
+                    + long_case_edits
+                    + dynamic_case_edits
+                    + expression_compaction_edits
+                )
+                layout_edits = [
+                    edit
+                    for edit in layout_edits
+                    if edit in physical_case_edit_set
+                    or not any(
+                        max(edit[0], range_start) < min(edit[1], range_end)
+                        or (
+                            edit[0] == edit[1]
+                            and range_start <= edit[0] <= range_end
+                        )
+                        for range_start, range_end in physical_case_ranges
+                    )
+                ]
                 layout_edits.extend(
                     sql_trailing_whitespace_source_edits(
                         content,
@@ -4418,6 +5097,11 @@ class XmlMybatisSqlRule(BaseRule):
                     + dynamic_where_edits
                     + physical_where_edits
                     + dynamic_projection_edits
+                    + long_select_edits
+                    + physical_case_edits
+                    + long_case_edits
+                    + dynamic_case_edits
+                    + expression_compaction_edits
                 ] + [
                     (start, end)
                     for start, end, replacement in (
@@ -4452,6 +5136,11 @@ class XmlMybatisSqlRule(BaseRule):
                         + subquery_source_edits
                         + dynamic_window_edits
                         + dynamic_projection_edits
+                        + long_select_edits
+                        + physical_case_edits
+                        + long_case_edits
+                        + dynamic_case_edits
+                        + expression_compaction_edits
                     )
                 ) | set(
                     edit
@@ -4480,6 +5169,11 @@ class XmlMybatisSqlRule(BaseRule):
                     + keyword_case_edits
                     + function_case_edits
                     + datatype_case_edits
+                    + long_select_edits
+                    + physical_case_edits
+                    + long_case_edits
+                    + dynamic_case_edits
+                    + expression_compaction_edits
                 )
                 layout_edits = [
                     (start, end, replacement)
@@ -4507,6 +5201,12 @@ class XmlMybatisSqlRule(BaseRule):
                 # same logical newline at both sides of a source-map boundary,
                 # producing doubled blank lines in otherwise static SQL.
                 excluded_guest_rule_ids.add("IR-where-multi")
+                if has_dynamic_case_branches(
+                    content, (el["start_offset"], el["end_offset"])
+                ):
+                    excluded_guest_rule_ids.update(
+                        {"IR-case", "IR-case-when-wrap"}
+                    )
                 if has_unresolved_include(el, sql_defs):
                     excluded_guest_rule_ids.add("IR-paren-single")
                 if keyword_case_edits:
@@ -4599,15 +5299,22 @@ class XmlMybatisSqlRule(BaseRule):
                     # them with a large layout reflow can make overlapping
                     # diffs discard only part of the semantic edit (for
                     # example removing OUTER and ASC but retaining INNER).
-                    # Keep only local WHERE-source edits: unlike the large
-                    # guest diff, they are whitespace-only, source-exact, and
+                    # Keep local, source-exact layout edits. Unlike the large
+                    # guest diff, these preserve the token stream and are
                     # signature checked below. This prevents semantic changes
-                    # inside an expanded include from starving its host WHERE.
-                    exact_where_edits = set(where_source_edits)
+                    # from starving a host WHERE or long physical projection.
+                    exact_source_edits = set(
+                        where_source_edits
+                        + long_select_edits
+                        + physical_case_edits
+                        + long_case_edits
+                        + dynamic_case_edits
+                        + expression_compaction_edits
+                    )
                     layout_edits = [
                         edit
                         for edit in layout_edits
-                        if edit in exact_where_edits
+                        if edit in exact_source_edits
                     ]
                 layout_edits = [
                     edit
@@ -4641,6 +5348,27 @@ class XmlMybatisSqlRule(BaseRule):
                     edits = datatype_case_edits
                     applied_rules.clear()
                     applied_rules.add("IR-datatype-case")
+                elif (
+                    physical_case_edits
+                    or long_case_edits
+                    or dynamic_case_edits
+                    or expression_compaction_edits
+                ):
+                    # Commit exact physical layout before a large guest-SQL
+                    # reflow. Removing only the overlapping portion of that
+                    # reflow can otherwise make the combined source map fail
+                    # signature validation and starve both safe edits.
+                    edits = (
+                        physical_case_edits
+                        + long_case_edits
+                        + dynamic_case_edits
+                        + expression_compaction_edits
+                    )
+                    applied_rules.clear()
+                    if physical_case_edits or long_case_edits:
+                        applied_rules.add("IR-case-when-wrap")
+                    if expression_compaction_edits:
+                        applied_rules.add("IR-multiline-function-layout")
                 elif null_source_edits:
                     from mir.rules.sql.sql_utils import protected_sql_signature
 
