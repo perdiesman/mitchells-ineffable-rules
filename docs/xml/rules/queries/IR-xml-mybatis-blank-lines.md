@@ -1,6 +1,6 @@
 # IR-xml-mybatis-blank-lines
 
-Remove boundary blank lines from MyBatis statements and limit internal blank-line runs to one.
+Remove boundary blank lines from MyBatis statements and limit blank-line runs in mapper and generator XML to one.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes

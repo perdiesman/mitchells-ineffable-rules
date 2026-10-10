@@ -12,8 +12,8 @@ class XmlMybatisBlankLinesRule(BaseRule):
     commit_profile = True
     rule_id = "IR-xml-mybatis-blank-lines"
     description = (
-        "Remove boundary blank lines from MyBatis statements and limit internal "
-        "blank-line runs to one."
+        "Remove boundary blank lines from MyBatis statements and limit blank-line "
+        "runs in mapper and generator XML to one."
     )
     category = "queries"
     is_fixable = "yes"
@@ -72,7 +72,8 @@ class XmlMybatisBlankLinesRule(BaseRule):
 
     @staticmethod
     def _removed_lines(content: str) -> set[int]:
-        if "<mapper" not in content.lower():
+        lowered = content.lower()
+        if "<mapper" not in lowered and "<generatorconfiguration" not in lowered:
             return set()
         tokens = tokenize_xml(content)
         elements = get_all_elements_recursively(parse_xml_elements(tokens))

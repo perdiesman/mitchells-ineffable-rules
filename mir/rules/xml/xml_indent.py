@@ -70,7 +70,23 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
         opening_end = content.find(">", t["start"])
         closing_start = content.find(f"</{tag_name}", opening_end + 1)
         if opening_end != -1 and closing_start != -1:
-            dynamic_text = content[opening_end + 1:closing_start].strip().upper()
+            dynamic_source = content[opening_end + 1:closing_start].strip()
+            dynamic_text = dynamic_source.upper()
+            if (
+                tag_name == "if"
+                and active_parents
+                and active_parents[-1]["tag"]
+                in {"select", "insert", "update", "delete"}
+                and re.search(
+                    r"<include\b[^>]*\brefid\s*=\s*['\"][^'\"]*where[^'\"]*['\"]",
+                    dynamic_source,
+                    re.IGNORECASE,
+                )
+            ):
+                # A generated optional WHERE include is a direct statement
+                # clause. Do not inherit the indentation of the preceding
+                # SELECT column or UPDATE assignment.
+                return " " * base_query_indent
             if re.match(
                 r"(?:(?:LEFT|RIGHT|FULL)(?:\s+OUTER)?|INNER|CROSS)?\s*JOIN\b",
                 dynamic_text,

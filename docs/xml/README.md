@@ -40,5 +40,5 @@ This document describes all XML linting rules supported by Mitchell's Ineffable 
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
-| [`IR-xml-mybatis-blank-lines`](rules/queries/IR-xml-mybatis-blank-lines.md) | Remove boundary blank lines from MyBatis statements and limit internal blank-line runs to one. | Yes | [View Details](rules/queries/IR-xml-mybatis-blank-lines.md) |
+| [`IR-xml-mybatis-blank-lines`](rules/queries/IR-xml-mybatis-blank-lines.md) | Remove boundary blank lines from MyBatis statements and limit blank-line runs in mapper and generator XML to one. | Yes | [View Details](rules/queries/IR-xml-mybatis-blank-lines.md) |
 | [`IR-xml-mybatis-sql`](rules/queries/IR-xml-mybatis-sql.md) | Format embedded SQL inside MyBatis XML mapper files using SQL rules. | Yes | [View Details](rules/queries/IR-xml-mybatis-sql.md) |

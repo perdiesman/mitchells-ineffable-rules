@@ -1040,6 +1040,73 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
 
+    def test_xml_indent_keeps_optional_where_include_at_clause_indent(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <update id="updateItems">\n'
+            '        UPDATE sample_item\n'
+            '        SET\n'
+            '            item_name = #{itemName}\n'
+            '            <if test="filter != null">\n'
+            '                <include refid="Update_Where_Clause" />\n'
+            '            </if>\n'
+            '    </update>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '            <if test="filter != null">\n'
+            '                <include refid="Update_Where_Clause" />\n'
+            '            </if>',
+            '        <if test="filter != null">\n'
+            '            <include refid="Update_Where_Clause" />\n'
+            '        </if>',
+        )
+        config = Config()
+        config.fix = True
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-indent"]
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+
+    def test_xml_mybatis_generator_limits_blank_line_runs(self):
+        xml_content = (
+            '<generatorConfiguration>\n'
+            '    <context id="generic">\n'
+            '        <!-- generated tables -->\n'
+            '\n'
+            '\n'
+            '        <table tableName="sample_item" />\n'
+            '\n'
+            '\n'
+            '\n'
+            '    </context>\n'
+            '</generatorConfiguration>'
+        )
+        expected = (
+            '<generatorConfiguration>\n'
+            '    <context id="generic">\n'
+            '        <!-- generated tables -->\n'
+            '\n'
+            '        <table tableName="sample_item" />\n'
+            '\n'
+            '    </context>\n'
+            '</generatorConfiguration>'
+        )
+        config = Config()
+        config.fix = True
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-mybatis-blank-lines"]
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+
     def test_xml_mybatis_commit_profile_applies_declared_boolean_rewrites(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
