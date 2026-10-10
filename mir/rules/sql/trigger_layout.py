@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class TriggerLayoutRule(BaseRule):
+    commit_profile = True
     rule_id = "IR-trigger-layout"
     description = "Format and wrap long CREATE TRIGGER statements to standard multiline layout."
     category = "schema-definition"

@@ -5,7 +5,7 @@ Format and wrap long CREATE TRIGGER statements to standard multiline layout.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Schema Definition Rules
-- **Commit Profile**: No
+- **Commit Profile**: Yes
 - **MyBatis Safe**: No
 - **Trellis Safe**: No
 - **Configuration Options**:

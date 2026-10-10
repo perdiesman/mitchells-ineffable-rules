@@ -29,3 +29,7 @@ SELECT -5 FROM users;
 ```sql
 SELECT COUNT(*) FROM users;
 ```
+
+```sql
+DECLARE item_name sample_item.name%TYPE;
+```

@@ -574,6 +574,30 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
 
+    def test_commit_profile_wraps_long_create_trigger(self):
+        sql_content = (
+            "CREATE TRIGGER update_sample_item_after_change AFTER INSERT OR UPDATE "
+            "ON sample_item FOR EACH ROW EXECUTE FUNCTION "
+            "update_sample_item_change_history();\n"
+        )
+        expected = (
+            "CREATE TRIGGER update_sample_item_after_change\n"
+            "    AFTER INSERT OR UPDATE ON sample_item\n"
+            "    FOR EACH ROW\n"
+            "    EXECUTE FUNCTION update_sample_item_change_history();\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(config, first.content, "generic.sql", "sql")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_formats_overlaps_tuple_inside_choose(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

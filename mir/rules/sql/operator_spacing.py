@@ -23,7 +23,8 @@ class OperatorSpacingRule(BaseRule):
     ]
     additional_validations = [
         'SELECT -5 FROM users;',
-        'SELECT COUNT(*) FROM users;'
+        'SELECT COUNT(*) FROM users;',
+        'DECLARE item_name sample_item.name%TYPE;'
     ]
 
     def _find_violations(self, content: str) -> List[dict]:
@@ -45,6 +46,44 @@ class OperatorSpacingRule(BaseRule):
                     if tokens[idx]["type"] not in ("WHITESPACE", "COMMENT"):
                         prev_active = tokens[idx]
                         break
+
+                next_active = None
+                for idx in range(i + 1, n):
+                    if tokens[idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                        next_active = tokens[idx]
+                        break
+
+                # PostgreSQL type attributes are a single compact construct:
+                # relation.column%TYPE and relation%ROWTYPE. Treating the
+                # percent sign as arithmetic modulo produces invalid PL/pgSQL.
+                if (
+                    val == "%"
+                    and next_active is not None
+                    and next_active["value"].upper() in {"TYPE", "ROWTYPE"}
+                ):
+                    ws_before = (
+                        tokens[i - 1]
+                        if i > 0 and tokens[i - 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    ws_after = (
+                        tokens[i + 1]
+                        if i + 1 < n and tokens[i + 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    if ws_before or ws_after:
+                        violations.append({
+                            "token": tok,
+                            "ws_before": ws_before,
+                            "ws_after": ws_after,
+                            "rep_before": "",
+                            "rep_after": "",
+                            "message": (
+                                "PostgreSQL %TYPE and %ROWTYPE attributes "
+                                "must not contain spaces."
+                            ),
+                        })
+                    continue
                         
                 is_unary_or_special = False
                 if val in ("-", "*"):
@@ -103,7 +142,11 @@ class OperatorSpacingRule(BaseRule):
                         "ws_before": ws_before,
                         "ws_after": ws_after,
                         "rep_before": rep_before,
-                        "rep_after": rep_after
+                        "rep_after": rep_after,
+                        "message": (
+                            f"Operator '{val}' must be surrounded by a "
+                            "single space."
+                        ),
                     })
                     
         return violations
@@ -119,7 +162,7 @@ class OperatorSpacingRule(BaseRule):
                 Violation(
                     rule_id=self.rule_id,
                     line_number=tok["line"],
-                    message=f"Operator '{tok['value']}' must be surrounded by a single space.",
+                    message=item["message"],
                     offending_lines=[lines[tok["line"] - 1] if tok["line"] - 1 < len(lines) else ""],
                     is_fixable=True
                 )

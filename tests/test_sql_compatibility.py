@@ -65,6 +65,23 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
 
+    def test_operator_spacing_preserves_postgresql_type_attributes(self):
+        source = (
+            "DECLARE\n"
+            "    item_name sample_item.name % TYPE;\n"
+            "    item_row sample_item % ROWTYPE;"
+        )
+        expected = source.replace(" % TYPE", "%TYPE").replace(
+            " % ROWTYPE", "%ROWTYPE"
+        )
+        rule = OperatorSpacingRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertFalse(rule.check(fixed, "generic.sql", {}))
+
     def test_multiline_case_stays_with_its_leading_additive_operator(self):
         source = (
             "    first_label\n"
