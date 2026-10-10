@@ -319,6 +319,10 @@ class CaseLayoutRule(BaseRule):
                             f"{case_indent}    WHEN {compact_condition}"
                         )
                         inline_arm = f"{condition_line} THEN {res_text}"
+                        inline_arm_for_length = (
+                            f"{condition_line} THEN "
+                            + re.sub(r"\s+", " ", res_text)
+                        )
                         has_additive_condition_break = (
                             any(
                                 token["type"] == "WHITESPACE"
@@ -348,7 +352,7 @@ class CaseLayoutRule(BaseRule):
                                 + f"\n{case_indent}        THEN {res_text}"
                             )
                         elif source_text_length(
-                            inline_arm, rule_config
+                            inline_arm_for_length, rule_config
                         ) > effective_max_len:
                             if source_text_length(
                                 condition_line, rule_config

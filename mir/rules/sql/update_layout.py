@@ -144,6 +144,19 @@ class UpdateLayoutRule(BaseRule):
                 # Check if it fits on a single line
                 single_line = c1_str + " SET " + ", ".join(fields) + (" " + c4_str if tail_tok else ";")
                 original = content[t["start"] : tokens[semi_idx]["end"]].strip()
+                from mir.rules.sql.additive_wrap import AdditiveWrapRule
+
+                additive_max_len = self.get_config_value(
+                    rule_config,
+                    "additive_max_line_length",
+                    default_value=100,
+                    fallbacks=[(AdditiveWrapRule, "max_line_length")],
+                )
+                has_additive_expression = any(
+                    token["type"] == "OPERATOR"
+                    and token["value"] in {"+", "||"}
+                    for token in stmt_tokens
+                )
                 preserve_dynamic_clauses = (
                     "\n" in original
                     and t["start"] in rule_config.get(
@@ -154,6 +167,10 @@ class UpdateLayoutRule(BaseRule):
                     expected = original
                 elif (
                     len(base_indent + single_line) <= max_len
+                    and (
+                        not has_additive_expression
+                        or len(base_indent + single_line) <= additive_max_len
+                    )
                     and all(
                         "\n" not in component
                         for component in (c1_str, *fields, c4_str)

@@ -3378,6 +3378,36 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_simple_case_result_continuation_does_not_cycle_then_layout(self):
+        sql_content = (
+            "SELECT\n"
+            "    CASE\n"
+            "        category\n"
+            "        WHEN 'bounded'\n"
+            "            THEN lower_value IS NOT NULL\n"
+            "                AND upper_value IS NOT NULL\n"
+            "                AND lower_value <= upper_value\n"
+            "        ELSE FALSE\n"
+            "    END AS valid_range\n"
+            "FROM sample_record;\n"
+        )
+        expected = sql_content.replace(
+            "        WHEN 'bounded'\n            THEN",
+            "        WHEN 'bounded' THEN",
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_multiline_update_is_not_recompacted_after_expression_wrap(self):
         sql_content = (
             "UPDATE sample_group\n"
@@ -3395,6 +3425,28 @@ class TestRunnerIntegration(unittest.TestCase):
 
         self.assertEqual(first.content, sql_content)
         self.assertEqual(second.content, sql_content)
+        self.assertFalse(first.diagnostics)
+
+    def test_update_compaction_respects_additive_line_limit(self):
+        sql_content = (
+            "UPDATE sample_provider_group\n"
+            "SET generated_key = lower(substring(group_name, 1, 1)) "
+            "|| substring(replace(group_name, ' ', ''), 2);\n"
+        )
+        expected = sql_content.replace(
+            ")) || substring", "))\n    || substring"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
     def test_short_update_clauses_compact_when_expressions_are_single_line(self):
