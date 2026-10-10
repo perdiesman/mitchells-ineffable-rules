@@ -1686,6 +1686,19 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed.count(":end"), 3)
         self.assertEqual(WhereMultiRule().fix(fixed, "generic.sql", {}), fixed)
 
+    def test_additive_wrap_preserves_tokens_with_overlapping_continuations(self):
+        source = (
+            "    first_measure + second_measure +\n"
+            "        third_measure +\n"
+            "            fourth_measure_with_a_long_name + fifth_measure_with_a_long_name"
+        )
+        rule = AdditiveWrapRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(protected_sql_signature(fixed), protected_sql_signature(source))
+        self.assertEqual(fixed.count("measure"), source.count("measure"))
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
+
     def test_protected_signature_allows_formatting_inside_dollar_quoted_code(self):
         original = "CREATE FUNCTION sample() RETURNS void AS $$ BEGIN RETURN; END; $$ LANGUAGE plpgsql;"
         formatted = "CREATE FUNCTION sample() RETURNS void AS $$ BEGIN\n    RETURN;\nEND; $$ LANGUAGE plpgsql;"

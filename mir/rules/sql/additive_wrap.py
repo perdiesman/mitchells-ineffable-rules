@@ -435,27 +435,42 @@ class AdditiveWrapRule(BaseRule):
         ]
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        edits = self._find_edits(content, rule_config)
-        chars = list(content)
-        for item in sorted(edits, key=lambda edit: edit["start"], reverse=True):
-            chars[item["start"] : item["end"]] = list(item["replacement"])
-        fixed = "".join(chars)
-        for _ in range(8):
+        def apply_nonoverlapping_edits(text: str, items: List[dict]) -> str:
+            by_span = {
+                (item["start"], item["end"]): item["replacement"]
+                for item in items
+            }
+            accepted = []
+            next_start = len(text) + 1
+            for (start, end), replacement in sorted(
+                by_span.items(), key=lambda item: item[0][0], reverse=True
+            ):
+                if end > next_start:
+                    continue
+                accepted.append((start, end, replacement))
+                next_start = start
+            chars = list(text)
+            for start, end, replacement in accepted:
+                chars[start:end] = list(replacement)
+            return "".join(chars)
+
+        fixed = content
+        seen = {fixed}
+        for _ in range(16):
+            wrapped = apply_nonoverlapping_edits(
+                fixed, self._find_edits(fixed, rule_config)
+            )
             continuation_edits = self._find_continuation_edits(
-                fixed,
+                wrapped,
                 rule_config,
             )
-            if not continuation_edits:
-                break
-            chars = list(fixed)
-            for item in sorted(
-                continuation_edits,
-                key=lambda edit: edit["start"],
-                reverse=True,
-            ):
-                chars[item["start"] : item["end"]] = list(item["replacement"])
-            updated = "".join(chars)
+            updated = apply_nonoverlapping_edits(
+                wrapped, continuation_edits
+            )
             if updated == fixed:
                 break
+            if updated in seen:
+                break
+            seen.add(updated)
             fixed = updated
         return fixed
