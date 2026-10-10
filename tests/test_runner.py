@@ -1530,6 +1530,45 @@ class TestRunnerIntegration(unittest.TestCase):
         )
         self.assertEqual(first.content.count("SELECT count(*) <include"), 2)
 
+    def test_xml_mybatis_included_cte_before_repeated_local_ctes_converges(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="sourceStage">SELECT item_id FROM sample_source</sql>\n'
+            '    <insert id="first">\n'
+            '        WITH staged AS (<include refid="sourceStage" />), mapped AS (\n'
+            '            SELECT st.item_id, owner.owner_id\n'
+            '            FROM staged st\n'
+            '            JOIN sample_owner owner ON owner.item_id = st.item_id\n'
+            '        )\n'
+            '        INSERT INTO sample_target (item_id, owner_id)\n'
+            '        SELECT item_id, owner_id FROM mapped\n'
+            '    </insert>\n'
+            '    <insert id="second">\n'
+            '        WITH staged AS (<include refid="sourceStage" />), mapped AS (\n'
+            '            SELECT st.item_id, owner.owner_id\n'
+            '            FROM staged st\n'
+            '            JOIN sample_owner owner ON owner.item_id = st.item_id\n'
+            '        )\n'
+            '        INSERT INTO sample_archive (item_id, owner_id)\n'
+            '        SELECT item_id, owner_id FROM mapped\n'
+            '    </insert>\n'
+            '</mapper>\n'
+        )
+        config = Config()
+        config.fix = True
+        config.profile = "commit"
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertFalse(
+            any("converge" in diagnostic for diagnostic in first.diagnostics)
+        )
+        self.assertEqual(second.content, first.content)
+        self.assertEqual(first.content.count("            SELECT"), 2)
+        self.assertEqual(first.content.count("            FROM\n"), 2)
+        self.assertEqual(first.content.count("                staged st"), 2)
+
     def test_xml_mybatis_fragment_semantic_rewrite_updates_consumer_signatures(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

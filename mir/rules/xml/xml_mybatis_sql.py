@@ -158,6 +158,22 @@ def has_unresolved_include(element: dict, sql_defs: dict) -> bool:
     return False
 
 
+def has_included_cte_before_local_cte(element: dict, content: str) -> bool:
+    """Return whether an included CTE is followed by a source-local CTE.
+
+    Expanding the reusable CTE body makes its out-of-element source mapping
+    compete with repeated local CTE bodies. A small placeholder preserves the
+    host parse shape while keeping every host layout offset source-local.
+    """
+    fragment = content[element["start_offset"]:element["end_offset"]]
+    return bool(re.search(
+        r"\bAS\s*\(\s*<include\b[^>]*/>\s*\)\s*,\s*"
+        r"[A-Za-z_][A-Za-z0-9_$]*\s+AS\s*\(",
+        fragment,
+        re.IGNORECASE,
+    ))
+
+
 def _tokens_start_with_select(tokens: List[dict]) -> bool:
     """Return whether a dynamic branch starts with a complete SELECT."""
     for token in tokens:
@@ -194,7 +210,15 @@ def _next_dynamic_body_starts_select(
         return False
     return _tokens_start_with_select(tokens[tag_end + 1 :])
 
-def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], expanded_chars: List[str], mapping: List[int], is_after_tag: List[bool], state: dict = None):
+def expand_tokens(
+    inner_tokens: List[dict],
+    sql_defs: Dict[str, List[dict]],
+    expanded_chars: List[str],
+    mapping: List[int],
+    is_after_tag: List[bool],
+    state: dict = None,
+    expand_resolved_includes: bool = True,
+):
     if state is None:
         state = {
             "last_tag_line": -1,
@@ -232,11 +256,22 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                     elif short_refid in sql_defs:
                         matched_tokens = sql_defs[short_refid]
                         
-                    if matched_tokens:
-                        expand_tokens(matched_tokens, sql_defs, expanded_chars, mapping, is_after_tag, state)
+                    if matched_tokens and expand_resolved_includes:
+                        expand_tokens(
+                            matched_tokens,
+                            sql_defs,
+                            expanded_chars,
+                            mapping,
+                            is_after_tag,
+                            state,
+                            expand_resolved_includes,
+                        )
                     else:
                         refid_lower = refid.lower()
-                        if "column" in refid_lower or "col" in refid_lower or "list" in refid_lower:
+                        preceding = "".join(expanded_chars).rstrip()
+                        if re.search(r"\bAS\s*\($", preceding, re.IGNORECASE):
+                            placeholder = "SELECT 1"
+                        elif "column" in refid_lower or "col" in refid_lower or "list" in refid_lower:
                             placeholder = "dummy_column"
                         elif "where" in refid_lower or "clause" in refid_lower or "cond" in refid_lower or "example" in refid_lower:
                             placeholder = "1 = 1"
@@ -393,7 +428,15 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                     }
                     if tag_name in dynamic_tags:
                         state["dynamic_depth"] = state.get("dynamic_depth", 0) + 1
-                    expand_tokens(inner_tokens[tag_end_idx + 1 : close_idx], sql_defs, expanded_chars, mapping, is_after_tag, state)
+                    expand_tokens(
+                        inner_tokens[tag_end_idx + 1 : close_idx],
+                        sql_defs,
+                        expanded_chars,
+                        mapping,
+                        is_after_tag,
+                        state,
+                        expand_resolved_includes,
+                    )
                     if tag_name in dynamic_tags:
                         state["dynamic_depth"] -= 1
                     close_end_idx = -1
@@ -2440,14 +2483,24 @@ class XmlMybatisSqlRule(BaseRule):
                     if not any(l in lines_filter for l in range(start_line, end_line + 1)):
                         continue
 
-                cache_key = (id(content), el["start_offset"])
+                local_cte_mapping = has_included_cte_before_local_cte(
+                    el, content
+                )
+                cache_key = (id(content), el["start_offset"], local_cte_mapping)
                 if cache_key in self._expansion_cache:
                     expanded_chars, mapping, is_after_tag = self._expansion_cache[cache_key]
                 else:
                     expanded_chars = []
                     mapping = []
                     is_after_tag = []
-                    expand_tokens(el["inner_tokens"], sql_defs, expanded_chars, mapping, is_after_tag)
+                    expand_tokens(
+                        el["inner_tokens"],
+                        sql_defs,
+                        expanded_chars,
+                        mapping,
+                        is_after_tag,
+                        expand_resolved_includes=not local_cte_mapping,
+                    )
                     self._expansion_cache[cache_key] = (expanded_chars, mapping, is_after_tag)
                 sql_text = "".join(expanded_chars)
                 
@@ -2642,6 +2695,12 @@ class XmlMybatisSqlRule(BaseRule):
                     })
 
                 excluded_guest_rule_ids = set()
+                if local_cte_mapping:
+                    excluded_guest_rule_ids.update(
+                        rule.rule_id
+                        for rule in load_rules_for_language("sql")
+                        if rule.commit_semantic_rewrite
+                    )
                 if owns_runtime_where(el):
                     excluded_guest_rule_ids.update(
                         {"IR-where-multi", "IR-where-single"}
@@ -2860,19 +2919,42 @@ class XmlMybatisSqlRule(BaseRule):
                     if not any(l in lines_filter for l in range(start_line, end_line + 1)):
                         continue
 
-                cache_key = (id(content), el["start_offset"])
+                local_cte_mapping = has_included_cte_before_local_cte(
+                    el, content
+                )
+                cache_key = (id(content), el["start_offset"], local_cte_mapping)
                 if cache_key in self._expansion_cache:
                     expanded_chars, mapping, is_after_tag = self._expansion_cache[cache_key]
                 else:
                     expanded_chars = []
                     mapping = []
                     is_after_tag = []
-                    expand_tokens(el["inner_tokens"], sql_defs, expanded_chars, mapping, is_after_tag)
+                    expand_tokens(
+                        el["inner_tokens"],
+                        sql_defs,
+                        expanded_chars,
+                        mapping,
+                        is_after_tag,
+                        expand_resolved_includes=not local_cte_mapping,
+                    )
                     self._expansion_cache[cache_key] = (expanded_chars, mapping, is_after_tag)
                 sql_text = "".join(expanded_chars)
                 
                 if not sql_text.strip():
                     continue
+                signature_sql_text = sql_text
+                if local_cte_mapping:
+                    signature_chars: List[str] = []
+                    signature_mapping: List[int] = []
+                    signature_after_tag: List[bool] = []
+                    expand_tokens(
+                        el["inner_tokens"],
+                        sql_defs,
+                        signature_chars,
+                        signature_mapping,
+                        signature_after_tag,
+                    )
+                    signature_sql_text = "".join(signature_chars)
                     
                 ignored_comma_offsets = set()
                 for idx, char in enumerate(sql_text):
@@ -3225,7 +3307,7 @@ class XmlMybatisSqlRule(BaseRule):
                     excluded_guest_rule_ids.update(
                         {"IR-where-multi", "IR-where-single"}
                     )
-                if any(
+                if local_cte_mapping or any(
                     source_offset < el["start_offset"]
                     or source_offset > el["end_offset"]
                     for source_offset in mapping
@@ -3251,6 +3333,12 @@ class XmlMybatisSqlRule(BaseRule):
                     require_embedded_safe=True,
                     extra_fix_args=bridge_state,
                 )
+                if local_cte_mapping:
+                    from mir.rules.sql.sql_utils import protected_sql_signature
+
+                    full_signature = protected_sql_signature(signature_sql_text)
+                    bridge_state["original_protected_signature"] = full_signature
+                    bridge_state["expected_protected_signature"] = full_signature
                 static_inner_tokens = el.get("inner_tokens", [])
                 static_full_replacement = bool(
                     static_inner_tokens
