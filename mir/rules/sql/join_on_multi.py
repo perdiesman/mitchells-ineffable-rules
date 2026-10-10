@@ -207,6 +207,40 @@ class JoinOnMultiRule(BaseRule):
                     " " if t["type"] == "WHITESPACE" else t["value"]
                     for t in first_cond_toks
                 ).strip()
+                # An additive continuation has its own wrapping policy.  Do
+                # not count the continuation when deciding whether ON fits
+                # beside a multiline join target; otherwise a stable
+                # ``target ON expression\n    + operand`` layout is pulled
+                # apart on the next convergence pass.
+                first_cond_line_tokens = []
+                has_additive_continuation = False
+                for first_cond_index, item in enumerate(first_cond_toks):
+                    if (
+                        item["type"] == "WHITESPACE"
+                        and "\n" in item["value"]
+                    ):
+                        next_item = next(
+                            (
+                                candidate
+                                for candidate in first_cond_toks[
+                                    first_cond_index + 1 :
+                                ]
+                                if candidate["type"]
+                                not in {"WHITESPACE", "COMMENT"}
+                            ),
+                            None,
+                        )
+                        has_additive_continuation = bool(
+                            next_item
+                            and next_item["type"] == "OPERATOR"
+                            and next_item["value"] in {"+", "||"}
+                        )
+                        break
+                    first_cond_line_tokens.append(item)
+                first_cond_line_normalized = "".join(
+                    " " if item["type"] == "WHITESPACE" else item["value"]
+                    for item in first_cond_line_tokens
+                ).strip()
 
                 operator_split = None
                 comparison_operators = {"=", "!=", "<>", "<", ">", "<=", ">="}
@@ -245,7 +279,15 @@ class JoinOnMultiRule(BaseRule):
                             operator_split = actual_idx
                         break
                 
-                estimated_first_line_len = len(join_prefix_for_on) + len("ON ") + len(first_cond_str_normalized)
+                estimated_first_line_len = (
+                    len(join_prefix_for_on)
+                    + len("ON ")
+                    + len(
+                        first_cond_line_normalized
+                        if has_additive_continuation
+                        else first_cond_str_normalized
+                    )
+                )
                 expected_pre_on_ws = (
                     "\n" + expected_indent
                     if estimated_first_line_len > max_len and operator_split is None

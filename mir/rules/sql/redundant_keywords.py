@@ -8,7 +8,8 @@ class RedundantKeywordsRule(BaseRule):
     embedded_safe = True
     rule_id = "IR-redundant-keywords"
     description = (
-        "Remove redundant implied keywords like INNER, OUTER, and non-window ASC."
+        "Remove redundant implied keywords like INNER, LEFT/RIGHT OUTER, and "
+        "non-window ASC while retaining explicit FULL OUTER JOIN."
     )
     category = "general"
     is_fixable = "yes"
@@ -23,7 +24,9 @@ class RedundantKeywordsRule(BaseRule):
             "correct": "SELECT * FROM t1 JOIN t2 LEFT JOIN t3 ORDER BY col;"
         }
     ]
-    additional_validations = []
+    additional_validations = [
+        "SELECT * FROM first_item FULL OUTER JOIN second_item USING (item_id);"
+    ]
 
     def _find_violations(self, content: str) -> List[dict]:
         tokens = tokenize_sql(content)
@@ -69,7 +72,7 @@ class RedundantKeywordsRule(BaseRule):
                     continue
                     
             # 2. <LEFT/RIGHT/FULL> OUTER JOIN -> <LEFT/RIGHT/FULL> JOIN
-            if val_upper in ("LEFT", "RIGHT", "FULL"):
+            if val_upper in ("LEFT", "RIGHT"):
                 next_act = next_active(idx + 1)
                 if next_act < n and tokens[next_act]["type"] == "KEYWORD" and tokens[next_act]["value"].upper() == "OUTER":
                     next_next = next_active(next_act + 1)

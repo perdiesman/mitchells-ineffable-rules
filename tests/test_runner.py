@@ -829,18 +829,18 @@ class TestRunnerIntegration(unittest.TestCase):
     def test_xml_mybatis_dynamic_joined_table_function_keeps_sql_indentation(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
-            '    <select id="joinedFunction">\n'
+            '    <sql id="joinedFunction">\n'
             '        <choose>\n'
             '            <when test="usePeriod">\n'
             '                SELECT item.id\n'
             '                FROM sample.item item\n'
             '                    JOIN sample.items_for_period(\n'
-            '                        #{start},\n'
-            '                        #{end}\n'
+            "                        '${start}',\n"
+            "                        '${end}'\n"
             '                    ) period_item ON period_item.id = item.id\n'
             '            </when>\n'
             '        </choose>\n'
-            '    </select>\n'
+            '    </sql>\n'
             '</mapper>'
         )
         expected = xml_content.replace(
@@ -849,12 +849,12 @@ class TestRunnerIntegration(unittest.TestCase):
             '                    sample.item item\n',
         ).replace(
             '                    JOIN sample.items_for_period(\n'
-            '                        #{start},\n'
-            '                        #{end}\n'
+            "                        '${start}',\n"
+            "                        '${end}'\n"
             '                    ) period_item ON period_item.id = item.id',
             '                    JOIN sample.items_for_period(\n'
-            '                            #{start},\n'
-            '                            #{end}\n'
+            "                            '${start}',\n"
+            "                            '${end}'\n"
             '                        ) period_item ON period_item.id = item.id',
         )
         config = Config()
@@ -898,6 +898,49 @@ class TestRunnerIntegration(unittest.TestCase):
         config = Config()
         config.disable_all = True
         config.rules_to_enable = ["IR-xml-indent"]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_expanded_dynamic_table_function_keeps_join_indent(self):
+        self.maxDiff = None
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="periods">\n'
+            '        <choose>\n'
+            '            <when test="hourly">\n'
+            '                SELECT period_start\n'
+            "                FROM sample_item item JOIN generate_series('${start}', '${end}', '${hours} Hours'::interval) period_start ON item.recorded_at BETWEEN period_start AND period_start + '${hours} Hours'::interval\n"
+            '            </when>\n'
+            '        </choose>\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="periods">\n'
+            '        <choose>\n'
+            '            <when test="hourly">\n'
+            '                SELECT period_start\n'
+            '                FROM\n'
+            '                    sample_item item\n'
+            '                    JOIN generate_series(\n'
+            "                            '${start}',\n"
+            "                            '${end}',\n"
+            "                            '${hours} Hours'::interval\n"
+            '                        ) AS period_start ON item.recorded_at BETWEEN period_start AND period_start\n'
+            "                        + '${hours} Hours'::interval\n"
+            '            </when>\n'
+            '        </choose>\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        config = Config()
         config.fix = True
 
         first = process_document(config, xml_content, "generic.xml", "xml")

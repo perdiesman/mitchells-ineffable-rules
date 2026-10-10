@@ -1,6 +1,6 @@
 # IR-table-function-indent
 
-Indent multiline table-function arguments as table continuations, with joined functions nested beneath the JOIN.
+Indent multiline table-function arguments as table continuations, with joined functions and their wrapped predicate expressions nested beneath the JOIN.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
@@ -39,4 +39,20 @@ Expected fixed output:
     JOIN sample.items_for_period(
             :period
         ) AS item ON TRUE
+```
+
+##### joined table function with additive predicate continuation — Fixed
+```sql
+    JOIN sample.items_for_period(
+        :period
+    ) AS item ON event_time BETWEEN item.start_time AND item.start_time
++ item.duration
+```
+
+Expected fixed output:
+```sql
+    JOIN sample.items_for_period(
+            :period
+        ) AS item ON event_time BETWEEN item.start_time AND item.start_time
+        + item.duration
 ```

@@ -41,7 +41,8 @@ class TableFunctionIndentRule(BaseRule):
     rule_id = "IR-table-function-indent"
     description = (
         "Indent multiline table-function arguments as table continuations, with "
-        "joined functions nested beneath the JOIN."
+        "joined functions and their wrapped predicate expressions nested beneath "
+        "the JOIN."
     )
     category = "queries"
     is_fixable = "yes"
@@ -69,6 +70,22 @@ class TableFunctionIndentRule(BaseRule):
             "    JOIN sample.items_for_period(\n        :period\n    ) AS item ON TRUE",
             "fixed",
             "    JOIN sample.items_for_period(\n            :period\n        ) AS item ON TRUE",
+        ),
+        RuleCase(
+            "joined table function with additive predicate continuation",
+            (
+                "    JOIN sample.items_for_period(\n"
+                "        :period\n"
+                "    ) AS item ON event_time BETWEEN item.start_time AND item.start_time\n"
+                "+ item.duration"
+            ),
+            "fixed",
+            (
+                "    JOIN sample.items_for_period(\n"
+                "            :period\n"
+                "        ) AS item ON event_time BETWEEN item.start_time AND item.start_time\n"
+                "        + item.duration"
+            ),
         ),
     ]
 
@@ -129,6 +146,17 @@ class TableFunctionIndentRule(BaseRule):
                 + unit
                 + unit * case_adjustments.get(line_number, 0)
             )
+        for _, _, closing, continuation_indent, _ in ranges:
+            next_line_number = closing["line"] + 1
+            if next_line_number > len(lines):
+                continue
+            closing_line = lines[closing["line"] - 1]
+            next_line = lines[next_line_number - 1]
+            if (
+                " ON " in closing_line
+                and next_line.lstrip().startswith(("+", "||"))
+            ):
+                expected[next_line_number] = continuation_indent
         return expected
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:

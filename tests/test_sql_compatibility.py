@@ -42,6 +42,13 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
         self.assertEqual(rule.check(source, "generic.sql", {}), [])
 
+    def test_full_outer_join_keeps_outer_keyword(self):
+        source = "SELECT * FROM first_item FULL OUTER JOIN second_item USING (item_id);"
+        rule = RedundantKeywordsRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
     def test_dynamic_join_conditions_compact_within_one_xml_branch(self):
         source = (
             "    JOIN sample_owner owner ON owner.id = item.owner_id\n"

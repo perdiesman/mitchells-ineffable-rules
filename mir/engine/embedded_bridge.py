@@ -281,6 +281,7 @@ def fix_embedded_content(
         )
     fixed_text = guest_text
     dynamic_indent_safe_lines: set[int] = set()
+    dynamic_indent_safe_bodies: set[str] = set()
     semantic_changed = False
     xml_safety_context = None
     if (
@@ -373,6 +374,9 @@ def fix_embedded_content(
                             and current_indent != previous_indent
                         ):
                             dynamic_indent_safe_lines.add(line_index)
+                            body = current_line.rstrip("\r\n").lstrip(" \t")
+                            if body:
+                                dynamic_indent_safe_bodies.add(body)
             if fixed_text != prev_text and extra_fix_args and "applied_rules" in extra_fix_args:
                 extra_fix_args["applied_rules"].add(rule.rule_id)
             if fixed_text != prev_text and rule.commit_semantic_rewrite:
@@ -604,6 +608,78 @@ def fix_embedded_content(
                         block_edits.append(candidate_edit)
 
                 edits.extend(block_edits)
+
+        # Line matching can align a freshly expanded line with the wrong
+        # repeated neighbor. Recover unique indentation-only changes directly
+        # from their line bodies so dynamic table-function arguments are not
+        # left partially formatted.
+        guest_body_indexes: Dict[str, List[int]] = {}
+        fixed_body_indexes: Dict[str, List[int]] = {}
+        for index, line in enumerate(guest_lines):
+            body = line.rstrip("\r\n").lstrip(" \t")
+            if body:
+                guest_body_indexes.setdefault(body, []).append(index)
+        for index, line in enumerate(fixed_lines):
+            body = line.rstrip("\r\n").lstrip(" \t")
+            if body:
+                fixed_body_indexes.setdefault(body, []).append(index)
+
+        for body, old_indexes in guest_body_indexes.items():
+            new_indexes = fixed_body_indexes.get(body, [])
+            if len(old_indexes) != 1 or len(new_indexes) != 1:
+                continue
+            old_index = old_indexes[0]
+            new_index = new_indexes[0]
+            if (
+                new_index not in dynamic_indent_safe_lines
+                and body not in dynamic_indent_safe_bodies
+            ):
+                continue
+            guest_line = guest_lines[old_index]
+            fixed_line = fixed_lines[new_index]
+            guest_indent = len(guest_line) - len(guest_line.lstrip(" \t"))
+            fixed_indent = len(fixed_line) - len(fixed_line.lstrip(" \t"))
+            if guest_indent == fixed_indent:
+                continue
+            guest_start = guest_line_offsets[old_index]
+            guest_end = guest_start + guest_indent
+            start_orig = mapping[guest_start] if guest_start < len(mapping) else None
+            end_orig = (
+                mapping[guest_end - 1] + 1
+                if start_orig is not None and guest_end > guest_start
+                else start_orig
+            )
+            if start_orig is None or end_orig is None:
+                continue
+            if any(
+                mapping[position] - mapping[position - 1] != 1
+                for position in range(guest_start + 1, guest_end)
+            ):
+                continue
+            candidate = (start_orig, end_orig, fixed_line[:fixed_indent])
+            if any(
+                start_orig < existing_end and existing_start < end_orig
+                for existing_start, existing_end, _ in edits
+            ):
+                continue
+            source_range = extra_fix_args.get("source_range") if extra_fix_args else None
+            if source_range and not (
+                source_range[0] <= start_orig and end_orig <= source_range[1]
+            ):
+                continue
+            if (
+                extra_fix_args
+                and "original_xml" in extra_fix_args
+                and "tag_ranges" in extra_fix_args
+                and not is_fixed_text_xml_safe(
+                    extra_fix_args["original_xml"],
+                    extra_fix_args["tag_ranges"],
+                    [candidate],
+                    xml_safety_context,
+                )
+            ):
+                continue
+            edits.append(candidate)
 
     if edits and extra_fix_args and "original_xml" in extra_fix_args and "tag_ranges" in extra_fix_args:
         original_xml = extra_fix_args["original_xml"]
