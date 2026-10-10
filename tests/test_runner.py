@@ -2507,6 +2507,41 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
 
+    def test_xml_mybatis_expands_included_table_before_join(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="ItemRows">\n'
+            '        SELECT item_id, state_code\n'
+            '        FROM sample_item\n'
+            '    </sql>\n'
+            '    <select id="items">\n'
+            '        SELECT rows.item_id, state.name\n'
+            '        FROM (\n'
+            '                <include refid="ItemRows" />\n'
+            '            ) rows\n'
+            '        JOIN sample_state state ON state.code = rows.state_code;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '        FROM (\n',
+            '        FROM\n            (\n',
+        ).replace(
+            '        JOIN sample_state',
+            '            JOIN sample_state',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_applies_host_semantics_around_include(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

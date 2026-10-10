@@ -2498,6 +2498,42 @@ def include_subquery_source_ranges(
     ]
 
 
+def include_relation_list_source_edits(
+    content: str,
+    source_range: tuple[int, int],
+) -> List[tuple[int, int, str]]:
+    """Expand an included derived table when another JOIN follows it."""
+    source_start, source_end = source_range
+    fragment = content[source_start:source_end]
+    pattern = re.compile(
+        r"(?im)^(?P<indent>[ \t]*)FROM(?P<after_from>[ \t]*)\("
+        r"(?P<after_open>[ \t\r\n]*)"
+        r"(?P<include><include\b[^>]*/>)"
+        r"(?P<before_close>[ \t\r\n]*)\)"
+        r"(?P<alias>[ \t]+(?:AS[ \t]+)?[A-Za-z_][A-Za-z0-9_$]*)"
+        r"(?P<before_join>[ \t\r\n]+)"
+        r"(?=(?:(?:LEFT|RIGHT|FULL)(?:[ \t]+OUTER)?|INNER|CROSS|NATURAL)?"
+        r"[ \t]+JOIN\b|JOIN\b)",
+    )
+    edits = []
+    for match in pattern.finditer(fragment):
+        indent = match.group("indent")
+        relation_indent = indent + "    "
+        body_indent = relation_indent + "    "
+        replacements = {
+            "after_from": "\n" + relation_indent,
+            "after_open": "\n" + body_indent,
+            "before_close": "\n" + relation_indent,
+            "before_join": "\n" + relation_indent,
+        }
+        for group, replacement in replacements.items():
+            start = source_start + match.start(group)
+            end = source_start + match.end(group)
+            if content[start:end] != replacement:
+                edits.append((start, end, replacement))
+    return edits
+
+
 def has_include_relation_before(
     content: str,
     source_start: int,
@@ -5434,6 +5470,11 @@ class XmlMybatisSqlRule(BaseRule):
                         )
                     ]
                 layout_edits.extend(dynamic_projection_edits)
+                include_relation_edits = include_relation_list_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                )
+                layout_edits.extend(include_relation_edits)
                 dynamic_order_edits = compact_dynamic_order_by_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
@@ -5559,6 +5600,7 @@ class XmlMybatisSqlRule(BaseRule):
                     + long_case_edits
                     + dynamic_case_edits
                     + expression_compaction_edits
+                    + include_relation_edits
                 )
                 layout_edits = [
                     edit
@@ -5640,6 +5682,7 @@ class XmlMybatisSqlRule(BaseRule):
                         + long_case_edits
                         + dynamic_case_edits
                         + expression_compaction_edits
+                        + include_relation_edits
                     )
                 ) | set(
                     edit
