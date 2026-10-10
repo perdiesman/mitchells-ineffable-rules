@@ -449,7 +449,20 @@ class WhereMultiRule(BaseRule):
                         if comparison_index is None:
                             continue
                         whitespace = tokens[comparison_index + 1]
-                        expected_operand_ws = "\n" + condition_indent + "    "
+                        comparison = tokens[comparison_index]
+                        comparison_line_start = content.rfind(
+                            "\n", 0, comparison["start"]
+                        ) + 1
+                        comparison_prefix = content[
+                            comparison_line_start:comparison["start"]
+                        ]
+                        comparison_indent = comparison_prefix[
+                            : len(comparison_prefix)
+                            - len(comparison_prefix.lstrip(" \t"))
+                        ]
+                        expected_operand_ws = (
+                            "\n" + comparison_indent + "    "
+                        )
                         if whitespace["value"] != expected_operand_ws:
                             violations.append({
                                 "token": tokens[comparison_index],

@@ -2471,6 +2471,53 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(fixed, expected)
         self.assertEqual(apply_edits(fixed), expected)
 
+    def test_xml_mybatis_dynamic_join_continuations_and_short_subquery(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item.item_id\n'
+            '        FROM\n'
+            '            sample_item item\n'
+            '            <if test="withRegion">\n'
+            '                LEFT JOIN sample_region region\n'
+            '                ON region.id = (\n'
+            '                    SELECT id\n'
+            '                    FROM sample_region_lookup\n'
+            "                    WHERE code = 'NE')\n"
+            '            </if>\n'
+            '            LEFT JOIN sample_detail detail ON detail.item_id = item.item_id\n'
+            '            AND detail.active\n'
+            '            AND\n'
+            '            <if test="withRegion">detail.region_id = region.id</if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item.item_id\n'
+            '        FROM\n'
+            '            sample_item item\n'
+            '            <if test="withRegion">\n'
+            '                LEFT JOIN sample_region region\n'
+            "                    ON region.id = (SELECT id FROM sample_region_lookup WHERE code = 'NE')\n"
+            '            </if>\n'
+            '            LEFT JOIN sample_detail detail ON detail.item_id = item.item_id AND detail.active AND\n'
+            '            <if test="withRegion">detail.region_id = region.id</if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_between_layout_uses_physical_source_width(self):
         indent = " " * 20
         source = (
@@ -3232,6 +3279,133 @@ class TestRunnerIntegration(unittest.TestCase):
             "    'PREFIX_' || 101\n"
             "        || '_ND'\n"
             "FROM sample_inventory;\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_where_case_comparison_continuation_does_not_cycle(self):
+        sql_content = (
+            "SELECT item_id\n"
+            "FROM sample_item\n"
+            "WHERE\n"
+            "    CASE\n"
+            "        WHEN grouping_mode =\n"
+            "            'regional'\n"
+            "            AND very_long_owner_identifier IS NULL\n"
+            "            AND very_long_region_identifier IS NOT NULL\n"
+            "            AND another_long_scope_identifier IS NOT NULL\n"
+            "            THEN TRUE\n"
+            "        ELSE FALSE\n"
+            "    END\n"
+            "    AND active;\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(first.content, sql_content)
+        self.assertEqual(second.content, sql_content)
+        self.assertFalse(first.diagnostics)
+
+    def test_multiline_case_keeps_additive_condition_continuation(self):
+        sql_content = (
+            "SELECT\n"
+            "    CASE\n"
+            "        WHEN previous_time = current_time + INTERVAL '15 minutes' THEN current_time\n"
+            "        ELSE current_time + INTERVAL '1 hour'\n"
+            "    END AS adjusted_time\n"
+            "FROM sample_event;\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(first.content, sql_content)
+        self.assertEqual(second.content, sql_content)
+        self.assertFalse(first.diagnostics)
+
+    def test_multiline_case_rejoins_short_else_result(self):
+        sql_content = (
+            "SELECT\n"
+            "    CASE\n"
+            "        WHEN enabled\n"
+            "            THEN first_count + second_count\n"
+            "                + third_count + fourth_count\n"
+            "        ELSE\n"
+            "            0\n"
+            "    END AS total_count\n"
+            "FROM sample_record;\n"
+        )
+        expected = (
+            "SELECT\n"
+            "    CASE\n"
+            "        WHEN enabled THEN first_count + second_count\n"
+            "            + third_count + fourth_count\n"
+            "        ELSE 0\n"
+            "    END AS total_count\n"
+            "FROM sample_record;\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_multiline_update_is_not_recompacted_after_expression_wrap(self):
+        sql_content = (
+            "UPDATE sample_group\n"
+            "SET generated_key = lower(substring(group_name, 1, 1))\n"
+            "    || substring(replace(group_name, ' ', ''), 2);\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(first.content, sql_content)
+        self.assertEqual(second.content, sql_content)
+        self.assertFalse(first.diagnostics)
+
+    def test_short_update_clauses_compact_when_expressions_are_single_line(self):
+        sql_content = (
+            "UPDATE sample_record\n"
+            "SET processed_at = now()\n"
+            "WHERE enabled AND processed_at IS NULL;\n"
+        )
+        expected = (
+            "UPDATE sample_record SET processed_at = now() "
+            "WHERE enabled AND processed_at IS NULL;\n"
         )
         config = Config()
         config.profile = "commit"

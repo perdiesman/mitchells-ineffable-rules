@@ -539,32 +539,6 @@ class JoinOnMultiRule(BaseRule):
                         "replacement": expected_post_on_ws
                     })
 
-                if prospective_additive_index is not None:
-                    additive = tokens[prospective_additive_index]
-                    whitespace_before_additive = (
-                        tokens[prospective_additive_index - 1]
-                        if prospective_additive_index > 0
-                        and tokens[prospective_additive_index - 1]["type"]
-                        == "WHITESPACE"
-                        else None
-                    )
-                    expected_additive_ws = "\n" + expected_indent
-                    if (
-                        whitespace_before_additive is None
-                        or whitespace_before_additive["value"]
-                        != expected_additive_ws
-                    ):
-                        violations.append({
-                            "token": additive,
-                            "ws_start": (
-                                whitespace_before_additive["start"]
-                                if whitespace_before_additive
-                                else additive["start"]
-                            ),
-                            "ws_end": additive["start"],
-                            "replacement": expected_additive_ws,
-                        })
-
                 violations.extend(
                     item
                     for item in grouped_boolean_edits
@@ -644,9 +618,12 @@ class JoinOnMultiRule(BaseRule):
                     )
                     and not has_multiline_group
                 ):
-                    if not any(
+                    if (
+                        not has_additive_continuation
+                        and not any(
                         token["type"] == "COMMENT"
                         for token in tokens[i + 1 : clause_end]
+                        )
                     ):
                         last_active_idx = next(
                             (
@@ -659,9 +636,25 @@ class JoinOnMultiRule(BaseRule):
                         if last_active_idx is not None:
                             for index in range(i + 1, last_active_idx):
                                 whitespace = tokens[index]
+                                next_active = next(
+                                    (
+                                        tokens[candidate]
+                                        for candidate in range(
+                                            index + 1, last_active_idx + 1
+                                        )
+                                        if tokens[candidate]["type"]
+                                        not in {"WHITESPACE", "COMMENT"}
+                                    ),
+                                    None,
+                                )
                                 if (
                                     whitespace["type"] == "WHITESPACE"
                                     and whitespace["value"] != " "
+                                    and not (
+                                        next_active
+                                        and next_active["type"] == "OPERATOR"
+                                        and next_active["value"] in {"+", "||"}
+                                    )
                                 ):
                                     violations.append({
                                         "token": whitespace,

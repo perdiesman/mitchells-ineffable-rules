@@ -100,7 +100,10 @@ class FromMultiRule(BaseRule):
                         break
                     if d == outer_depth:
                         if t["type"] == "KEYWORD" and t["value"].upper() in (
-                            "WHERE", "GROUP", "ORDER", "BY", "HAVING", "LIMIT", "OFFSET", "UNION", "INTERSECT", "EXCEPT"
+                            "WHERE", "GROUP", "ORDER", "BY", "HAVING",
+                            "LIMIT", "OFFSET", "UNION", "INTERSECT",
+                            "EXCEPT", "SELECT", "INSERT", "UPDATE",
+                            "DELETE", "SET", "VALUES", "RETURNING",
                         ):
                             clause_end = idx
                             break

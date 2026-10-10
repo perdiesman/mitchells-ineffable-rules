@@ -179,15 +179,6 @@ class CaseWhenWrapRule(BaseRule):
                 for position, item in enumerate(result_tokens)
                 if item["type"] not in ("WHITESPACE", "COMMENT")
             ]
-            meaningful_result_tokens = (
-                result_tokens[active_result[0]:active_result[-1] + 1]
-                if active_result
-                else []
-            )
-            result_multiline = any(
-                item["type"] == "WHITESPACE" and "\n" in item["value"]
-                for item in meaningful_result_tokens
-            )
             candidate_line = (
                 when_indent
                 + "WHEN "
@@ -196,8 +187,7 @@ class CaseWhenWrapRule(BaseRule):
                 + result_text
             )
             should_wrap_then = (
-                result_multiline
-                or source_text_length(candidate_line, rule_config) > max_length
+                source_text_length(candidate_line, rule_config) > max_length
             )
             condition_line = when_indent + "WHEN " + condition_text
             if source_text_length(condition_line, rule_config) > max_length:
@@ -245,15 +235,20 @@ class CaseWhenWrapRule(BaseRule):
                                 )[-1]
                             ) > len(indent)
                         ):
-                            # Collapse only legacy column-aligned operands
-                            # that drift far beyond the CASE continuation.
-                            # Deliberate operator continuations at the normal
-                            # one-level indent remain multiline.
+                            # Additive layout owns an existing operator
+                            # continuation. Normalize legacy column alignment
+                            # to the CASE continuation instead of rejoining it
+                            # and creating a cycle at the stricter additive
+                            # line limit.
                             edits.append({
                                 "token": token,
                                 "start": condition_whitespace["start"],
                                 "end": condition_whitespace["end"],
-                                "replacement": " ",
+                                "replacement": (
+                                    "\n" + indent
+                                    if previous["value"] in {"+", "||"}
+                                    else " "
+                                ),
                             })
                 for boolean_index in find_boolean_operator_indices(
                     tokens,

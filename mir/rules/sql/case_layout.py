@@ -110,6 +110,35 @@ class CaseLayoutRule(BaseRule):
             end_idx = block["end_idx"]
             case_tok = block["case_tok"]
             end_tok = block["end_tok"]
+            if any(
+                token["type"] == "STRING" and "\n" in token["value"]
+                for token in tokens[start_idx:end_idx + 1]
+            ):
+                # Collapsing or rebuilding the CASE would normalize bytes
+                # inside a dynamic SQL string literal. Its contents are data,
+                # not layout owned by this rule.
+                continue
+            effective_max_len = max_len
+            has_additive_expression = any(
+                token["type"] == "OPERATOR"
+                and token["value"] in {"+", "||"}
+                for token in tokens[start_idx:end_idx + 1]
+            )
+            if has_additive_expression:
+                from mir.rules.sql.additive_wrap import AdditiveWrapRule
+
+                additive_max_len = self.get_config_value(
+                    rule_config,
+                    "additive_max_line_length",
+                    default_value=100,
+                    fallbacks=[(AdditiveWrapRule, "max_line_length")],
+                )
+                effective_max_len = min(
+                    effective_max_len, additive_max_len
+                )
+            effective_base_indent = (
+                0 if has_additive_expression else base_indent_spaces
+            )
             
             original_text = content[case_tok["start"]:end_tok["end"]]
             
@@ -152,8 +181,8 @@ class CaseLayoutRule(BaseRule):
                         line_prefix + original_text.strip() + line_suffix,
                         rule_config,
                     )
-                    - base_indent_spaces
-                ) <= max_len
+                    - effective_base_indent
+                ) <= effective_max_len
             )
             
             if is_simple_inline:
@@ -163,6 +192,7 @@ class CaseLayoutRule(BaseRule):
             can_compact_multiline = (
                 case_tok["line"] != end_tok["line"]
                 and when_count == 1
+                and not has_additive_expression
                 and not any(
                     token["type"] in {"COMMENT", "COMMA"}
                     for token in tokens[start_idx:end_idx + 1]
@@ -172,8 +202,8 @@ class CaseLayoutRule(BaseRule):
                         line_prefix + compact_text + line_suffix,
                         rule_config,
                     )
-                    - base_indent_spaces
-                ) <= max_len
+                    - effective_base_indent
+                ) <= effective_max_len
             )
             if can_compact_multiline:
                 violations.append({
@@ -281,9 +311,40 @@ class CaseLayoutRule(BaseRule):
                             f"{case_indent}    WHEN {compact_condition}"
                         )
                         inline_arm = f"{condition_line} THEN {res_text}"
+                        has_additive_condition_break = (
+                            any(
+                                token["type"] == "WHITESPACE"
+                                and "\n" in token["value"]
+                                for token in cond_tokens
+                            )
+                            and any(
+                                token["type"] == "OPERATOR"
+                                and token["value"] in {"+", "||"}
+                                for token in cond_tokens
+                            )
+                        )
 
-                        if source_text_length(inline_arm, rule_config) > max_len:
-                            if source_text_length(condition_line, rule_config) <= max_len:
+                        if has_additive_condition_break:
+                            condition_lines = [
+                                line.strip()
+                                for line in compact_condition.splitlines()
+                                if line.strip()
+                            ]
+                            line_text = (
+                                f"\n{case_indent}    WHEN "
+                                + condition_lines[0]
+                                + "".join(
+                                    f"\n{case_indent}        {line}"
+                                    for line in condition_lines[1:]
+                                )
+                                + f"\n{case_indent}        THEN {res_text}"
+                            )
+                        elif source_text_length(
+                            inline_arm, rule_config
+                        ) > effective_max_len:
+                            if source_text_length(
+                                condition_line, rule_config
+                            ) <= effective_max_len:
                                 first_line = f"\n{condition_line}"
                                 remaining_conditions = []
                             else:
@@ -316,8 +377,30 @@ class CaseLayoutRule(BaseRule):
                 elif val_upper == "ELSE":
                     else_tokens = tokens[start_c:end_c]
                     else_text = "".join([t["value"] for t in else_tokens]).strip()
-                    else_text = " ".join(else_text.split())
-                    line_text = f"\n{case_indent}    ELSE {else_text}"
+                    preserve_additive_break = (
+                        "\n" in else_text
+                        and any(
+                            token["type"] == "OPERATOR"
+                            and token["value"] in {"+", "||"}
+                            for token in else_tokens
+                        )
+                    )
+                    if preserve_additive_break:
+                        else_lines = [
+                            line.strip()
+                            for line in else_text.splitlines()
+                            if line.strip()
+                        ]
+                        line_text = (
+                            f"\n{case_indent}    ELSE {else_lines[0]}"
+                            + "".join(
+                                f"\n{case_indent}        {line}"
+                                for line in else_lines[1:]
+                            )
+                        )
+                    else:
+                        else_text = " ".join(else_text.split())
+                        line_text = f"\n{case_indent}    ELSE {else_text}"
                     rebuilt_parts.append(line_text)
                     
                     kw_token_idx = tokens.index(kw_tok)

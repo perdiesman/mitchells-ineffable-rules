@@ -93,6 +93,16 @@ class MultilineFunctionLayoutRule(BaseRule):
                 "KEYWORD",
             ):
                 continue
+            preceding_active = [
+                tokens[candidate]
+                for candidate in range(name_index - 1, -1, -1)
+                if tokens[candidate]["type"] not in ("WHITESPACE", "COMMENT")
+            ][:4]
+            is_insert_target = any(
+                token["type"] == "KEYWORD"
+                and token["value"].upper() == "INTO"
+                for token in preceding_active
+            )
             if (
                 tokens[name_index]["type"] == "KEYWORD"
                 and tokens[name_index]["value"].upper()
@@ -101,6 +111,24 @@ class MultilineFunctionLayoutRule(BaseRule):
                 continue
             close_index = find_matching_paren(tokens, open_index)
             if close_index is None or tokens[close_index]["line"] == opening["line"]:
+                continue
+            first_inner_active = next(
+                (
+                    tokens[candidate]
+                    for candidate in range(open_index + 1, close_index)
+                    if tokens[candidate]["type"]
+                    not in ("WHITESPACE", "COMMENT")
+                ),
+                None,
+            )
+            if (
+                is_insert_target
+                and first_inner_active is not None
+                and first_inner_active["type"] == "KEYWORD"
+                and first_inner_active["value"].upper() in {"SELECT", "WITH"}
+            ):
+                # INSERT INTO relation (...) may contain a parenthesized
+                # query rather than a column list. It is not a function call.
                 continue
             line = lines[opening["line"] - 1]
             base_indent = line[: len(line) - len(line.lstrip(" \t"))]

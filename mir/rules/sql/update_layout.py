@@ -152,7 +152,13 @@ class UpdateLayoutRule(BaseRule):
                 )
                 if preserve_dynamic_clauses:
                     expected = original
-                elif len(base_indent + single_line) <= max_len:
+                elif (
+                    len(base_indent + single_line) <= max_len
+                    and all(
+                        "\n" not in component
+                        for component in (c1_str, *fields, c4_str)
+                    )
+                ):
                     expected = single_line
                 else:
                     if len(fields) > 1:

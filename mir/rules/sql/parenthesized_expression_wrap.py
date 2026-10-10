@@ -326,6 +326,16 @@ class ParenthesizedExpressionWrapRule(BaseRule):
                         source_text_length(operator_line, rule_config)
                         > expression_max_length
                     )
+                    leading_on_line = (
+                        tokens[previous_on_line]
+                        if previous_on_line is not None
+                        else None
+                    )
+                    additive_continuation_line = bool(
+                        leading_on_line
+                        and leading_on_line["type"] == "OPERATOR"
+                        and leading_on_line["value"] in {"+", "||"}
+                    )
                     if previous_on_line == operator_index:
                         continue
                     if trails_line:
@@ -342,6 +352,10 @@ class ParenthesizedExpressionWrapRule(BaseRule):
                     elif (
                         line_is_long
                         and operator["line"] not in trailing_operator_lines
+                        and not (
+                            additive_continuation_line
+                            and operator["value"] in {"+", "||"}
+                        )
                     ):
                         add_whitespace_edit(
                             operator_index,

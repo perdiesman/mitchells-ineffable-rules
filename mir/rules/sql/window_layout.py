@@ -105,6 +105,85 @@ class WindowLayoutRule(BaseRule):
             wrapper_open = enclosing.get(over_index, ())[-1] if enclosing.get(over_index) else None
             if wrapper_open is None:
                 continue
+            wrapper_name = next(
+                (
+                    candidate
+                    for candidate in range(wrapper_open - 1, -1, -1)
+                    if tokens[candidate]["type"]
+                    not in ("WHITESPACE", "COMMENT")
+                ),
+                None,
+            )
+            if (
+                wrapper_name is None
+                or tokens[wrapper_name]["type"]
+                not in ("IDENTIFIER", "KEYWORD")
+                or (
+                    tokens[wrapper_name]["type"] == "KEYWORD"
+                    and tokens[wrapper_name]["value"].upper()
+                    in {"AS", "FROM", "IN", "WHERE", "SELECT"}
+                )
+            ):
+                # A parenthesized query or CTE body can enclose a bare window
+                # expression. Format the OVER body without treating the query
+                # itself as a wrapper function call.
+                line = lines[over_token["line"] - 1]
+                base_indent = line[: len(line) - len(line.lstrip(" \t"))]
+                window_indent = base_indent + "    "
+                field_indent = window_indent + "    "
+                whitespace_edit(
+                    over_open, "\n" + window_indent, before=False
+                )
+                whitespace_edit(
+                    over_close, "\n" + base_indent, before=True
+                )
+                over_depth = depths[over_open] + 1
+                partition_index = next(
+                    (
+                        index
+                        for index in range(over_open + 1, over_close)
+                        if depths[index] == over_depth
+                        and tokens[index]["type"] == "KEYWORD"
+                        and tokens[index]["value"].upper() == "PARTITION"
+                    ),
+                    None,
+                )
+                order_index = next(
+                    (
+                        index
+                        for index in range(over_open + 1, over_close)
+                        if depths[index] == over_depth
+                        and tokens[index]["type"] == "KEYWORD"
+                        and tokens[index]["value"].upper() == "ORDER"
+                    ),
+                    None,
+                )
+                if partition_index is not None:
+                    by_index = active_after(partition_index, over_close)
+                    if (
+                        by_index is not None
+                        and tokens[by_index]["value"].upper() == "BY"
+                    ):
+                        whitespace_edit(
+                            by_index, "\n" + field_indent, before=False
+                        )
+                        for index in range(
+                            by_index + 1, order_index or over_close
+                        ):
+                            if (
+                                tokens[index]["type"] == "COMMA"
+                                and depths[index] == over_depth
+                            ):
+                                whitespace_edit(
+                                    index,
+                                    "\n" + field_indent,
+                                    before=False,
+                                )
+                if order_index is not None:
+                    whitespace_edit(
+                        order_index, "\n" + window_indent, before=True
+                    )
+                continue
             wrapper_close = find_matching_paren(tokens, wrapper_open)
             if wrapper_close is None:
                 continue
