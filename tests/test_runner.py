@@ -7,6 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from mir.engine.config import Config
+from mir.engine.rule_interface import BaseRule, Violation
 from mir.engine.runner import process_document, remap_selected_lines, run_linter
 from mir.rules.xml.xml_mybatis_sql import (
     between_delimiter_source_edits,
@@ -54,6 +55,42 @@ class TestRunnerIntegration(unittest.TestCase):
         
         with open(path, "r") as f:
             self.assertEqual(f.read(), "SELECT id FROM t;")
+
+    def test_formatter_cycle_does_not_persist_a_partial_state(self):
+        class OscillatingRule(BaseRule):
+            rule_id = "IR-test-oscillation"
+            is_fixable = "yes"
+
+            def check(self, content, file_path, rule_config):
+                return [
+                    Violation(
+                        self.rule_id,
+                        1,
+                        "Oscillating test fixture.",
+                        [content],
+                        is_fixable=True,
+                    )
+                ]
+
+            def fix(self, content, file_path, rule_config):
+                return "second\n" if content == "first\n" else "first\n"
+
+        rule = OscillatingRule()
+        violation = rule.check("first\n", "cycle.xml", {})[0]
+        config = Config()
+        config.fix = True
+
+        with patch(
+            "mir.engine.runner._collect",
+            return_value=([(violation, rule, "error")], []),
+        ):
+            result = process_document(config, "first\n", "cycle.xml", "xml")
+
+        self.assertEqual(result.content, "first\n")
+        self.assertEqual(result.violations, [(violation, rule, "error")])
+        self.assertTrue(
+            any("formatting cycle" in item for item in result.diagnostics)
+        )
 
     def test_language_specific_disable(self):
         # A file with select (which violates keyword case)

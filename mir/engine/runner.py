@@ -393,6 +393,7 @@ def process_document(
         current = content
         seen = {current}
         violations = initial
+        convergence_failed = False
         max_fix_passes = 20
         for _ in range(max_fix_passes):
             fix_rules: list[BaseRule] = []
@@ -471,6 +472,7 @@ def process_document(
             result.diagnostics.extend(pass_diagnostics)
             if cycle_detected:
                 result.diagnostics.append(f"Formatter did not converge for {path}; a formatting cycle was detected")
+                convergence_failed = True
                 break
             seen.add(current)
         else:
@@ -478,8 +480,16 @@ def process_document(
                 f"Formatter did not converge for {path} after "
                 f"{max_fix_passes} passes"
             )
-        result.content = current
-        result.violations = violations
+            convergence_failed = True
+        if convergence_failed:
+            # A partial state from a cycle is neither deterministic nor safe
+            # to persist. Keep the source byte-for-byte intact while exposing
+            # the diagnostic and its original violations to the caller.
+            result.content = content
+            result.violations = initial
+        else:
+            result.content = current
+            result.violations = violations
     else:
         result.violations = initial
 
