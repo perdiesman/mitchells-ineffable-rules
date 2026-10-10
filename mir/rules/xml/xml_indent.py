@@ -494,6 +494,7 @@ class XmlIndentRule(BaseRule):
                     for text_line in range(line, end_line + 1):
                         if text_line < 1 or text_line > len(lines):
                             continue
+                        text_line_start = line_starts[text_line - 1]
                         line_text = lines[text_line - 1]
                         if not line_text.strip() or line_text.lstrip().startswith("<"):
                             continue
@@ -505,11 +506,31 @@ class XmlIndentRule(BaseRule):
                         actual_indent = line_text[: len(line_text) - len(line_text.lstrip(" \t"))]
                         first_word = line_text.strip().split(None, 1)[0].upper()
                         is_bind_body = line_text.strip().startswith(("#{", "${", ":"))
+                        is_logical_continuation = first_word in {"AND", "OR"}
+                        open_parenthesis_depth = 0
+                        if is_logical_continuation:
+                            opening_tag_end = content.find(
+                                ">", dynamic_parent["token"]["start"]
+                            )
+                            if 0 <= opening_tag_end < text_line_start:
+                                prefix_tokens = tokenize_sql(
+                                    content[opening_tag_end + 1:text_line_start]
+                                )
+                                open_parenthesis_depth = sum(
+                                    1 if item["value"] == "(" else -1
+                                    for item in prefix_tokens
+                                    if item["type"] == "PAREN"
+                                )
                         malformed_dynamic_indent = (
                             len(actual_indent) % indent_size != 0
                         )
                         if (
                             is_bind_body
+                            or (
+                                is_logical_continuation
+                                and open_parenthesis_depth <= 0
+                                and actual_indent != minimum_indent
+                            )
                             or malformed_dynamic_indent
                             or len(actual_indent) < len(minimum_indent)
                         ):
@@ -641,9 +662,6 @@ class XmlIndentRule(BaseRule):
                 # Check if it's on multiple lines originally
                 start_line_number = content.count("\n", 0, el["start_offset"]) + 1
                 end_line_number = content.count("\n", 0, el["end_offset"]) + 1
-                if start_line_number == end_line_number:
-                    continue
-                    
                 start_offset = el["start_offset"]
                 end_offset = el["end_offset"]
                 
@@ -653,11 +671,14 @@ class XmlIndentRule(BaseRule):
                 opening_tag = content[start_offset:first_inner]
                 inner_text = content[first_inner:last_inner]
                 closing_tag = content[last_inner:end_offset]
-                if (
-                    el["tag"] in {"if", "when", "otherwise"}
-                    and "," in inner_text
-                    and len([line for line in inner_text.splitlines() if line.strip()]) > 1
-                ):
+                inner_lines = [
+                    line.strip()
+                    for line in inner_text.splitlines()
+                    if line.strip()
+                ]
+                if start_line_number == end_line_number:
+                    continue
+                if el["tag"] in {"if", "when", "otherwise"} and len(inner_lines) > 1:
                     continue
                 
                 collapsed = opening_tag.strip() + inner_text.strip() + closing_tag.strip()

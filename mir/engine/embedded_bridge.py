@@ -370,7 +370,7 @@ def fix_embedded_content(
                         )
                         if (
                             previous_line.lstrip(" \t") == current_line.lstrip(" \t")
-                            and current_indent > previous_indent
+                            and current_indent != previous_indent
                         ):
                             dynamic_indent_safe_lines.add(line_index)
             if fixed_text != prev_text and extra_fix_args and "applied_rules" in extra_fix_args:
@@ -443,9 +443,22 @@ def fix_embedded_content(
                     fixed_block = "".join(fixed_lines[j1:j2])
                     guest_block_lines = guest_block.splitlines(keepends=True)
                     fixed_block_lines = fixed_block.splitlines(keepends=True)
+                    guest_bodies = [line.strip() for line in guest_block_lines]
+                    fixed_bodies = [line.strip() for line in fixed_block_lines]
+                    moved_body = any(
+                        body
+                        and body in fixed_bodies
+                        and fixed_bodies.index(body) != index
+                        for index, body in enumerate(guest_bodies)
+                    )
+                    line_occupancy_changed = [bool(body) for body in guest_bodies] != [
+                        bool(body) for body in fixed_bodies
+                    ]
                     if (
                         has_dynamic_context
                         and len(guest_block_lines) == len(fixed_block_lines)
+                        and not moved_body
+                        and not line_occupancy_changed
                     ):
                         line_offset = guest_block_start
                         for relative_line, (guest_line, fixed_line) in enumerate(

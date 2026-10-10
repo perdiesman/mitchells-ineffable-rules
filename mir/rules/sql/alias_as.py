@@ -74,7 +74,29 @@ class AliasAsRule(BaseRule):
                 for item_idx, item in enumerate(items):
                     active = [t for t in item if t["type"] not in ("WHITESPACE", "COMMENT")]
                     if item_idx == 0 and active and active[0]["value"].upper() in ("DISTINCT", "ALL"):
-                        active = active[1:]
+                        if (
+                            len(active) > 2
+                            and active[0]["value"].upper() == "DISTINCT"
+                            and active[1]["value"].upper() == "ON"
+                            and active[2]["type"] == "PAREN"
+                            and active[2]["value"] == "("
+                        ):
+                            depth = 0
+                            prefix_end = None
+                            for prefix_index in range(2, len(active)):
+                                prefix_token = active[prefix_index]
+                                if prefix_token["type"] != "PAREN":
+                                    continue
+                                if prefix_token["value"] == "(":
+                                    depth += 1
+                                else:
+                                    depth -= 1
+                                    if depth == 0:
+                                        prefix_end = prefix_index + 1
+                                        break
+                            active = active[prefix_end:] if prefix_end else active[1:]
+                        else:
+                            active = active[1:]
                     if len(active) >= 2:
                         last_tok = active[-1]
                         # Skip if it is part of a data type name

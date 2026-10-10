@@ -11,6 +11,7 @@ from mir.rules.sql.sql_utils import (
 class WhereMultiRule(BaseRule):
     commit_profile = True
     embedded_safe = True
+    embedded_dynamic_indent_safe = True
     trellis_safe = True
     rule_id = "IR-where-multi"
     description = "Keep a multi-condition WHERE clause inline when it fits; otherwise put each condition on its own indented line."

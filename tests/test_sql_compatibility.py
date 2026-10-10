@@ -1,6 +1,7 @@
 import unittest
 
 from mir.rules.sql.additive_wrap import AdditiveWrapRule
+from mir.rules.sql.alias_as import AliasAsRule
 from mir.rules.sql.as_spacing import ASSpacingRule
 from mir.rules.sql.function_case import FunctionCaseRule
 from mir.rules.sql.from_multi import FromMultiRule
@@ -26,6 +27,7 @@ from mir.rules.sql.sql_utils import _tokenize_sql_impl, protected_sql_signature,
 from mir.rules.sql.statement_semicolon import StatementSemicolonRule
 from mir.rules.sql.subquery_indent import SubqueryIndentRule
 from mir.rules.sql.table_function_indent import TableFunctionIndentRule
+from mir.rules.sql.table_alias_as import TableAliasAsRule
 from mir.rules.sql.trailing_semicolon import TrailingSemicolonRule
 from mir.rules.sql.unresolved_alias import UnresolvedAliasRule
 from mir.rules.sql.where_multi import WhereMultiRule
@@ -45,6 +47,35 @@ class TestSqlCompatibility(unittest.TestCase):
         rule = NullCoalesceRule()
 
         self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
+
+    def test_boolean_null_fallback_does_not_use_numeric_coalesce(self):
+        source = "enabled IS NULL OR enabled = true"
+
+        rule = NullCoalesceRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
+    def test_set_returning_function_alias_uses_as(self):
+        source = "SELECT * FROM generate_series(1, 3) item_number;"
+        expected = "SELECT * FROM generate_series(1, 3) AS item_number;"
+
+        rule = TableAliasAsRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
+        self.assertEqual(rule.fix(expected, "generic.sql", {}), expected)
+
+    def test_distinct_on_projection_is_not_treated_as_an_alias(self):
+        source = (
+            "SELECT DISTINCT ON (recorded_date)\n"
+            "    recorded_date, item_count\n"
+            "FROM sample_item;"
+        )
+
+        rule = AliasAsRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
 
     def test_short_alias_recombines_in_mybatis_sql(self):
         source = "    item_name\n                    AS display_name"

@@ -135,24 +135,37 @@ class XmlMybatisBlankLinesRule(BaseRule):
         self, content: str, file_path: str, rule_config: Dict[str, Any]
     ) -> List[Violation]:
         lines = content.splitlines()
+        removed = self._removed_lines(content)
+        whitespace_only = {
+            line_number
+            for line_number, line in enumerate(lines, 1)
+            if line and not line.strip()
+        }
         return [
             Violation(
                 self.rule_id,
                 line_number,
-                "MyBatis statements must not start or end with blank lines or contain repeated blank lines.",
+                (
+                    "Blank lines in MyBatis files must not contain whitespace."
+                    if line_number in whitespace_only and line_number not in removed
+                    else "MyBatis statements must not start or end with blank lines or contain repeated blank lines."
+                ),
                 [lines[line_number - 1]],
                 True,
             )
-            for line_number in sorted(self._removed_lines(content))
+            for line_number in sorted(removed | whitespace_only)
         ]
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
         removed = self._removed_lines(content)
-        if not removed:
-            return content
         lines = content.splitlines()
+        whitespace_only = any(line and not line.strip() for line in lines)
+        if not removed and not whitespace_only:
+            return content
         ending = "\r\n" if "\r\n" in content else "\n"
         fixed = ending.join(
-            line for line_number, line in enumerate(lines, 1) if line_number not in removed
+            "" if line and not line.strip() else line
+            for line_number, line in enumerate(lines, 1)
+            if line_number not in removed
         )
         return fixed + (ending if content.endswith(("\n", "\r")) else "")

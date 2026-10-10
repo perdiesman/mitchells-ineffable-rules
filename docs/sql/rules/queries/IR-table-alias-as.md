@@ -1,11 +1,11 @@
 # IR-table-alias-as
 
-Table and subquery aliases should not use the AS keyword.
+Table, subquery, and table-function aliases should not use AS, except generate_series aliases, which should use AS.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
-- **Commit Profile**: No
+- **Commit Profile**: Yes
 - **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:
@@ -38,4 +38,8 @@ SELECT * FROM users u;
 
 ```sql
 SELECT * FROM (SELECT a AS b FROM t) sub;
+```
+
+```sql
+SELECT * FROM generate_series(1, 3) AS item_number;
 ```

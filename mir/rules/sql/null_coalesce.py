@@ -165,7 +165,7 @@ class NullCoalesceRule(BaseRule):
                 t_eq = active[next_idx]
                 if t_eq["type"] == "OPERATOR" and t_eq["value"] == "=":
                     val_str, next_idx2 = parse_operand(next_idx + 1)
-                    if val_str and next_idx2 < num_active:
+                    if val_str == "-1" and next_idx2 < num_active:
                         t_or = active[next_idx2]
                         if t_or["type"] == "KEYWORD" and t_or["value"].upper() == "OR":
                             op1_check, next_check = parse_operand(next_idx2 + 1)
@@ -197,7 +197,7 @@ class NullCoalesceRule(BaseRule):
                                 t_eq = active[next_check]
                                 if t_eq["type"] == "OPERATOR" and t_eq["value"] == "=":
                                     val_str, next_check2 = parse_operand(next_check + 1)
-                                    if val_str:
+                                    if val_str == "-1":
                                         violations.append({
                                             "start_offset": active[i]["start"],
                                             "end_offset": active[next_check2 - 1]["end"],
