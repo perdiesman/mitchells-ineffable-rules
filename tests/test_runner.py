@@ -13,6 +13,7 @@ from mir.rules.xml.xml_mybatis_sql import (
     between_delimiter_source_edits,
     get_mybatis_protected_signatures,
     join_case_source_edits,
+    physical_case_indent_source_edits,
 )
 
 class TestRunnerIntegration(unittest.TestCase):
@@ -81,6 +82,19 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
+
+    def test_physical_case_indent_preserves_nested_inline_case_end(self):
+        sql = (
+            "CASE\n"
+            "    WHEN item_name IS NULL THEN NULL\n"
+            "    ELSE CASE WHEN item_count = 0 THEN false ELSE true END\n"
+            "END"
+        )
+
+        self.assertEqual(
+            physical_case_indent_source_edits(sql, (0, len(sql)), {}),
+            [],
+        )
 
     def test_xml_mybatis_expands_long_physical_select_projection(self):
         xml_content = (

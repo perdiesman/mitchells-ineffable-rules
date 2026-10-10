@@ -3235,6 +3235,11 @@ def physical_case_indent_source_edits(
                 if (
                     end_index is not None
                     and end_index > 0
+                    and not any(
+                        token["type"] == "KEYWORD"
+                        and token["value"].upper() == "CASE"
+                        for token in tokens[:end_index]
+                    )
                     and tokens[end_index - 1]["type"] == "WHITESPACE"
                 ):
                     whitespace = tokens[end_index - 1]
@@ -3459,6 +3464,18 @@ def has_dynamic_case_branches(
     start, end = source_range
     return bool(re.search(
         r"(?is)<if\b[^>]*>\s*(?:ELSE|END)\b",
+        content[start:end],
+    ))
+
+
+def has_dynamic_values_rows(
+    content: str,
+    source_range: tuple[int, int],
+) -> bool:
+    """Return whether a foreach supplies complete rows after VALUES."""
+    start, end = source_range
+    return bool(re.search(
+        r"(?is)\bVALUES\s*<foreach\b",
         content[start:end],
     ))
 
@@ -4317,6 +4334,16 @@ class XmlMybatisSqlRule(BaseRule):
                             "IR-case-when-wrap",
                             "IR-column-layout",
                         }
+                    )
+                if has_dynamic_values_rows(
+                    content, (el["start_offset"], el["end_offset"])
+                ):
+                    # The XML loop contributes complete row constructors.
+                    # Formatting its expanded guest as one physical VALUES
+                    # list discards the extra source indentation owned by the
+                    # foreach body and oscillates with XML indentation.
+                    excluded_guest_rule_ids.add(
+                        "IR-multiline-function-layout"
                     )
                 if dynamic_indent_ranges:
                     # The expanded guest omits XML indentation and can report
@@ -5206,6 +5233,12 @@ class XmlMybatisSqlRule(BaseRule):
                 ):
                     excluded_guest_rule_ids.update(
                         {"IR-case", "IR-case-when-wrap"}
+                    )
+                if has_dynamic_values_rows(
+                    content, (el["start_offset"], el["end_offset"])
+                ):
+                    excluded_guest_rule_ids.add(
+                        "IR-multiline-function-layout"
                     )
                 if has_unresolved_include(el, sql_defs):
                     excluded_guest_rule_ids.add("IR-paren-single")
