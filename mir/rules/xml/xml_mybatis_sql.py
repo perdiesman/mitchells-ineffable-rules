@@ -1424,16 +1424,18 @@ def dynamic_projection_subquery_source_edits(
             ),
             None,
         )
-        if first_from is None:
-            continue
         select_source = source_offset(tokens[select_index]["start"])
-        from_source = source_offset(tokens[first_from]["start"])
-        if select_source is None or from_source is None or not any(
-            select_source < start < from_source
-            for start, _, _ in dynamic_ranges
+        projection_end = first_from if first_from is not None else close_index
+        projection_end_source = source_offset(tokens[projection_end]["start"])
+        if (
+            select_source is None
+            or projection_end_source is None
+            or not any(
+                select_source < start < projection_end_source
+                for start, _, _ in dynamic_ranges
+            )
         ):
             continue
-
         open_source = source_offset(opening["start"])
         if open_source is None:
             continue
@@ -1456,6 +1458,18 @@ def dynamic_projection_subquery_source_edits(
             break
         close_indent = open_indent + ("    " if owner_is_relation else "")
         content_indent = close_indent + "    "
+        projection_indent = content_indent + "    "
+        seen_projection_lines = set()
+        for index in range(select_index + 1, projection_end):
+            token = tokens[index]
+            if (
+                depths[index] != subquery_depth
+                or token["type"] in {"WHITESPACE", "COMMENT", "COMMA"}
+                or token["line"] in seen_projection_lines
+            ):
+                continue
+            seen_projection_lines.add(token["line"])
+            indent_edit(token, projection_indent)
         for index in range(select_index, close_index):
             token = tokens[index]
             if (

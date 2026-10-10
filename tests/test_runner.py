@@ -3692,6 +3692,50 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_indents_dynamic_projection_without_from(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="insertShapes">\n'
+            '        INSERT INTO sample_shape (owner_id, shape)\n'
+            '        (\n'
+            '            SELECT\n'
+            '            #{ownerId},\n'
+            '            st_union(\n'
+            '                <foreach collection="shapes" item="shape">\n'
+            '                    st_geomfromgeojson(#{shape})\n'
+            '                </foreach>\n'
+            '            )\n'
+            '        )\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="insertShapes">\n'
+            '        INSERT INTO sample_shape (owner_id, shape)\n'
+            '        (\n'
+            '            SELECT\n'
+            '                #{ownerId},\n'
+            '                st_union(\n'
+            '                    <foreach collection="shapes" item="shape">\n'
+            '                        st_geomfromgeojson(#{shape})\n'
+            '                    </foreach>\n'
+            '                )\n'
+            '        )\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_case_boolean_continuation_indent(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
