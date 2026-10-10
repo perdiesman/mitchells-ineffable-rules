@@ -93,7 +93,9 @@ def run_rule_check_recursively(
     for body_info in _plpgsql_bodies(content):
         body = body_info["body"]
         body_start = content.count("\n", 0, body_info["token"]["start"] + len(body_info["tag"])) + 1
-        for violation in rule.check(body, file_path, rule_config):
+        recursive_config = dict(rule_config)
+        recursive_config["_recursive"] = True
+        for violation in rule.check(body, file_path, recursive_config):
             violation.line_number = body_start + violation.line_number - 1
             violation.offending_lines = [
                 lines[violation.line_number - 1] if violation.line_number <= len(lines) else ""
@@ -113,7 +115,9 @@ def run_rule_fix_recursively(
     if lang != "sql" or rule.exclude_recursive:
         return current
     for body_info in reversed(_plpgsql_bodies(current)):
-        fixed = rule.fix(body_info["body"], file_path, rule_config)
+        recursive_config = dict(rule_config)
+        recursive_config["_recursive"] = True
+        fixed = rule.fix(body_info["body"], file_path, recursive_config)
         if fixed == body_info["body"]:
             continue
         if rule_config.get("_profile") == "commit":

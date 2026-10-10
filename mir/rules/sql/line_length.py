@@ -89,7 +89,6 @@ class LineLengthRule(BaseRule):
     )
     category = "general"
     is_fixable = "sometimes"
-    exclude_recursive = True
     
     default_config = {
         "max_length": 120,
@@ -166,14 +165,21 @@ class LineLengthRule(BaseRule):
             line_starts.append(0)
 
         opaque_lines = set()
+        dollar_quote_lines = set()
         for token in tokenize_sql(content):
-            if token["type"] != "STRING" or token["value"].startswith("$"):
+            if token["type"] != "STRING":
                 continue
             start_line = bisect_right(line_starts, token["start"]) - 1
             end_line = bisect_right(
                 line_starts,
                 max(token["start"], token["end"] - 1),
             ) - 1
+            if token["value"].startswith("$"):
+                if not rule_config.get("_recursive"):
+                    dollar_quote_lines.update(
+                        range(start_line + 1, end_line + 2)
+                    )
+                continue
             if "\n" in token["value"]:
                 # Physical lines wholly inside a conventional SQL string are
                 # data, including dynamic SQL text, and cannot be reformatted
@@ -185,7 +191,7 @@ class LineLengthRule(BaseRule):
         violations = []
         lines = content.splitlines()
         for idx, line in enumerate(lines, start=1):
-            if idx in bulk_lines:
+            if idx in bulk_lines or idx in dollar_quote_lines:
                 continue
             effective_len = len(line) - base_indent_spaces
             if effective_len > max_length:

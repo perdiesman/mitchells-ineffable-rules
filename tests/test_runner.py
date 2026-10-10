@@ -33,6 +33,50 @@ class TestRunnerIntegration(unittest.TestCase):
             f.write(content)
         return filepath
 
+    def test_line_length_formats_plpgsql_body_recursively(self):
+        sql_content = (
+            "CREATE FUNCTION sample_item_action() RETURNS trigger AS $$\n"
+            "BEGIN\n"
+            "    INSERT INTO sample_item_history (recorded_timestamp, "
+            "sample_item_identifier, sample_owner_identifier, "
+            "sample_region_identifier)\n"
+            "        VALUES (new.recorded_timestamp, new.sample_item_identifier, "
+            "new.sample_owner_identifier, new.sample_region_identifier);\n"
+            "    RETURN new;\n"
+            "END;\n"
+            "$$ LANGUAGE plpgsql;\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertIn(
+            "    INSERT INTO sample_item_history (\n"
+            "        recorded_timestamp,\n"
+            "        sample_item_identifier,\n"
+            "        sample_owner_identifier,\n"
+            "        sample_region_identifier\n"
+            "    )",
+            first.content,
+        )
+        self.assertIn(
+            "        VALUES (\n"
+            "            new.recorded_timestamp,\n"
+            "            new.sample_item_identifier,\n"
+            "            new.sample_owner_identifier,\n"
+            "            new.sample_region_identifier\n"
+            "        );",
+            first.content,
+        )
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_formatter_off_region_is_not_fixed(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
