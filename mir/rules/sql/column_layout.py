@@ -273,6 +273,7 @@ class ColumnLayoutRule(BaseRule):
                 if keyword:
                     # Resolve indentation of keyword line (the leading whitespace of the line)
                     line_text = content[line_start_idx:w_start]
+                    keyword_column = w_start - line_start_idx
                     indentation = ""
                     for char in line_text:
                         if char in (" ", "\t"):
@@ -534,6 +535,7 @@ class ColumnLayoutRule(BaseRule):
                         "expression_ranges": expression_ranges,
                         "line_number": w_line,
                         "indentation": indentation,
+                        "keyword_column": keyword_column,
                         "distinct_on_expressions": distinct_on_expressions,
                     })
                     i = list_end
@@ -671,7 +673,11 @@ class ColumnLayoutRule(BaseRule):
                 cl, max_length, indent_size, base_indent_spaces
             )
             single_line_clause = f"{prefix} {', '.join(expressions)}"
-            effective_indent_len = max(0, len(indentation) - base_indent_spaces)
+            effective_indent_len = max(
+                0,
+                cl.get("keyword_column", len(indentation))
+                - base_indent_spaces,
+            )
             total_len = effective_indent_len + len(single_line_clause)
             expression_max_length = self._expression_line_limit(
                 expressions, max_length, rule_config
@@ -859,7 +865,11 @@ class ColumnLayoutRule(BaseRule):
                 cl, max_length, indent_size, base_indent_spaces
             )
             single_line_clause = f"{prefix} {', '.join(expressions)}"
-            effective_indent_len = max(0, len(indentation) - base_indent_spaces)
+            effective_indent_len = max(
+                0,
+                cl.get("keyword_column", len(indentation))
+                - base_indent_spaces,
+            )
             total_len = effective_indent_len + len(single_line_clause)
             expression_max_length = self._expression_line_limit(
                 expressions, max_length, rule_config

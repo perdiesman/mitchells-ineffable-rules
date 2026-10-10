@@ -211,6 +211,26 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
 
+    def test_column_layout_counts_return_query_prefix_in_line_length(self):
+        source = (
+            "    RETURN QUERY SELECT sample_result.region, "
+            "sample_result.migration_start_coverage, "
+            "sample_result.migration_end_coverage FROM sample_result;"
+        )
+        expected = (
+            "    RETURN QUERY SELECT\n"
+            "        sample_result.region,\n"
+            "        sample_result.migration_start_coverage,\n"
+            "        sample_result.migration_end_coverage FROM sample_result;"
+        )
+
+        rule = ColumnLayoutRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+
     def test_join_case_result_comparison_is_owned_by_case_layout(self):
         source = (
             "    LEFT JOIN state_value state_record ON\n"
