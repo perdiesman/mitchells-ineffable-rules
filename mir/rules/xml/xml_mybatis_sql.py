@@ -3064,6 +3064,12 @@ class XmlMybatisSqlRule(BaseRule):
                     edit
                     for edit in mapped_indent_edits
                     if content[edit[0]:edit[1]] != edit[2]
+                    and el["start_offset"] <= edit[0] <= edit[1]
+                    <= el["end_offset"]
+                    and el["tag"] != "sql"
+                    and "<choose" not in content[
+                        el["start_offset"]:el["end_offset"]
+                    ]
                 ]
                 if changed_mapped_indent_edits:
                     first_start = min(
@@ -3176,6 +3182,11 @@ class XmlMybatisSqlRule(BaseRule):
                     })
 
                 excluded_guest_rule_ids = set()
+                # Exact source-mapped WHERE checks above own physical XML
+                # layout. Guest WHERE findings can point through a dynamic tag
+                # or reusable fragment to whitespace that the host fixer must
+                # intentionally leave unchanged.
+                excluded_guest_rule_ids.add("IR-where-multi")
                 if local_cte_mapping:
                     excluded_guest_rule_ids.update(
                         rule.rule_id
