@@ -1,4 +1,5 @@
 from bisect import bisect_right
+import re
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.engine.rules_loader import load_rules_for_language
@@ -2366,6 +2367,28 @@ class XmlMybatisSqlRule(BaseRule):
                     if mapped_line_end == -1:
                         mapped_line_end = len(content)
                     mapped_line = content[mapped_line_start:mapped_line_end].strip()
+                    mapped_in_dynamic_body = any(
+                        start < ev["mapped_offset"] < end
+                        for start, end, _ in dynamic_indent_ranges
+                    )
+                    dynamic_children = get_all_elements_recursively(
+                        el.get("children", [])
+                    )
+                    has_dynamic_choose = any(
+                        child["tag"] == "choose" for child in dynamic_children
+                    )
+                    next_line_start = mapped_line_end + 1
+                    next_nonempty_line = ""
+                    while next_line_start < len(content):
+                        next_line_end = content.find("\n", next_line_start)
+                        if next_line_end == -1:
+                            next_line_end = len(content)
+                        next_nonempty_line = content[
+                            next_line_start:next_line_end
+                        ].strip()
+                        if next_nonempty_line:
+                            break
+                        next_line_start = next_line_end + 1
                     if not (
                         el["start_offset"]
                         <= ev["mapped_offset"]
@@ -2382,6 +2405,51 @@ class XmlMybatisSqlRule(BaseRule):
                         # every include consumer creates fixable-after-fix
                         # duplicates that the host is intentionally forbidden
                         # from editing.
+                        continue
+                    if (
+                        ev["rule_id"] == "IR-where-multi"
+                        and (
+                            mapped_in_dynamic_body
+                            or re.search(
+                                r"<if\b[^>]*>\s*(?:AND|OR)\b",
+                                mapped_line,
+                                re.IGNORECASE,
+                            )
+                        )
+                    ):
+                        # A dynamic branch contributes one complete AND/OR
+                        # continuation at runtime. Its XML nesting is absent
+                        # from the expanded guest indentation model.
+                        continue
+                    if (
+                        ev["rule_id"] == "IR-paren-same-op"
+                        and el["tag"] == "sql"
+                    ):
+                        # Reusable predicates may need their outer grouping
+                        # when a consumer appends another condition.
+                        continue
+                    if (
+                        ev["rule_id"] in {
+                            "IR-table-function-indent",
+                            "IR-subquery-indent",
+                        }
+                        and has_dynamic_choose
+                    ):
+                        # Mutually exclusive XML branches cannot be assigned
+                        # one meaningful guest-SQL indentation depth.
+                        continue
+                    if (
+                        ev["rule_id"] == "IR-as-spacing"
+                        and "</choose>" in mapped_line.lower()
+                    ):
+                        continue
+                    if (
+                        ev["rule_id"] == "IR-from-single"
+                        and mapped_line.upper() == "FROM"
+                        and next_nonempty_line.lower().startswith("<choose")
+                    ):
+                        # At runtime the chosen relation is the same logical
+                        # line, while the XML structure must remain separate.
                         continue
                     abs_line = content[:ev["mapped_offset"]].count('\n') + 1
                     if lines_filter and abs_line not in lines_filter:

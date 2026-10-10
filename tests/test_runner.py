@@ -871,6 +871,34 @@ class TestRunnerIntegration(unittest.TestCase):
             get_mybatis_protected_signatures(xml_content),
         )
 
+    def test_xml_indent_preserves_dynamic_table_function_on_continuations(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item item\n'
+            '        <if test="withPeriods">\n'
+            '            LEFT JOIN sample_items_for_period(\n'
+            '                    #{start},\n'
+            '                    #{end}\n'
+            '                ) period_item ON period_item.item_id = item.item_id\n'
+            '                AND period_item.enabled\n'
+            '        </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-indent"]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.violations)
+
     def test_xml_mybatis_dynamic_join_modifier_aligns_with_join(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
@@ -1389,6 +1417,7 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
         self.assertIn("WHERE (primary_scope OR fallback_scope)", first.content)
+        self.assertFalse(first.violations)
 
     def test_xml_mybatis_does_not_move_commas_across_dynamic_tags(self):
         xml_content = (
@@ -1921,6 +1950,7 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
+        self.assertFalse(first.violations)
 
     def test_xml_mybatis_long_delete_starts_multiline_where_clause(self):
         xml_content = (

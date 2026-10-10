@@ -1055,6 +1055,34 @@ class XmlIndentRule(BaseRule):
                     })
         except Exception:
             pass
+
+        # A multiline table-function JOIN may live inside a dynamic XML
+        # branch. Its ON continuations align with the physical ``) alias ON``
+        # line; adding another XML level would break the SQL join layout.
+        filtered_join_continuations = []
+        for violation in violations:
+            line_number = violation.get("line", 0)
+            line_text = (
+                lines[line_number - 1]
+                if 1 <= line_number <= len(lines)
+                else ""
+            )
+            body = line_text.lstrip(" \t")
+            if body.upper().startswith(("AND ", "OR ")):
+                previous_index = line_number - 2
+                while previous_index >= 0 and not lines[previous_index].strip():
+                    previous_index -= 1
+                if previous_index >= 0:
+                    previous_line = lines[previous_index]
+                    previous_body = previous_line.lstrip(" \t")
+                    if (
+                        re.match(r"^\)\s+\w+\s+ON\b", previous_body, re.IGNORECASE)
+                        and len(previous_line) - len(previous_body)
+                        == len(line_text) - len(body)
+                    ):
+                        continue
+            filtered_join_continuations.append(violation)
+        violations = filtered_join_continuations
             
         collapse_spans = []
         for v in violations:

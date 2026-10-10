@@ -1,6 +1,6 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql
+from mir.rules.sql.sql_utils import get_token_depths, tokenize_sql
 
 class UpdateLayoutRule(BaseRule):
     commit_profile = True
@@ -38,6 +38,7 @@ class UpdateLayoutRule(BaseRule):
     def _find_violations(self, content: str, rule_config: Dict[str, Any]) -> List[dict]:
         max_len = self.get_config_value(rule_config, "max_length", 120)
         tokens = tokenize_sql(content)
+        depths = get_token_depths(tokens)
         violations = []
         n = len(tokens)
         
@@ -72,16 +73,25 @@ class UpdateLayoutRule(BaseRule):
                     i = semi_idx + 1
                     continue
                     
-                # Locate WHERE or RETURNING keyword
-                where_tok = None
-                for tok in active_tokens:
-                    if tok["type"] == "KEYWORD" and tok["value"].upper() in ("WHERE", "RETURNING"):
-                        where_tok = tok
+                # Locate the first top-level clause after SET. PostgreSQL's
+                # UPDATE ... FROM relation belongs to the statement tail, not
+                # to the final assignment expression.
+                update_depth = depths[i]
+                tail_tok = None
+                set_index = tokens.index(set_tok)
+                for token_index in range(set_index + 1, semi_idx):
+                    tok = tokens[token_index]
+                    if (
+                        depths[token_index] == update_depth
+                        and tok["type"] == "KEYWORD"
+                        and tok["value"].upper() in ("FROM", "WHERE", "RETURNING")
+                    ):
+                        tail_tok = tok
                         break
                         
                 # Split fields list on commas at parenthesis level 0
                 fields_start = set_tok["end"]
-                fields_end = where_tok["start"] if where_tok else tokens[semi_idx]["start"]
+                fields_end = tail_tok["start"] if tail_tok else tokens[semi_idx]["start"]
                 
                 # Find tokens in the fields zone
                 fields_tokens = []
@@ -119,7 +129,7 @@ class UpdateLayoutRule(BaseRule):
                     continue
                     
                 c1_str = content[t["start"] : set_tok["start"]].strip()
-                c4_str = content[where_tok["start"] : tokens[semi_idx]["end"]].strip() if where_tok else ";"
+                c4_str = content[tail_tok["start"] : tokens[semi_idx]["end"]].strip() if tail_tok else ";"
                 
                 # Base indentation
                 line_start = content.rfind("\n", 0, t["start"]) + 1
@@ -132,14 +142,14 @@ class UpdateLayoutRule(BaseRule):
                         break
                         
                 # Check if it fits on a single line
-                single_line = c1_str + " SET " + ", ".join(fields) + (" " + c4_str if where_tok else ";")
+                single_line = c1_str + " SET " + ", ".join(fields) + (" " + c4_str if tail_tok else ";")
                 if len(base_indent + single_line) <= max_len:
                     expected = single_line
                 else:
                     if len(fields) > 1:
                         statement_tail = (
                             "\n" + base_indent + c4_str
-                            if where_tok
+                            if tail_tok
                             else ";"
                         )
                         expected = (
@@ -152,7 +162,7 @@ class UpdateLayoutRule(BaseRule):
                     else:
                         statement_tail = (
                             "\n" + base_indent + c4_str
-                            if where_tok
+                            if tail_tok
                             else ";"
                         )
                         expected = (

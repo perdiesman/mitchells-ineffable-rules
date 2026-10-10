@@ -255,6 +255,20 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.fix(fixed, "generic.sql", config), expected)
 
+    def test_postgresql_update_from_is_not_part_of_set_assignment(self):
+        from mir.rules.sql.update_layout import UpdateLayoutRule
+
+        source = (
+            "UPDATE sample_item item\n"
+            "SET item_value = source.item_value\n"
+            "FROM sample_source source\n"
+            "WHERE source.item_id = item.item_id;"
+        )
+        rule = UpdateLayoutRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
     def test_nullable_equality_accepts_reversed_equality_operands(self):
         source = (
             "((left_item.owner_id IS NULL AND right_item.owner_id IS NULL) OR "
