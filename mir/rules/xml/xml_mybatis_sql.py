@@ -730,6 +730,7 @@ def dynamic_sql_indent_source_edits(
     from mir.rules.sql.paren_multi import ParenMultiRule
     from mir.rules.sql.sql_utils import tokenize_sql
     from mir.rules.sql.where_multi import WhereMultiRule
+    from mir.rules.sql.where_single import WhereSingleRule
 
     edits = []
     source_content = rule_config.get("original_xml", "")
@@ -743,6 +744,7 @@ def dynamic_sql_indent_source_edits(
         FromMultiRule(),
         JoinOnMultiRule(),
         WhereMultiRule(),
+        WhereSingleRule(),
         ParenMultiRule(),
     )
     if rule_config.get("_disable_all"):
@@ -770,11 +772,28 @@ def dynamic_sql_indent_source_edits(
             # safely see an optional JOIN beyond a tag boundary when deciding
             # that the FROM entry itself needs one continuation level.
             active_config["mybatis_boundary_offsets"] = set()
-        items.extend(
-            (rule, item)
-            for item in rule._find_violations(sql_text, active_config)
-        )
+        for item in rule._find_violations(sql_text, active_config):
+            if isinstance(rule, WhereSingleRule):
+                item = dict(item)
+                item["token"] = item["cond_tok"]
+            items.append((rule, item))
     for source_rule, item in items:
+        if (
+            isinstance(source_rule, WhereSingleRule)
+            and item["where_tok"]["start"] not in dynamic_offsets
+            and "\n" in item["replacement"]
+            and (
+                rule_config.get("mybatis_boundary_offsets")
+                or "<choose" in source_content[
+                    rule_config.get("source_range", (0, len(source_content)))[0]:
+                    rule_config.get("source_range", (0, len(source_content)))[1]
+                ]
+            )
+        ):
+            # A preceding dynamic table/column branch can make the expanded
+            # guest prefix appear wider than the physical WHERE line. Keep
+            # that static source line under XML ownership.
+            continue
         guest_start = item["ws_start"]
         guest_end = item["ws_end"]
         original_whitespace = sql_text[guest_start:guest_end]
@@ -3060,6 +3079,15 @@ class XmlMybatisSqlRule(BaseRule):
                     dynamic_indent_ranges,
                     mapped_indent_config,
                 )
+                protected_mapped_indent_spans = [
+                    (start, end)
+                    for start, end, _ in (
+                        post_choose_edits
+                        + join_case_edits
+                        + between_edits
+                        + dynamic_body_edits
+                    )
+                ]
                 changed_mapped_indent_edits = [
                     edit
                     for edit in mapped_indent_edits
@@ -3070,6 +3098,12 @@ class XmlMybatisSqlRule(BaseRule):
                     and "<choose" not in content[
                         el["start_offset"]:el["end_offset"]
                     ]
+                    and not any(
+                        max(edit[0], protected_start)
+                        < min(edit[1], protected_end)
+                        for protected_start, protected_end
+                        in protected_mapped_indent_spans
+                    )
                 ]
                 if changed_mapped_indent_edits:
                     first_start = min(

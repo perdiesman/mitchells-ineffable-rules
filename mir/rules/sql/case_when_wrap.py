@@ -13,6 +13,7 @@ from mir.rules.sql.sql_utils import (
 class CaseWhenWrapRule(BaseRule):
     commit_profile = True
     embedded_safe = True
+    embedded_dynamic_indent_safe = True
     rule_id = "IR-case-when-wrap"
     description = (
         "Keep WHEN and THEN on one line when they fit; otherwise put THEN on "
@@ -229,11 +230,6 @@ class CaseWhenWrapRule(BaseRule):
                             condition_whitespace["type"] == "WHITESPACE"
                             and "\n" in condition_whitespace["value"]
                             and previous["type"] == "OPERATOR"
-                            and len(
-                                condition_whitespace["value"].rsplit(
-                                    "\n", 1
-                                )[-1]
-                            ) > len(indent)
                         ):
                             # Additive layout owns an existing operator
                             # continuation. Normalize legacy column alignment
@@ -304,6 +300,31 @@ class CaseWhenWrapRule(BaseRule):
                             "replacement": " ",
                         }
                     )
+                for result_index in range(
+                    first_result_index, next_boundary - 1
+                ):
+                    operator = tokens[result_index]
+                    operator_whitespace = tokens[result_index + 1]
+                    if (
+                        depths[result_index] != depths[then_index]
+                        or operator["type"] != "OPERATOR"
+                        or operator["value"]
+                        not in {"=", "!=", "<>", "<", ">", "<=", ">="}
+                        or operator_whitespace["type"] != "WHITESPACE"
+                        or "\n" not in operator_whitespace["value"]
+                    ):
+                        continue
+                    expected_result_continuation = "\n" + indent
+                    if (
+                        operator_whitespace["value"]
+                        != expected_result_continuation
+                    ):
+                        edits.append({
+                            "token": operator,
+                            "start": operator_whitespace["start"],
+                            "end": operator_whitespace["end"],
+                            "replacement": expected_result_continuation,
+                        })
 
         for index, token in enumerate(tokens):
             if token["type"] != "KEYWORD" or token["value"].upper() != "ELSE":

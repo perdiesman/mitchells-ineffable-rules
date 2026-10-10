@@ -3,6 +3,7 @@ from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.case_when_wrap import CaseWhenWrapRule
 from mir.rules.sql.sql_utils import (
+    find_between_delimiter_indices,
     find_boolean_operator_indices,
     get_token_depths,
     source_text_length,
@@ -159,6 +160,34 @@ class CaseLayoutRule(BaseRule):
             original_text = content[case_tok["start"]:end_tok["end"]]
             
             base_depth = depths[start_idx]
+            in_result_arm = False
+            has_multiline_result_comparison = False
+            for token_index in range(start_idx, end_idx):
+                current = tokens[token_index]
+                if (
+                    depths[token_index] == base_depth
+                    and current["type"] == "KEYWORD"
+                ):
+                    keyword = current["value"].upper()
+                    if keyword == "THEN":
+                        in_result_arm = True
+                    elif keyword in {"WHEN", "ELSE", "END"}:
+                        in_result_arm = keyword == "ELSE"
+                if (
+                    in_result_arm
+                    and current["type"] == "OPERATOR"
+                    and current["value"]
+                    in {"=", "!=", "<>", "<", ">", "<=", ">="}
+                    and tokens[token_index + 1]["type"] == "WHITESPACE"
+                    and "\n" in tokens[token_index + 1]["value"]
+                ):
+                    has_multiline_result_comparison = True
+                    break
+            if has_multiline_result_comparison:
+                # CASE-WHEN wrapping owns comparison continuations in a result
+                # arm. Rebuilding the complete CASE would retain legacy source
+                # indentation and oscillate with that focused rule.
+                continue
             if any(
                 nested["start_idx"] > start_idx
                 and nested["end_idx"] < end_idx
@@ -184,6 +213,28 @@ class CaseLayoutRule(BaseRule):
                         
             line_start = content.rfind("\n", 0, case_tok["start"]) + 1
             line_prefix = content[line_start:case_tok["start"]]
+            previous_active_index = next(
+                (
+                    index
+                    for index in range(start_idx - 1, -1, -1)
+                    if tokens[index]["type"]
+                    not in {"WHITESPACE", "COMMENT"}
+                ),
+                None,
+            )
+            follows_between_delimiter = bool(
+                previous_active_index is not None
+                and tokens[previous_active_index]["type"] == "KEYWORD"
+                and tokens[previous_active_index]["value"].upper() == "AND"
+                and previous_active_index
+                in find_between_delimiter_indices(
+                    tokens,
+                    depths,
+                    depths[previous_active_index],
+                    0,
+                    len(tokens),
+                )
+            )
             line_end = content.find("\n", end_tok["end"])
             if line_end == -1:
                 line_end = len(content)
@@ -209,6 +260,7 @@ class CaseLayoutRule(BaseRule):
                 case_tok["line"] != end_tok["line"]
                 and when_count == 1
                 and not has_additive_expression
+                and not follows_between_delimiter
                 and not any(
                     token["type"] in {"COMMENT", "COMMA"}
                     for token in tokens[start_idx:end_idx + 1]
@@ -240,8 +292,20 @@ class CaseLayoutRule(BaseRule):
             is_additive_continuation = prefix_body in {"+", "-", "*", "/", "||"}
             follows_inline_operator = bool(
                 re.search(r"(?:\+|-|\*|/|\|\|)\s*$", prefix_body)
-            )
+            ) or follows_between_delimiter
             is_inline = prefix_body != "" and not is_additive_continuation
+            if follows_between_delimiter and previous_active_index is not None:
+                delimiter_line_start = content.rfind(
+                    "\n", 0, tokens[previous_active_index]["start"]
+                ) + 1
+                delimiter_prefix = content[
+                    delimiter_line_start:tokens[previous_active_index]["start"]
+                ]
+                select_indent = delimiter_prefix[
+                    : len(delimiter_prefix)
+                    - len(delimiter_prefix.lstrip(" \t"))
+                ]
+                is_inline = True
             if is_inline and not follows_inline_operator:
                 case_indent = select_indent + "    "
             else:
@@ -503,10 +567,20 @@ class CaseLayoutRule(BaseRule):
                 needs_fix = True
                 
             if needs_fix:
+                replacement_start = case_tok["start"]
+                replacement = "".join(rebuilt_parts)
+                if (
+                    follows_between_delimiter
+                    and start_idx > 0
+                    and tokens[start_idx - 1]["type"] == "WHITESPACE"
+                ):
+                    replacement_start = tokens[start_idx - 1]["start"]
+                    replacement = " " + replacement
                 violations.append({
                     "case_tok": case_tok,
                     "end_tok": end_tok,
-                    "replacement": "".join(rebuilt_parts)
+                    "replacement_start": replacement_start,
+                    "replacement": replacement,
                 })
                 
         return violations
@@ -536,7 +610,11 @@ class CaseLayoutRule(BaseRule):
             
         edits = []
         for item in offending:
-            edits.append((item["case_tok"]["start"], item["end_tok"]["end"], item["replacement"]))
+            edits.append((
+                item.get("replacement_start", item["case_tok"]["start"]),
+                item["end_tok"]["end"],
+                item["replacement"],
+            ))
             
         edits.sort(key=lambda x: x[0], reverse=True)
         chars = list(content)

@@ -109,12 +109,32 @@ class WhereMultiRule(BaseRule):
                             
                 clause_tokens = tokens[i + 1:clause_end]
                 clause_depths = depths[i + 1:clause_end]
+                case_owned_indices = set()
+                case_nesting = 0
+                for token_index in range(i + 1, clause_end):
+                    item = tokens[token_index]
+                    if (
+                        item["type"] == "KEYWORD"
+                        and item["value"].upper() == "CASE"
+                    ):
+                        case_nesting += 1
+                    if case_nesting:
+                        case_owned_indices.add(token_index)
+                    if (
+                        item["type"] == "KEYWORD"
+                        and item["value"].upper() == "END"
+                        and case_nesting
+                    ):
+                        case_nesting -= 1
                 
                 boolean_indices = find_boolean_operator_indices(
                     tokens, depths, outer_depth, i + 1, clause_end
                 )
                 boolean_indices = [
-                    index for index in boolean_indices if not is_trellis_controlled(tokens[index])
+                    index
+                    for index in boolean_indices
+                    if index not in case_owned_indices
+                    and not is_trellis_controlled(tokens[index])
                 ]
                 dynamic_boolean_indices = {
                     index
@@ -578,6 +598,7 @@ class WhereMultiRule(BaseRule):
                                 if tokens[index]["type"] == "OPERATOR"
                                 and tokens[index]["value"]
                                 in {"=", "!=", "<>", "<", ">", "<=", ">="}
+                                and index not in case_owned_indices
                                 and depths[index] == outer_depth
                                 and tokens[index + 1]["type"] == "WHITESPACE"
                             ),
@@ -619,6 +640,7 @@ class WhereMultiRule(BaseRule):
                             operator["type"] != "OPERATOR"
                             or operator["value"]
                             not in {"=", "!=", "<>", "<", ">", "<=", ">="}
+                            or token_index in case_owned_indices
                             or whitespace["type"] != "WHITESPACE"
                             or "\n" not in whitespace["value"]
                         ):

@@ -161,6 +161,23 @@ class JoinOnMultiRule(BaseRule):
                             
                 clause_tokens = tokens[i + 1:clause_end]
                 clause_depths = depths[i + 1:clause_end]
+                first_clause_token = next(
+                    (
+                        token
+                        for token in clause_tokens
+                        if token["type"] not in {"WHITESPACE", "COMMENT"}
+                    ),
+                    None,
+                )
+                if (
+                    first_clause_token is not None
+                    and first_clause_token["type"] == "KEYWORD"
+                    and first_clause_token["value"].upper() == "CASE"
+                ):
+                    # A CASE expression owns its internal comparisons and
+                    # wrapping. Treating the first THEN result operator as the
+                    # JOIN's root comparison corrupts its continuation indent.
+                    continue
                 boolean_indices = find_boolean_operator_indices(
                     tokens, depths, outer_depth, i + 1, clause_end
                 )

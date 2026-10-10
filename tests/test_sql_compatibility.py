@@ -180,6 +180,21 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
 
+    def test_join_case_result_comparison_is_owned_by_case_layout(self):
+        source = (
+            "    LEFT JOIN state_value state_record ON\n"
+            "        CASE\n"
+            "            WHEN item.state_id IS NOT NULL THEN state_record.state_id =\n"
+            "                item.state_id\n"
+            "            WHEN item.county_id IS NOT NULL "
+            "THEN state_record.state_id = county.state_id\n"
+            "        END"
+        )
+        rule = JoinOnMultiRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
     def test_join_predicate_subquery_compacts_when_on_line_fits(self):
         source = (
             "                            LEFT JOIN sample_county county\n"
@@ -892,6 +907,21 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(fixed, expected)
 
+    def test_where_layout_does_not_split_comparison_inside_case_bound(self):
+        source = (
+            "WHERE\n"
+            "    recorded_at BETWEEN :start\n"
+            "        AND CASE\n"
+            "            WHEN :end::TIMESTAMP < now()\n"
+            "                THEN :end::TIMESTAMP - INTERVAL '4 HOURS'\n"
+            "            ELSE now()\n"
+            "        END\n"
+            "    AND active"
+        )
+        rule = WhereMultiRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+
     def test_case_arm_stays_inline_within_its_line_length_limit(self):
         source = (
             "                        WHEN u.active AND coalesce(su.active, true) "
@@ -931,6 +961,44 @@ class TestSqlCompatibility(unittest.TestCase):
         expected = source
 
         self.assertEqual(CaseWhenWrapRule().fix(source, "generic.sql", {}), expected)
+
+    def test_case_result_comparison_continuation_uses_one_indent(self):
+        source = (
+            "        WHEN item.state_id IS NOT NULL THEN owner.state_id =\n"
+            "    item.state_id"
+        )
+        expected = (
+            "        WHEN item.state_id IS NOT NULL THEN owner.state_id =\n"
+            "            item.state_id"
+        )
+        rule = CaseWhenWrapRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertEqual(CaseLayoutRule().fix(fixed, "generic.sql", {}), expected)
+
+    def test_between_case_upper_bound_stays_with_delimiter(self):
+        source = (
+            "WHERE recorded_at BETWEEN :start\n"
+            "    AND\n"
+            "CASE\n"
+            "    WHEN :end < now() THEN :end\n"
+            "    ELSE now()\n"
+            "END"
+        )
+        expected = (
+            "WHERE recorded_at BETWEEN :start\n"
+            "    AND CASE\n"
+            "        WHEN :end < now() THEN :end\n"
+            "        ELSE now()\n"
+            "    END"
+        )
+        rule = CaseLayoutRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
 
     def test_multiline_case_keywords_follow_the_case_indent(self):
         source = (
