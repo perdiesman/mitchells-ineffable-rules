@@ -1068,6 +1068,56 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
 
+    def test_xml_mybatis_reusable_dynamic_column_list_is_clean(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="Basic_Column_List">\n'
+            '        <if test="distinct">DISTINCT</if>\n'
+            '        sample_item.item_id AS sample_item_id,\n'
+            '        sample_item.item_name AS sample_item_name\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.violations)
+        self.assertFalse(second.violations)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_trim_owned_where_is_clean(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="Basic_Where">\n'
+            '        <if test="included">\n'
+            '            <trim prefix="WHERE" prefixOverrides="WHERE ">\n'
+            '                <trim prefixOverrides="AND |OR ">\n'
+            '                    <include refid="Example_Where_Clause" />\n'
+            '                </trim>\n'
+            '            </trim>\n'
+            '        </if>\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.violations)
+        self.assertFalse(second.violations)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_indent_keeps_optional_where_include_at_clause_indent(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

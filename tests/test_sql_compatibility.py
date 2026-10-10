@@ -122,6 +122,16 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
 
+    def test_additive_wrap_accepts_short_inline_case_expression(self):
+        source = (
+            "            SELECT item_id, slot_number, "
+            "CASE WHEN run_count = 1 THEN 1 ELSE run_count + 1 END AS required_count"
+        )
+        rule = AdditiveWrapRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
     def test_plpgsql_message_level_can_be_a_sql_identifier(self):
         source = "WITH info AS (SELECT item_id FROM sample_item) SELECT * FROM info;"
         rule = PlpgsqlKeywordCaseRule()

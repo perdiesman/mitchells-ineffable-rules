@@ -116,6 +116,30 @@ def get_all_elements_recursively(elements: List[dict]) -> List[dict]:
     return res
 
 
+def owns_runtime_where(element: dict) -> bool:
+    """Return whether dynamic XML supplies the statement's WHERE keyword."""
+    for child in get_all_elements_recursively(element.get("children", [])):
+        if child["tag"] == "where":
+            return True
+        if (
+            child["tag"] == "trim"
+            and child.get("attrs", {}).get("prefix", "").strip().upper()
+            == "WHERE"
+        ):
+            return True
+    return False
+
+
+def is_reusable_column_list(element: dict) -> bool:
+    """Return whether a SQL fragment defines columns without a SELECT owner."""
+    return (
+        element.get("tag") == "sql"
+        and element.get("attrs", {}).get("id", "").lower().endswith(
+            "column_list"
+        )
+    )
+
+
 def _tokens_start_with_select(tokens: List[dict]) -> bool:
     """Return whether a dynamic branch starts with a complete SELECT."""
     for token in tokens:
@@ -2191,15 +2215,27 @@ class XmlMybatisSqlRule(BaseRule):
                 if "_lines" in inner_config:
                     del inner_config["_lines"]
 
-                layout_edits = dynamic_column_layout_edits(
-                    sql_text,
-                    mapping,
-                    boundary_offsets,
-                    tag_ranges,
-                    dynamic_indent_ranges,
-                    content,
-                    inner_config,
+                layout_edits = (
+                    []
+                    if is_reusable_column_list(el)
+                    else dynamic_column_layout_edits(
+                        sql_text,
+                        mapping,
+                        boundary_offsets,
+                        tag_ranges,
+                        dynamic_indent_ranges,
+                        content,
+                        inner_config,
+                    )
                 )
+                # Expanded <include> bodies map back to their reusable
+                # fragment. That fragment is checked independently; a host
+                # statement must not report its source offsets as host layout.
+                layout_edits = [
+                    edit
+                    for edit in layout_edits
+                    if el["start_offset"] <= edit[0] <= edit[1] <= el["end_offset"]
+                ]
                 if layout_edits:
                     first_start = min(start for start, _, _ in layout_edits)
                     violations.append({
@@ -2332,12 +2368,7 @@ class XmlMybatisSqlRule(BaseRule):
                     rule_config=inner_config,
                     excluded_rule_ids=(
                         {"IR-where-multi", "IR-where-single"}
-                        if any(
-                            child["tag"] == "where"
-                            for child in get_all_elements_recursively(
-                                el.get("children", [])
-                            )
-                        )
+                        if owns_runtime_where(el)
                         else None
                     ),
                     require_embedded_safe=True,
@@ -2651,14 +2682,18 @@ class XmlMybatisSqlRule(BaseRule):
                     else ([], sql_text, None)
                 )
                 from mir.engine.embedded_bridge import fix_embedded_content
-                layout_edits = dynamic_column_layout_edits(
-                    sql_text,
-                    mapping,
-                    boundary_offsets,
-                    tag_ranges,
-                    dynamic_indent_ranges,
-                    content,
-                    inner_config,
+                layout_edits = (
+                    []
+                    if is_reusable_column_list(el)
+                    else dynamic_column_layout_edits(
+                        sql_text,
+                        mapping,
+                        boundary_offsets,
+                        tag_ranges,
+                        dynamic_indent_ranges,
+                        content,
+                        inner_config,
+                    )
                 )
                 post_choose_edits = post_choose_clause_source_edits(
                     content,
@@ -2864,12 +2899,7 @@ class XmlMybatisSqlRule(BaseRule):
                 if keyword_case_edits:
                     excluded_guest_rule_ids.add("IR-keyword-case")
                     applied_rules.add("IR-keyword-case")
-                if any(
-                    child["tag"] == "where"
-                    for child in get_all_elements_recursively(
-                        el.get("children", [])
-                    )
-                ):
+                if owns_runtime_where(el):
                     # MyBatis <where> owns prefix insertion/removal across
                     # mutually exclusive dynamic branches. Concatenating all
                     # branches into guest SQL cannot represent its runtime
