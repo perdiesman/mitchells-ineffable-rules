@@ -1,4 +1,5 @@
 import re
+import textwrap
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.xml.xml_utils import tokenize_xml
@@ -139,6 +140,52 @@ class XmlLineLengthRule(BaseRule):
         )
         if not any_violating and not has_inconsistent_foreach:
             return content
+
+        comment_edits = []
+        for comment in re.finditer(r"<!--(?P<body>.*?)-->", content, re.DOTALL):
+            line_start = content.rfind("\n", 0, comment.start()) + 1
+            line_end = content.find("\n", comment.end())
+            if line_end == -1:
+                line_end = len(content)
+            if (
+                content[line_start:comment.start()].strip()
+                or content[comment.end():line_end].strip()
+            ):
+                continue
+            source = content[comment.start():comment.end()]
+            if not any(
+                len(line) > max_length
+                for line in content[line_start:line_end].splitlines()
+            ):
+                continue
+            body = comment.group("body")
+            if "@formatter" in body.lower() or re.search(r"\bIR-[A-Za-z0-9-]+", body):
+                continue
+            words = " ".join(body.split())
+            if not words:
+                continue
+            physical_line = content[line_start:content.find("\n", line_start) if "\n" in content[line_start:] else len(content)]
+            indent = physical_line[: len(physical_line) - len(physical_line.lstrip(" \t"))]
+            body_indent = indent + "    "
+            wrapped = textwrap.wrap(
+                words,
+                width=max(20, max_length - len(body_indent)),
+                break_long_words=False,
+                break_on_hyphens=False,
+            )
+            replacement = (
+                "<!--\n"
+                + "\n".join(body_indent + line for line in wrapped)
+                + "\n"
+                + indent
+                + "-->"
+            )
+            comment_edits.append((comment.start(), comment.end(), replacement))
+        if comment_edits:
+            chars = list(content)
+            for start, end, replacement in sorted(comment_edits, reverse=True):
+                chars[start:end] = list(replacement)
+            return "".join(chars)
 
         # Two individually compact dynamic tags can make their shared physical
         # line overlong. Split the whitespace between sibling tags first; on

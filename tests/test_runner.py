@@ -190,6 +190,32 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
 
+    def test_xml_line_length_wraps_long_comments(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <!-- This compatibility note has enough generic explanatory words to exceed the configured physical line length without containing a formatter directive or rule suppression. -->\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <!--\n'
+            '        This compatibility note has enough generic explanatory words to exceed the configured physical line length\n'
+            '        without containing a formatter directive or rule suppression.\n'
+            '    -->\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_where_container_aligns_after_join_conditions(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
@@ -220,6 +246,43 @@ class TestRunnerIntegration(unittest.TestCase):
         config = Config()
         config.profile = "commit"
         config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_mybatis_keeps_long_parenthesized_dynamic_condition_expanded(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        WHERE recorded_timestamp_for_requested_interval &lt;= #{intervalEnd}\n'
+            '            AND (recorded_timestamp_for_requested_interval &gt;= #{intervalStart}\n'
+            '                <if test="includeAllActive == true">\n'
+            '                    OR completed_timestamp_for_requested_interval IS NULL\n'
+            '                </if>\n'
+            '                )\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        expected = xml_content.replace(
+            '        WHERE recorded_timestamp_for_requested_interval &lt;= #{intervalEnd}',
+            '        WHERE\n'
+            '            recorded_timestamp_for_requested_interval &lt;= #{intervalEnd}',
+        ).replace(
+            '            AND (recorded_timestamp_for_requested_interval &gt;= #{intervalStart}',
+            '            AND (\n'
+            '                recorded_timestamp_for_requested_interval &gt;= #{intervalStart}',
+        )
 
         first = process_document(config, xml_content, "generic.xml", "xml")
         second = process_document(config, first.content, "generic.xml", "xml")
@@ -2913,6 +2976,33 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_foreach_cast_on_following_line_closes_function_separately(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_code\n'
+            '        FROM sample_item\n'
+            '        WHERE item_code = ANY(\n'
+            '            <foreach collection="codes" item="code" open="ARRAY[" close="]" separator=",">\n'
+            '                #{code}\n'
+            '            </foreach>\n'
+            '            ::TEXT[])\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace("            ::TEXT[])", "            ::TEXT[]\n        )")
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
 
     def test_xml_mybatis_choose_value_is_not_a_synthetic_function_error(self):
         xml_content = (

@@ -2556,8 +2556,22 @@ def multiline_foreach_function_source_edits(
             close_line_end = source_end
         trailing = content[close_tag_end:close_line_end]
         function_close = re.fullmatch(r"([^)]*)\)([^)]*)", trailing)
+        close_search_start = close_tag_end
+        if function_close is None and not trailing.strip() and close_line_end < source_end:
+            following_line_start = close_line_end + 1
+            following_line_end = content.find("\n", following_line_start)
+            if following_line_end == -1:
+                following_line_end = source_end
+            following_line = content[following_line_start:following_line_end]
+            following_body = following_line.lstrip(" \t")
+            function_close = re.fullmatch(r"([^)]*)\)([^)]*)", following_body)
+            close_search_start = following_line_start + (
+                len(following_line) - len(following_body)
+            )
+            if function_close is not None and not function_close.group(1).strip():
+                function_close = None
         if function_close is not None:
-            close_offset = close_tag_end + len(function_close.group(1))
+            close_offset = close_search_start + len(function_close.group(1))
             edits.append((close_offset, close_offset, "\n" + base_indent))
     return edits
 
@@ -5374,7 +5388,8 @@ class XmlMybatisSqlRule(BaseRule):
                 protected_source_indent_spans = [
                     (start, end)
                     for start, end, _ in post_choose_edits + dynamic_body_edits
-                    + join_case_edits + between_edits + top_level_clause_edits
+                    + join_case_edits + between_edits + foreach_function_edits
+                    + top_level_clause_edits
                     + dynamic_where_edits
                     + physical_where_edits
                     + dynamic_projection_edits
@@ -5416,6 +5431,7 @@ class XmlMybatisSqlRule(BaseRule):
                         post_choose_edits
                         + join_case_edits
                         + between_edits
+                        + foreach_function_edits
                         + dynamic_body_edits
                         + dynamic_where_edits
                         + physical_where_edits
@@ -5598,6 +5614,7 @@ class XmlMybatisSqlRule(BaseRule):
                     # from starving a host WHERE or long physical projection.
                     exact_source_edits = set(
                         where_source_edits
+                        + foreach_function_edits
                         + long_select_edits
                         + physical_case_edits
                         + long_case_edits

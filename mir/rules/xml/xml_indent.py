@@ -143,6 +143,23 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
                     ):
                         return candidate[: len(candidate) - len(candidate.lstrip(" \t"))]
 
+        current_line_start = content.rfind("\n", 0, t["start"]) + 1
+        if not content[current_line_start:t["start"]].strip():
+            previous_index = t["line"] - 2
+            if 0 <= previous_index < len(lines):
+                previous = lines[previous_index]
+                previous_tokens = tokenize_sql(previous)
+                open_depth = sum(
+                    1 if item["value"] == "(" else -1
+                    for item in previous_tokens
+                    if item["type"] == "PAREN"
+                )
+                if open_depth > 0 and dynamic_text.startswith(("AND ", "OR ")):
+                    previous_indent = previous[
+                        : len(previous) - len(previous.lstrip(" \t"))
+                    ]
+                    return previous_indent + " " * indent_size
+
     if tag_name == "include":
         for k in range(t["line"] - 2, query_line - 1, -1):
             previous = lines[k]
@@ -1329,6 +1346,23 @@ class XmlIndentRule(BaseRule):
                     continue
                 
                 collapsed = opening_tag.strip() + inner_text.strip() + closing_tag.strip()
+                if (
+                    el["tag"] in {"if", "when", "otherwise"}
+                    and inner_lines
+                    and inner_lines[0].upper().startswith(("AND ", "OR "))
+                    and start_line_number > 1
+                    and end_line_number < len(lines)
+                ):
+                    previous_sql = lines[start_line_number - 2].rstrip()
+                    following_sql = lines[end_line_number].strip()
+                    combined_physical_line = (
+                        previous_sql + " " + collapsed + " " + following_sql
+                    )
+                    if len(combined_physical_line) > 120:
+                        # The embedded-SQL bridge would otherwise rejoin this
+                        # conditional with both surrounding fragments and send
+                        # XML line length back around the same cycle.
+                        continue
                 
                 # Resolve indent from start_line
                 start_line_idx = start_line_number - 1
