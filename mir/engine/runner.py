@@ -393,7 +393,8 @@ def process_document(
         current = content
         seen = {current}
         violations = initial
-        for _ in range(10):
+        max_fix_passes = 20
+        for _ in range(max_fix_passes):
             fix_rules: list[BaseRule] = []
             for violation, rule, _ in violations:
                 if violation.is_fixable and rule.is_fixable in {"yes", "sometimes"} and rule not in fix_rules:
@@ -473,7 +474,10 @@ def process_document(
                 break
             seen.add(current)
         else:
-            result.diagnostics.append(f"Formatter did not converge for {path} after 10 passes")
+            result.diagnostics.append(
+                f"Formatter did not converge for {path} after "
+                f"{max_fix_passes} passes"
+            )
         result.content = current
         result.violations = violations
     else:

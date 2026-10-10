@@ -1699,6 +1699,27 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed.count("measure"), source.count("measure"))
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
 
+    def test_short_case_condition_compacts_operator_operand_whitespace(self):
+        source = (
+            "CASE\n"
+            "    WHEN item_code ~\n"
+            "                                             '^[0-9]+$'\n"
+            "        THEN CAST(item_code AS INTEGER)\n"
+            "    ELSE 0\n"
+            "END"
+        )
+        expected = (
+            "CASE\n"
+            "    WHEN item_code ~ '^[0-9]+$' THEN CAST(item_code AS INTEGER)\n"
+            "    ELSE 0\n"
+            "END"
+        )
+        rule = CaseWhenWrapRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+
     def test_protected_signature_allows_formatting_inside_dollar_quoted_code(self):
         original = "CREATE FUNCTION sample() RETURNS void AS $$ BEGIN RETURN; END; $$ LANGUAGE plpgsql;"
         formatted = "CREATE FUNCTION sample() RETURNS void AS $$ BEGIN\n    RETURN;\nEND; $$ LANGUAGE plpgsql;"

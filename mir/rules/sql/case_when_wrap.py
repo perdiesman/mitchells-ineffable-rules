@@ -228,6 +228,33 @@ class CaseWhenWrapRule(BaseRule):
                             }
                         )
             else:
+                if not any(
+                    item["type"] == "COMMENT"
+                    for item in tokens[index + 1:then_index]
+                ):
+                    for condition_index in range(index + 2, then_index):
+                        condition_whitespace = tokens[condition_index]
+                        previous = tokens[condition_index - 1]
+                        if (
+                            condition_whitespace["type"] == "WHITESPACE"
+                            and "\n" in condition_whitespace["value"]
+                            and previous["type"] == "OPERATOR"
+                            and len(
+                                condition_whitespace["value"].rsplit(
+                                    "\n", 1
+                                )[-1]
+                            ) > len(indent)
+                        ):
+                            # Collapse only legacy column-aligned operands
+                            # that drift far beyond the CASE continuation.
+                            # Deliberate operator continuations at the normal
+                            # one-level indent remain multiline.
+                            edits.append({
+                                "token": token,
+                                "start": condition_whitespace["start"],
+                                "end": condition_whitespace["end"],
+                                "replacement": " ",
+                            })
                 for boolean_index in find_boolean_operator_indices(
                     tokens,
                     depths,
@@ -303,7 +330,13 @@ class CaseWhenWrapRule(BaseRule):
         edits = self._find_edits(content, rule_config)
         if not edits:
             return content
+        edits_by_span = {
+            (item["start"], item["end"]): item["replacement"]
+            for item in edits
+        }
         chars = list(content)
-        for item in sorted(edits, key=lambda edit: edit["start"], reverse=True):
-            chars[item["start"] : item["end"]] = list(item["replacement"])
+        for (start, end), replacement in sorted(
+            edits_by_span.items(), key=lambda item: item[0][0], reverse=True
+        ):
+            chars[start:end] = list(replacement)
         return "".join(chars)
