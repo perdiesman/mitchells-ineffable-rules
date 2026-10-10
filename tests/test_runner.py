@@ -1459,6 +1459,44 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_does_not_merge_optional_range_bounds(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        WHERE 1 = 1\n'
+            '        <if test="start != null">\n'
+            '            AND recorded_at &gt;= #{start}\n'
+            '        </if>\n'
+            '        <if test="end != null">\n'
+            '            AND recorded_at &lt;= #{end}\n'
+            '        </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        WHERE\n'
+            '            1 = 1\n'
+            '            <if test="start != null">AND recorded_at &gt;= #{start}</if>\n'
+            '            <if test="end != null">AND recorded_at &lt;= #{end}</if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_long_delete_starts_multiline_where_clause(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
