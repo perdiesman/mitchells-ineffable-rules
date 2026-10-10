@@ -3027,7 +3027,7 @@ class TestRunnerIntegration(unittest.TestCase):
             '            <when test="byName">\n'
             '                SELECT item_id\n'
             '                FROM sample_item\n'
-            '                ORDER BY item_name, recorded_at\n'
+            '                order By item_name, recorded_at\n'
             '            </when>\n'
             '            <otherwise>SELECT item_id FROM sample_item</otherwise>\n'
             '        </choose>\n'
@@ -3054,7 +3054,8 @@ class TestRunnerIntegration(unittest.TestCase):
             '            <choose>\n'
             '                <when test="archived">\n'
             '                    SELECT item_id\n'
-            '                    FROM archived_item item\n'
+            '                    FROM\n'
+            '                        archived_item item\n'
             '                </when>\n'
             '                <otherwise>\n'
             '                    SELECT item_id\n'
@@ -3080,6 +3081,25 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertIn('                    FROM current_item item\n', first.content)
         self.assertEqual(second.content, first.content)
         self.assertFalse(first.diagnostics)
+
+        optional_join = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        <if test="archived">\n'
+            '            SELECT item.item_id\n'
+            '            FROM\n'
+            '                archived_item item\n'
+            '            <if test="owners">LEFT JOIN sample_owner owner ON owner.owner_id = item.owner_id</if>\n'
+            '        </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        joined = process_document(config, optional_join, "generic.xml", "xml")
+        self.assertIn(
+            '            FROM\n                archived_item item\n',
+            joined.content,
+        )
+        self.assertFalse(joined.diagnostics)
 
     def test_xml_mybatis_join_addition_uses_full_line_limit(self):
         join_line = (

@@ -638,7 +638,18 @@ class ColumnLayoutRule(BaseRule):
             fully_dynamic = self._is_fully_dynamic(
                 cl, dynamic_offset_set
             ) and not self._crosses_dynamic_content(cl, boundary_offsets)
-            if dynamic_offsets and not fully_dynamic:
+            crosses_dynamic = self._crosses_dynamic_content(
+                cl, dynamic_offsets
+            )
+            embedded_reindent_only = (
+                bool(dynamic_offsets)
+                and not fully_dynamic
+                and (
+                    not keyword.startswith("ORDER")
+                    or crosses_dynamic
+                )
+            )
+            if embedded_reindent_only:
                 if "\n" not in current_clause_text:
                     continue
                 inner_indent = indentation + (" " * indent_size)
@@ -773,7 +784,17 @@ class ColumnLayoutRule(BaseRule):
             fully_dynamic = self._is_fully_dynamic(
                 cl, dynamic_offset_set
             ) and not self._crosses_dynamic_content(cl, boundary_offsets)
-            embedded_reindent_only = bool(dynamic_offsets) and not fully_dynamic
+            crosses_dynamic = self._crosses_dynamic_content(
+                cl, dynamic_offsets
+            )
+            embedded_reindent_only = (
+                bool(dynamic_offsets)
+                and not fully_dynamic
+                and (
+                    not keyword.startswith("ORDER")
+                    or crosses_dynamic
+                )
+            )
             if embedded_reindent_only and "\n" not in current_clause_text:
                 fixed_chunks.append(content[last_idx:cl["list_end"]])
                 last_idx = cl["list_end"]
