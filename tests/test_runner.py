@@ -2298,15 +2298,26 @@ class TestRunnerIntegration(unittest.TestCase):
             '    </select>\n'
             '</mapper>'
         )
-        expected = xml_content.replace(
-            '<foreach collection="codes" item="code" open="(" close=")" separator=",">#{code}</foreach>',
-            '<foreach collection="codes" item="code" open="(" close=")" separator=",">\n'
-            '                #{code}\n'
-            '            </foreach>',
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        WHERE\n'
+            '            primary_code IN\n'
+            '                <foreach collection="codes" item="code" open="(" close=")" separator=",">\n'
+            '                    #{code}\n'
+            '                </foreach>\n'
+            '            OR secondary_code IN\n'
+            '                <foreach collection="codes" item="code" open="(" close=")" separator=",">\n'
+            '                    #{code}\n'
+            '                </foreach>\n'
+            '    </select>\n'
+            '</mapper>'
         )
         config = Config()
         config.disable_all = True
-        config.rules_to_enable = ["IR-xml-line-length"]
+        config.rules_to_enable = ["IR-xml-indent", "IR-xml-line-length"]
         config.fix = True
 
         first = process_document(config, xml_content, "generic.xml", "xml")
@@ -2315,6 +2326,7 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
 
     def test_xml_mybatis_commit_profile_expands_datatype_aliases(self):
         xml_content = (

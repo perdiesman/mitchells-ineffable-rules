@@ -866,6 +866,16 @@ class XmlIndentRule(BaseRule):
                     
         # Check for collapsable elements that can fit on a single line under 120 chars
         try:
+            multiline_foreach_signatures = {
+                content[
+                    element["start_offset"]:element["inner_tokens"][0]["start"]
+                ].strip()
+                for element in elements
+                if element["tag"] == "foreach"
+                and element["inner_tokens"]
+                and content.count("\n", 0, element["start_offset"])
+                != content.count("\n", 0, element["end_offset"])
+            }
             for el in elements:
                 if el["tag"] in ("mapper", "select", "insert", "update", "delete", "sql"):
                     continue
@@ -893,6 +903,15 @@ class XmlIndentRule(BaseRule):
                     if line.strip()
                 ]
                 if start_line_number == end_line_number:
+                    continue
+                if (
+                    el["tag"] == "foreach"
+                    and opening_tag.strip() in multiline_foreach_signatures
+                ):
+                    # XML line length deliberately expands every repeated
+                    # foreach with the same opening tag once one occurrence
+                    # needs multiple lines. Do not collapse a shorter copy
+                    # and create an inter-rule formatting cycle.
                     continue
                 if el["tag"] in {"if", "when", "otherwise"} and len(inner_lines) > 1:
                     continue
