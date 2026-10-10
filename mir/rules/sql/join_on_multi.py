@@ -95,6 +95,10 @@ class JoinOnMultiRule(BaseRule):
                     join_line_start = content.rfind("\n", 0, join_tok["start"]) + 1
                     join_part = content[join_line_start:tok["start"]]
                     join_target_multiline = "\n" in join_part
+                    join_target_is_subquery = bool(
+                        join_target_multiline
+                        and re.search(r"\bSELECT\b", join_part, re.IGNORECASE)
+                    )
                     join_indent = join_part[:len(join_part) - len(join_part.lstrip())]
                     if "\n" in join_part:
                         last_line = join_part.splitlines()[-1]
@@ -113,6 +117,7 @@ class JoinOnMultiRule(BaseRule):
                     on_indent = join_indent
                 else:
                     join_target_multiline = False
+                    join_target_is_subquery = False
                     line_start = content.rfind("\n", 0, tok["start"]) + 1
                     line_prefix = content[line_start:tok["start"]]
                     join_prefix_for_on = line_prefix
@@ -411,7 +416,11 @@ class JoinOnMultiRule(BaseRule):
                 
                 if (
                     estimated_line_len <= max_len
-                    and not join_target_multiline
+                    and (
+                        not join_target_multiline
+                        or join_target_is_subquery
+                        or has_additive_continuation
+                    )
                     and not has_multiline_group
                 ):
                     if not any(
