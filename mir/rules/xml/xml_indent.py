@@ -55,6 +55,15 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
         if choose_el and choose_el.get("resolved_indent") is not None:
             # indent one level relative to choose_indent
             return choose_el["resolved_indent"] + " " * indent_size
+
+    # Repeated dynamic assignments/values inside MyBatis containers are XML
+    # siblings. Deriving each indent from the preceding source line makes a
+    # partially indented generated block creep rightward one pass at a time.
+    # Anchor these children directly to their resolved XML parent instead.
+    if active_parents and active_parents[-1]["tag"] in {"trim", "set"}:
+        parent_indent = active_parents[-1].get("resolved_indent")
+        if parent_indent is not None:
+            return parent_indent + " " * indent_size
             
     # 4. For opening tags (like <if>, <foreach>, <choose>, etc.)
     if tag_name in {"if", "when", "otherwise"}:

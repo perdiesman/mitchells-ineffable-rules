@@ -3202,6 +3202,69 @@ class TestRunnerIntegration(unittest.TestCase):
             )
             self.assertEqual(content, expected)
 
+    def test_xml_mybatis_generated_dynamic_lists_converge_in_one_run(self):
+        fields = [
+            ("id", "INTEGER"),
+            ("code", "VARCHAR"),
+            ("name", "VARCHAR"),
+            ("region", "VARCHAR"),
+            ("status", "VARCHAR"),
+            ("created", "TIMESTAMP"),
+            ("updated", "TIMESTAMP"),
+            ("active", "BOOLEAN"),
+            ("latitude", "DOUBLE"),
+            ("longitude", "DOUBLE"),
+            ("geometry", "OTHER"),
+            ("parentId", "INTEGER"),
+        ]
+        column_tags = "".join(
+            f'      <if test="{name} != null">\n        {name},\n      </if>\n'
+            for name, _ in fields
+        )
+        value_tags = "".join(
+            f'      <if test="{name} != null">\n'
+            f'        #{{{name},jdbcType={kind}}},\n'
+            '      </if>\n'
+            for name, kind in fields
+        )
+        set_tags = "".join(
+            f'      <if test="record.{name} != null">\n'
+            f'        {name} = #{{record.{name},jdbcType={kind}}},\n'
+            '      </if>\n'
+            for name, kind in fields
+        )
+        xml_content = (
+            '<mapper namespace="example.GeneratedMapper">\n'
+            '  <insert id="insertSelective">\n'
+            '    insert into sample_item\n'
+            '    <trim prefix="(" suffix=")" suffixOverrides=",">\n'
+            + column_tags
+            + '    </trim>\n'
+            '    <trim prefix="values (" suffix=")" suffixOverrides=",">\n'
+            + value_tags
+            + '    </trim>\n'
+            '  </insert>\n'
+            '  <update id="updateSelective">\n'
+            '    update sample_item\n'
+            '    <set>\n'
+            + set_tags
+            + '    </set>\n'
+            '  </update>\n'
+            '</mapper>\n'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, second.content)
+        self.assertFalse(
+            any("Formatter did not converge" in item for item in first.diagnostics)
+        )
+        self.assertNotIn("IR-xml-indent", [item[0].rule_id for item in first.violations])
+
     def test_xml_mybatis_foreach_continuation_indentation(self):
         xml_content = (
             '<mapper namespace="MyMapper">\n'
