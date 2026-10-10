@@ -1049,13 +1049,20 @@ def dynamic_subquery_source_edits(
         start_line = item["open_line"] + 1
         close_line = item["close_line"]
         clause_lines = item["clause_lines"]
+        close_token = item["close_tok"]
+        close_guest_line_start = sql_text.rfind(
+            "\n", 0, close_token["start"]
+        ) + 1
+        close_shares_content = bool(
+            sql_text[close_guest_line_start:close_token["start"]].strip()
+        )
         for line_number in range(start_line, close_line + 1):
             raw_line = lines[line_number - 1].rstrip("\r\n")
             if not raw_line.strip():
                 continue
             body = raw_line.lstrip(" \t")
             guest_indent = raw_line[: len(raw_line) - len(body)]
-            if line_number == close_line:
+            if line_number == close_line and not close_shares_content:
                 expected = item["close_indent"] + (" " * source_indent_delta)
             elif line_number in clause_lines:
                 expected = item["content_indent"] + (" " * source_indent_delta)
@@ -1098,6 +1105,23 @@ def dynamic_subquery_source_edits(
             edits.append(
                 (source_line_start, source_body_start, expected)
             )
+        if close_shares_content and close_token["start"] < len(mapping):
+            source_close = mapping[close_token["start"]]
+            if (
+                source_close < len(content)
+                and content[source_close] == close_token["value"]
+            ):
+                source_line_start = content.rfind(
+                    "\n", 0, source_close
+                ) + 1
+                if content[source_line_start:source_close].strip():
+                    edits.append((
+                        source_close,
+                        source_close,
+                        "\n"
+                        + item["close_indent"]
+                        + (" " * source_indent_delta),
+                    ))
     # Expanded SQL intentionally hides indentation contributed by XML tags.
     # Reassert the physical source relationship for clause anchors and the
     # closing parenthesis even when the guest view is already logically
