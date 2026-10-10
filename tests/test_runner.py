@@ -2291,6 +2291,49 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_compacts_dynamic_fragment_join_opener(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="itemSource">\n'
+            '        FROM\n'
+            '            sample_item item\n'
+            '            JOIN\n'
+            '        (\n'
+            '            SELECT owner_id\n'
+            '            FROM sample_owner\n'
+            '        ) owner ON owner.owner_id = item.owner_id\n'
+            '        WHERE\n'
+            '            owner.visible\n'
+            '            <if test="enabledOnly">AND owner.enabled</if>\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="itemSource">\n'
+            '        FROM\n'
+            '            sample_item item\n'
+            '            JOIN (\n'
+            '                    SELECT owner_id\n'
+            '                    FROM sample_owner\n'
+            '                ) owner ON owner.owner_id = item.owner_id\n'
+            '        WHERE\n'
+            '            owner.visible\n'
+            '            <if test="enabledOnly">AND owner.enabled</if>\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_preserves_dynamic_in_subquery_layout(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

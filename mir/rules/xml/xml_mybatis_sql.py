@@ -980,6 +980,22 @@ def dynamic_subquery_source_edits(
     scan_config.pop("source_mapped_subquery_compaction", None)
     for item in rule._find_violations(sql_text, scan_config):
         if item.get("type") == "compact_join_opener":
+            guest_start = item["ws_start"]
+            guest_end = item["ws_end"]
+            if not (0 <= guest_start < guest_end <= len(mapping)):
+                continue
+            if any(
+                mapping[index] - mapping[index - 1] != 1
+                for index in range(guest_start + 1, guest_end)
+            ):
+                continue
+            source_start = mapping[guest_start]
+            source_end = mapping[guest_end - 1] + 1
+            if (
+                content[source_start:source_end].isspace()
+                and content[source_start:source_end] != " "
+            ):
+                edits.append((source_start, source_end, " "))
             continue
         if item.get("type") == "compact_subquery":
             guest_start = item["ws_start"]
