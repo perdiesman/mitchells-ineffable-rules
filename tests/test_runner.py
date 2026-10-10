@@ -2435,31 +2435,6 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, xml_content)
         self.assertFalse(first.diagnostics)
 
-    def test_xml_mybatis_honors_formatter_off_region(self):
-        xml_content = (
-            '<mapper namespace="GenericMapper">\n'
-            '    <!--@formatter:off-->\n'
-            '    <sql id="preserved">select item_id from sample_item</sql>\n'
-            '    <!--@formatter:on-->\n'
-            '    <select id="consumer"><include refid="preserved" /></select>\n'
-            '    <select id="formatted">select item_id from sample_item</select>\n'
-            '</mapper>'
-        )
-        expected = xml_content.replace(
-            '<select id="formatted">select item_id from sample_item</select>',
-            '<select id="formatted">SELECT item_id FROM sample_item</select>',
-        )
-        config = Config()
-        config.profile = "commit"
-        config.fix = True
-
-        first = process_document(config, xml_content, "generic.xml", "xml")
-        second = process_document(config, first.content, "generic.xml", "xml")
-
-        self.assertEqual(first.content, expected)
-        self.assertEqual(second.content, expected)
-        self.assertFalse(first.diagnostics)
-
     def test_xml_mybatis_foreach_keeps_multicondition_where_expanded(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

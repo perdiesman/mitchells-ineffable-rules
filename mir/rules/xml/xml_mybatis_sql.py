@@ -43,13 +43,6 @@ def mapping_boundary_offsets(
     return result
 
 
-def is_formatter_disabled(content: str, source_offset: int) -> bool:
-    """Return whether an XML element starts inside a formatter-off region."""
-    prefix = content[:source_offset].lower()
-    last_off = prefix.rfind("<!--@formatter:off")
-    last_on = prefix.rfind("<!--@formatter:on")
-    return last_off > last_on
-
 def parse_xml_elements(tokens: List[dict]) -> List[dict]:
     """Build the XML element tree in one token pass.
 
@@ -2988,11 +2981,7 @@ class XmlMybatisSqlRule(BaseRule):
 
         sql_defs = {}
         for el in elements:
-            if (
-                el["tag"] == "sql"
-                and "id" in el["attrs"]
-                and not is_formatter_disabled(content, el["start_offset"])
-            ):
+            if el["tag"] == "sql" and "id" in el["attrs"]:
                 sql_id = el["attrs"]["id"]
                 sql_defs[sql_id] = el["inner_tokens"]
                 if "." in sql_id:
@@ -3004,8 +2993,6 @@ class XmlMybatisSqlRule(BaseRule):
         lines_filter = rule_config.get("_lines")
         for el in elements:
             if el["tag"] in target_tags and "id" in el["attrs"]:
-                if is_formatter_disabled(content, el["start_offset"]):
-                    continue
                 if lines_filter:
                     start_line = content[:el["start_offset"]].count('\n') + 1
                     end_tok = tokens[el["end_idx"]]
@@ -3665,11 +3652,7 @@ class XmlMybatisSqlRule(BaseRule):
 
         sql_defs = {}
         for el in elements:
-            if (
-                el["tag"] == "sql"
-                and "id" in el["attrs"]
-                and not is_formatter_disabled(content, el["start_offset"])
-            ):
+            if el["tag"] == "sql" and "id" in el["attrs"]:
                 sql_id = el["attrs"]["id"]
                 sql_defs[sql_id] = el["inner_tokens"]
                 if "." in sql_id:
@@ -3683,8 +3666,6 @@ class XmlMybatisSqlRule(BaseRule):
 
         for el in elements:
             if el["tag"] in target_tags and "id" in el["attrs"]:
-                if is_formatter_disabled(content, el["start_offset"]):
-                    continue
                 if lines_filter:
                     start_line = content[:el["start_offset"]].count('\n') + 1
                     end_tok = tokens[el["end_idx"]]
