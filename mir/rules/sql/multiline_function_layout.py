@@ -8,6 +8,7 @@ from mir.rules.sql.table_function_indent import table_function_parens
 class MultilineFunctionLayoutRule(BaseRule):
     commit_profile = True
     embedded_safe = True
+    embedded_dynamic_indent_safe = True
     rule_id = "IR-multiline-function-layout"
     description = (
         "Multiline function calls should put every direct argument on its own "

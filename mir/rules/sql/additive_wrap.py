@@ -7,6 +7,7 @@ from mir.rules.sql.sql_utils import get_token_depths, source_text_length, tokeni
 class AdditiveWrapRule(BaseRule):
     commit_profile = True
     embedded_safe = True
+    embedded_dynamic_indent_safe = True
     rule_id = "IR-additive-wrap"
     description = (
         "Long additive expressions should wrap before an operator, with all "

@@ -110,6 +110,7 @@ class WhereMultiRule(BaseRule):
                     for index in boolean_indices
                     if tokens[index]["start"] in mybatis_dynamic_offsets
                 }
+                where_is_dynamic = tok["start"] in mybatis_dynamic_offsets
                 from mir.rules.sql.line_length import LineLengthRule
                 max_len = self.get_config_value(
                     rule_config,
@@ -254,7 +255,10 @@ class WhereMultiRule(BaseRule):
                             ws_before = tokens[first_cond_idx - 1]
                             
                         first_condition_indent = expected_indent
-                        if fc_tok["start"] in mybatis_dynamic_offsets:
+                        if (
+                            fc_tok["start"] in mybatis_dynamic_offsets
+                            and not where_is_dynamic
+                        ):
                             first_condition_indent += "    "
                         expected_replacement = "\n" + first_condition_indent
                         if not ws_before or ws_before["value"] != expected_replacement:
@@ -273,7 +277,7 @@ class WhereMultiRule(BaseRule):
                             ws_tok = tokens[actual_idx - 1]
 
                         boolean_indent = expected_indent
-                        if actual_idx in dynamic_boolean_indices:
+                        if actual_idx in dynamic_boolean_indices and not where_is_dynamic:
                             boolean_indent += "    "
                         expected_replacement = "\n" + boolean_indent
                         whitespace_matches = bool(
@@ -282,6 +286,7 @@ class WhereMultiRule(BaseRule):
                                 ws_tok["value"] == expected_replacement
                                 or (
                                     actual_idx in dynamic_boolean_indices
+                                    and not where_is_dynamic
                                     and ws_tok["value"].endswith(expected_replacement)
                                 )
                             )

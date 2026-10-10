@@ -1974,6 +1974,90 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_dynamic_cte_select_branches_keep_xml_indentation(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        WITH filtered_items AS (\n'
+            '            <if test="byOwner">\n'
+            '                SELECT owner_id\n'
+            '                FROM sample_owner\n'
+            '                WHERE\n'
+            '                    active\n'
+            '                    AND visible\n'
+            '            </if>\n'
+            '            <if test="byGroup">\n'
+            '                SELECT owner_id\n'
+            '                FROM sample_group_owner\n'
+            '                WHERE\n'
+            '                    active\n'
+            '                    AND visible\n'
+            '            </if>\n'
+            '        )\n'
+            '        SELECT owner_id\n'
+            '        FROM filtered_items;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_dynamic_cte_formats_function_and_additive_indentation(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        WITH totals AS (\n'
+            '            <if test="included">\n'
+            '                SELECT\n'
+            '                    coalesce(\n'
+            '                total_count,\n'
+            '                        residential_count + transportation_count\n'
+            '                  + commercial_count + industrial_count\n'
+            '            ) AS covered_count\n'
+            '                FROM sample_count\n'
+            '            </if>\n'
+            '        )\n'
+            '        SELECT covered_count FROM totals;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        WITH totals AS (\n'
+            '            <if test="included">\n'
+            '                SELECT\n'
+            '                    coalesce(\n'
+            '                        total_count,\n'
+            '                        residential_count + transportation_count\n'
+            '                            + commercial_count + industrial_count\n'
+            '                    ) AS covered_count\n'
+            '                FROM sample_count\n'
+            '            </if>\n'
+            '        )\n'
+            '        SELECT covered_count FROM totals;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_choose_branches_do_not_extend_join_predicates(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

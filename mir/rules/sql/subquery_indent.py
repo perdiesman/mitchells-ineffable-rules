@@ -37,9 +37,16 @@ class SubqueryIndentRule(BaseRule):
         "SELECT * FROM (/* preserve placement */ SELECT item_id FROM sample_item\n) sample_rows;"
     ]
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _find_violations(
+        self, content: str, rule_config: Dict[str, Any] | None = None
+    ) -> List[dict]:
+        if rule_config is None:
+            rule_config = {}
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
+        mybatis_dynamic_offsets = rule_config.get(
+            "mybatis_dynamic_offsets", set()
+        )
         violations = []
         n = len(tokens)
         
@@ -56,6 +63,17 @@ class SubqueryIndentRule(BaseRule):
                         break
                         
                 if next_active and next_active["type"] == "KEYWORD" and next_active["value"].upper() == "SELECT":
+                    # A dynamic tag may provide an entire alternative SELECT
+                    # inside an outer CTE parenthesis. Its additional source
+                    # indentation belongs to XML nesting, not to the SQL
+                    # subquery. The XML rule owns that boundary; nested
+                    # subqueries whose opening parenthesis is in the same
+                    # dynamic body continue through the normal path below.
+                    if (
+                        next_active["start"] in mybatis_dynamic_offsets
+                        and tok["start"] not in mybatis_dynamic_offsets
+                    ):
+                        continue
                     if (
                         next_active["line"] == tok["line"]
                         and any(
@@ -251,7 +269,7 @@ class SubqueryIndentRule(BaseRule):
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         
         for item in offending:
             tok = item["open_tok"]
@@ -323,7 +341,7 @@ class SubqueryIndentRule(BaseRule):
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
         processed = set()
         while True:
-            offending = self._find_violations(content)
+            offending = self._find_violations(content, rule_config)
             offending = [
                 item
                 for item in offending

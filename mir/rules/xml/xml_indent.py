@@ -523,6 +523,7 @@ class XmlIndentRule(BaseRule):
                         is_bind_body = line_text.strip().startswith(("#{", "${", ":"))
                         is_logical_continuation = first_word in {"AND", "OR"}
                         open_parenthesis_depth = 0
+                        has_local_logical_clause = False
                         if is_logical_continuation:
                             opening_tag_end = content.find(
                                 ">", dynamic_parent["token"]["start"]
@@ -530,6 +531,11 @@ class XmlIndentRule(BaseRule):
                             if 0 <= opening_tag_end < text_line_start:
                                 prefix_tokens = tokenize_sql(
                                     content[opening_tag_end + 1:text_line_start]
+                                )
+                                has_local_logical_clause = any(
+                                    item["type"] == "KEYWORD"
+                                    and item["value"].upper() in {"WHERE", "ON", "HAVING"}
+                                    for item in prefix_tokens
                                 )
                                 open_parenthesis_depth = sum(
                                     1 if item["value"] == "(" else -1
@@ -544,6 +550,7 @@ class XmlIndentRule(BaseRule):
                             or (
                                 is_logical_continuation
                                 and open_parenthesis_depth <= 0
+                                and not has_local_logical_clause
                                 and actual_indent != minimum_indent
                             )
                             or malformed_dynamic_indent
