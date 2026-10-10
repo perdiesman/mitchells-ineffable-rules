@@ -42,6 +42,7 @@ class ClauseAlignmentRule(BaseRule):
         dynamic_offsets = (rule_config or {}).get("mybatis_dynamic_offsets", set())
         paren_stack: List[int] = []
         statement_number = 0
+        insert_indents = {}
         clauses = []
         active_indices: List[int] = []
 
@@ -64,6 +65,17 @@ class ClauseAlignmentRule(BaseRule):
                 continue
 
             word = token["value"].upper()
+            if word == "INSERT":
+                insert_line_start = content.rfind(
+                    "\n", 0, token["start"]
+                ) + 1
+                insert_prefix = content[
+                    insert_line_start:token["start"]
+                ]
+                if not insert_prefix.strip():
+                    insert_indents[
+                        (statement_number, tuple(paren_stack))
+                    ] = insert_prefix
             keyword = None
             keyword_end = token["end"]
             if word == "FROM":
@@ -128,6 +140,9 @@ class ClauseAlignmentRule(BaseRule):
                         bisect_right(dynamic_boundaries, token["start"]),
                         token["start"] in dynamic_offsets,
                     ),
+                    "insert_indent": insert_indents.get(
+                        (statement_number, tuple(paren_stack))
+                    ),
                 })
             active_indices.append(index)
 
@@ -162,7 +177,12 @@ class ClauseAlignmentRule(BaseRule):
             if not ref_clause:
                 continue
                 
-            expected_indent = ref_clause["indentation"]
+            expected_indent = (
+                ref_clause.get("insert_indent") + "    "
+                if ref_clause["keyword"] == "SELECT"
+                and ref_clause.get("insert_indent") is not None
+                else ref_clause["indentation"]
+            )
             
             for cl in group:
                 if cl == ref_clause:
@@ -223,10 +243,21 @@ class ClauseAlignmentRule(BaseRule):
             if not ref_clause:
                 continue
                 
-            expected_indent = ref_clause["indentation"]
+            expected_indent = (
+                ref_clause.get("insert_indent") + "    "
+                if ref_clause["keyword"] == "SELECT"
+                and ref_clause.get("insert_indent") is not None
+                else ref_clause["indentation"]
+            )
             
             for cl in group:
                 if cl == ref_clause:
+                    if cl["indentation"] != expected_indent:
+                        replacements.append((
+                            cl["line_start_idx"],
+                            cl["line_start_idx"] + len(cl["indentation"]),
+                            expected_indent,
+                        ))
                     continue
                 if not cl["is_first_on_line"]:
                     replacements.append((

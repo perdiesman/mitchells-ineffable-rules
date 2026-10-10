@@ -39,6 +39,22 @@ from mir.rules.sql.window_layout import WindowLayoutRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_insert_select_aligns_with_the_insert_statement(self):
+        source = (
+            "    INSERT INTO sample_item_history (item_id, owner_id)\n"
+            "                                             SELECT item_id, owner_id\n"
+            "                                             FROM sample_item\n"
+            "                                             WHERE enabled;"
+        )
+        expected = source.replace("                                             ", "        ")
+        rule = ClauseAlignmentRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+
     def test_long_single_line_window_expands_by_clause(self):
         source = (
             "        row_number() over (partition BY sample_id, sample_region "
