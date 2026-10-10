@@ -67,3 +67,20 @@ Expected fixed output:
         ) AS item ON event_time BETWEEN item.start_time AND item.start_time
         + item.duration
 ```
+
+##### joined table function with multiline predicate — Fixed
+```sql
+    LEFT JOIN sample.items_for_period(:period, :region) item
+        ON item.period_id = event.period_id
+        AND item.enabled
+```
+
+Expected fixed output:
+```sql
+    LEFT JOIN sample.items_for_period(
+            :period,
+            :region
+        ) item
+        ON item.period_id = event.period_id
+        AND item.enabled
+```

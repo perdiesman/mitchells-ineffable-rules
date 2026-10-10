@@ -100,6 +100,23 @@ class TableFunctionIndentRule(BaseRule):
                 "        + item.duration"
             ),
         ),
+        RuleCase(
+            "joined table function with multiline predicate",
+            (
+                "    LEFT JOIN sample.items_for_period(:period, :region) item\n"
+                "        ON item.period_id = event.period_id\n"
+                "        AND item.enabled"
+            ),
+            "fixed",
+            (
+                "    LEFT JOIN sample.items_for_period(\n"
+                "            :period,\n"
+                "            :region\n"
+                "        ) item\n"
+                "        ON item.period_id = event.period_id\n"
+                "        AND item.enabled"
+            ),
+        ),
     ]
 
     @staticmethod
@@ -147,9 +164,14 @@ class TableFunctionIndentRule(BaseRule):
         )
         boundaries = rule_config.get("mybatis_boundary_offsets", set())
         edits = []
-        for open_index in table_function_parens(tokens):
+        for open_index, source_keyword in table_function_parens(tokens).items():
             close_index = find_matching_paren(tokens, open_index)
             if close_index is None:
+                continue
+            if (
+                source_keyword == "JOIN"
+                and self._multiline_join_predicate(tokens, close_index)
+            ):
                 continue
             opening = tokens[open_index]
             closing = tokens[close_index]
@@ -203,6 +225,108 @@ class TableFunctionIndentRule(BaseRule):
                     "end": closing["end"],
                     "replacement": replacement,
                 })
+        return edits
+
+    @staticmethod
+    def _multiline_join_predicate(
+        tokens: List[dict], close_index: int
+    ) -> bool:
+        closing = tokens[close_index]
+        on_token = None
+        for token in tokens[close_index + 1:]:
+            if token["type"] in {"WHITESPACE", "COMMENT"}:
+                continue
+            value = token["value"].upper()
+            if token["type"] == "KEYWORD" and value in {
+                "WHERE", "GROUP", "ORDER", "HAVING", "LIMIT", "JOIN",
+            }:
+                if value != "ON":
+                    break
+            if token["type"] == "KEYWORD" and value == "ON":
+                on_token = token
+                break
+        if on_token is None:
+            return False
+        if on_token["line"] > closing["line"]:
+            return True
+        for token in tokens[close_index + 1:]:
+            if token["type"] in {"WHITESPACE", "COMMENT"}:
+                continue
+            value = token["value"].upper()
+            if token["type"] == "KEYWORD" and value in {
+                "WHERE", "GROUP", "ORDER", "HAVING", "LIMIT", "JOIN",
+            }:
+                break
+            if (
+                token["type"] == "KEYWORD"
+                and value in {"AND", "OR"}
+                and token["line"] > on_token["line"]
+            ):
+                return True
+        return False
+
+    def _expand_join_edits(
+        self, content: str, rule_config: Dict[str, Any]
+    ) -> List[dict]:
+        tokens = tokenize_sql(content)
+        indent_size = self.get_config_value(
+            rule_config,
+            "indent_size",
+            4,
+            fallbacks=[(IndentRule, "indent_size")],
+        )
+        unit = " " * indent_size
+        edits = []
+        for open_index, source_keyword in table_function_parens(tokens).items():
+            if source_keyword != "JOIN":
+                continue
+            close_index = find_matching_paren(tokens, open_index)
+            if close_index is None:
+                continue
+            opening = tokens[open_index]
+            closing = tokens[close_index]
+            if (
+                opening["line"] != closing["line"]
+                or not self._multiline_join_predicate(tokens, close_index)
+            ):
+                continue
+            argument_ranges = []
+            range_start = open_index + 1
+            nested_depth = 0
+            for index in range(open_index + 1, close_index):
+                token = tokens[index]
+                if token["type"] == "PAREN":
+                    nested_depth += 1 if token["value"] == "(" else -1
+                elif token["type"] == "COMMA" and nested_depth == 0:
+                    argument_ranges.append((range_start, index))
+                    range_start = index + 1
+            argument_ranges.append((range_start, close_index))
+            if len(argument_ranges) < 2:
+                continue
+            arguments = [
+                self._compact_tokens(tokens[start:end])
+                for start, end in argument_ranges
+            ]
+            if not all(arguments):
+                continue
+            line_start = content.rfind("\n", 0, opening["start"]) + 1
+            line = content[line_start:opening["start"]]
+            base_indent = line[: len(line) - len(line.lstrip(" \t"))]
+            close_indent = base_indent + unit
+            argument_indent = close_indent + unit
+            edits.append({
+                "token": opening,
+                "start": opening["start"],
+                "end": closing["end"],
+                "replacement": (
+                    "(\n"
+                    + argument_indent
+                    + (",\n" + argument_indent).join(arguments)
+                    + "\n"
+                    + close_indent
+                    + ")"
+                ),
+            })
         return edits
 
     def _expected_indents(self, content: str, indent_size: int) -> Dict[int, str]:
@@ -293,6 +417,16 @@ class TableFunctionIndentRule(BaseRule):
             )
             for item in self._compact_edits(content, rule_config)
         ]
+        violations.extend(
+            Violation(
+                self.rule_id,
+                item["token"]["line"],
+                "A joined table function with a multiline predicate should expand its arguments.",
+                [lines[item["token"]["line"] - 1]],
+                True,
+            )
+            for item in self._expand_join_edits(content, rule_config)
+        )
         for line_number, expected in self._expected_indents(content, indent_size).items():
             line = lines[line_number - 1]
             actual = line[: len(line) - len(line.lstrip())]
@@ -309,6 +443,14 @@ class TableFunctionIndentRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        expand_edits = self._expand_join_edits(content, rule_config)
+        if expand_edits:
+            chars = list(content)
+            for item in sorted(
+                expand_edits, key=lambda edit: edit["start"], reverse=True
+            ):
+                chars[item["start"] : item["end"]] = list(item["replacement"])
+            content = "".join(chars)
         compact_edits = self._compact_edits(content, rule_config)
         if compact_edits:
             chars = list(content)
