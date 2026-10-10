@@ -313,9 +313,36 @@ class JoinOnMultiRule(BaseRule):
                         or next_boundary is not None
                     )
                 ):
-                    source_indent_offset = len(
-                        base_indent.replace("\t", "    ")
+                    source_mapping = rule_config.get("mybatis_source_mapping")
+                    source_offset = (
+                        source_mapping[join_tok["start"]]
+                        if (
+                            isinstance(source_mapping, list)
+                            and 0 <= join_tok["start"] < len(source_mapping)
+                        )
+                        else None
                     )
+                    if source_offset is not None:
+                        original_xml = rule_config["original_xml"]
+                        source_line_start = original_xml.rfind(
+                            "\n", 0, source_offset
+                        ) + 1
+                        source_prefix = original_xml[
+                            source_line_start:source_offset
+                        ]
+                        source_indent_width = len(
+                            source_prefix.replace("\t", "    ")
+                        )
+                        guest_indent_width = len(
+                            join_indent.replace("\t", "    ")
+                        )
+                        source_indent_offset = max(
+                            0, source_indent_width - guest_indent_width
+                        )
+                    else:
+                        source_indent_offset = len(
+                            base_indent.replace("\t", "    ")
+                        )
                     estimated_line_len += source_indent_offset
                 
                 from mir.rules.sql.line_length import LineLengthRule

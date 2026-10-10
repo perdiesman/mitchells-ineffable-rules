@@ -1478,8 +1478,7 @@ class TestRunnerIntegration(unittest.TestCase):
             '        FROM\n'
             '            sample_item a\n'
             '            <if test="enabled">\n'
-            '                JOIN sample_owner b ON a.owner_id = b.owner_id\n'
-            '                    AND coalesce(b.group_id, -1) = coalesce(a.group_id, -1)\n'
+                '                JOIN sample_owner b ON a.owner_id = b.owner_id AND coalesce(b.group_id, -1) = coalesce(a.group_id, -1)\n'
             '            </if>\n'
             '    </select>\n'
             '</mapper>'
@@ -3007,6 +3006,99 @@ class TestRunnerIntegration(unittest.TestCase):
 
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+        inline_in_branch = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="orderedItems">\n'
+            '        <choose>\n'
+            '            <when test="byName">\n'
+            '                SELECT item_id\n'
+            '                FROM sample_item\n'
+            '                ORDER BY item_name, recorded_at\n'
+            '            </when>\n'
+            '            <otherwise>SELECT item_id FROM sample_item</otherwise>\n'
+            '        </choose>\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        branch_first = process_document(
+            config, inline_in_branch, "generic.xml", "xml"
+        )
+        branch_second = process_document(
+            config, branch_first.content, "generic.xml", "xml"
+        )
+        self.assertIn(
+            '                ORDER BY item_name, recorded_at\n',
+            branch_first.content,
+        )
+        self.assertEqual(branch_second.content, branch_first.content)
+        self.assertFalse(branch_first.diagnostics)
+
+    def test_xml_mybatis_preserves_inline_dynamic_single_from(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '            <choose>\n'
+            '                <when test="archived">\n'
+            '                    SELECT item_id\n'
+            '                    FROM archived_item item\n'
+            '                </when>\n'
+            '                <otherwise>\n'
+            '                    SELECT item_id\n'
+            '                    FROM current_item item\n'
+            '                </otherwise>\n'
+            '            </choose>\n'
+            '            JOIN sample_owner owner ON owner.owner_id = item.owner_id\n'
+            '        WHERE owner.enabled\n'
+            '        UNION ALL\n'
+            '        SELECT archived_item_id\n'
+            '        FROM archived_item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertIn('                    FROM archived_item item\n', first.content)
+        self.assertIn('                    FROM current_item item\n', first.content)
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_join_addition_uses_full_line_limit(self):
+        join_line = (
+            "                    JOIN item_window iw ON item.at BETWEEN "
+            "iw.start_at AND iw.start_at + '${periodHrs} Hours'::interval"
+        )
+        self.assertLessEqual(len(join_line), 120)
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="items">\n'
+            '        <choose>\n'
+            '            <when test="periodHrs &gt; 0">\n'
+            '                SELECT items.item_id\n'
+            '                FROM\n'
+            '                    sample_period periods\n'
+            f'{join_line}\n'
+            '            </when>\n'
+            '            <otherwise>SELECT item_id FROM sample_item</otherwise>\n'
+            '        </choose>\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertIn(join_line, first.content)
+        self.assertEqual(second.content, first.content)
         self.assertFalse(first.diagnostics)
 
     def test_xml_mybatis_choose_branches_do_not_extend_join_predicates(self):

@@ -1463,7 +1463,11 @@ def dynamic_window_source_edits(
     import re
 
     from mir.rules.sql.line_length import LineLengthRule
-    from mir.rules.sql.sql_utils import get_token_depths, source_text_length, tokenize_sql
+    from mir.rules.sql.sql_utils import (
+        get_token_depths,
+        source_text_length,
+        tokenize_sql,
+    )
 
     start, end = source_range
     fragment = content[start:end]
@@ -1610,6 +1614,22 @@ def compact_static_order_by_edits(
     edits = []
     for index, raw_line in enumerate(lines):
         line = raw_line.rstrip("\r\n")
+        inline_match = re.match(
+            r"^([ \t]*)ORDER[ \t]+BY[ \t]+([^<\n]+?)$",
+            line,
+            re.IGNORECASE,
+        )
+        if inline_match is not None:
+            body = inline_match.group(2)
+            if (
+                "," in body
+                and "--" not in body
+                and "/*" not in body
+                and source_text_length(line, rule_config) <= max_length
+            ):
+                edit_start = start + line_offsets[index]
+                edits.append((edit_start, edit_start + len(line), line))
+            continue
         match = re.match(r"^([ \t]*)ORDER[ \t]+BY[ \t]*$", line, re.IGNORECASE)
         if match is None:
             continue
@@ -1637,6 +1657,85 @@ def compact_static_order_by_edits(
             lines[final_index].rstrip("\r\n")
         )
         edits.append((edit_start, edit_end, replacement))
+    return edits
+
+
+def preserve_inline_dynamic_from_edits(
+    content: str,
+    source_range: tuple[int, int],
+    dynamic_ranges: List[tuple[int, int, int]],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Keep a fitting one-relation FROM inline inside a dynamic branch."""
+    import re
+
+    from mir.rules.sql.line_length import LineLengthRule
+    from mir.rules.sql.sql_utils import get_token_depths, source_text_length, tokenize_sql
+
+    source_start, source_end = source_range
+    max_length = LineLengthRule().get_config_value(
+        rule_config, "max_length", default_value=120
+    )
+    edits = []
+    for range_start, range_end, _ in dynamic_ranges:
+        if not (
+            source_start < range_start < range_end < source_end
+        ):
+            continue
+        cursor = content.rfind("\n", 0, range_start) + 1
+        while cursor < range_end:
+            line_end = content.find("\n", cursor, range_end)
+            if line_end == -1:
+                line_end = range_end
+            line = content[cursor:line_end]
+            match = re.match(
+                r"^([ \t]*)FROM[ \t]+([^<\n]+?)$", line, re.IGNORECASE
+            )
+            if match is not None and source_text_length(
+                line, rule_config
+            ) <= max_length:
+                relation = match.group(2)
+                relation_tokens = tokenize_sql(relation)
+                depths = get_token_depths(relation_tokens)
+                has_top_level_comma = any(
+                    token["type"] == "COMMA" and depths[index] == 0
+                    for index, token in enumerate(relation_tokens)
+                )
+                has_top_level_join = any(
+                    token["type"] == "KEYWORD"
+                    and token["value"].upper() == "JOIN"
+                    and depths[index] == 0
+                    for index, token in enumerate(relation_tokens)
+                )
+                following_join = False
+                scan_cursor = line_end + 1
+                while scan_cursor < range_end:
+                    scan_end = content.find("\n", scan_cursor, range_end)
+                    if scan_end == -1:
+                        scan_end = range_end
+                    following_body = content[scan_cursor:scan_end].strip()
+                    if not following_body or following_body.startswith("<"):
+                        scan_cursor = scan_end + 1
+                        continue
+                    if re.match(
+                        r"^(?:LEFT|RIGHT|FULL|INNER|CROSS|NATURAL)?"
+                        r"(?:[ \t]+OUTER)?[ \t]+JOIN\b|^JOIN\b",
+                        following_body,
+                        re.IGNORECASE,
+                    ):
+                        following_join = True
+                    break
+                if (
+                    not has_top_level_comma
+                    and not has_top_level_join
+                    and not following_join
+                    and "--" not in relation
+                    and "/*" not in relation
+                ):
+                    edits.append((cursor, line_end, line))
+            if line_end >= range_end:
+                break
+            cursor = line_end + 1
     return edits
 
 
@@ -2018,6 +2117,7 @@ class XmlMybatisSqlRule(BaseRule):
                             mapping, foreach_ranges
                         ),
                         "mybatis_boundary_offsets": boundary_offsets,
+                        "mybatis_source_mapping": mapping,
                         "base_indent": base_indent,
                         "tag_ranges": tag_ranges,
                         "original_xml": content
@@ -2152,6 +2252,7 @@ class XmlMybatisSqlRule(BaseRule):
                         mapping, foreach_ranges
                     ),
                     "mybatis_boundary_offsets": boundary_offsets,
+                    "mybatis_source_mapping": mapping,
                     "mybatis_dynamic_indent_ranges": [
                         item
                         for item in dynamic_indent_ranges
@@ -2305,6 +2406,13 @@ class XmlMybatisSqlRule(BaseRule):
                     inner_config,
                 )
                 layout_edits.extend(static_order_edits)
+                dynamic_from_edits = preserve_inline_dynamic_from_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    dynamic_indent_ranges,
+                    inner_config,
+                )
+                layout_edits.extend(dynamic_from_edits)
                 static_select_edits = compact_static_select_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
@@ -2323,6 +2431,7 @@ class XmlMybatisSqlRule(BaseRule):
                     (start, end)
                     for start, end, _ in post_choose_edits + dynamic_body_edits
                     + dynamic_projection_edits
+                    + dynamic_from_edits
                 ]
 
                 def overlaps_protected_source_indent(edit) -> bool:
@@ -2356,6 +2465,7 @@ class XmlMybatisSqlRule(BaseRule):
                 # preserves the complete SQL and XML token sequence.
                 trusted_structural_edits = set(
                     dynamic_order_edits + static_order_edits
+                    + dynamic_from_edits
                 )
                 layout_edits = [
                     (start, end, replacement)
