@@ -28,6 +28,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-statement-blank-lines`](rules/general/IR-statement-blank-lines.md) | Ensure at least one blank line between consecutive SQL statements. | Yes | [View Details](rules/general/IR-statement-blank-lines.md) |
 | [`IR-statement-semicolon`](rules/general/IR-statement-semicolon.md) | Enforce that all top-level statements end with a trailing semicolon. | Yes | [View Details](rules/general/IR-statement-semicolon.md) |
 | [`IR-trailing-semicolon`](rules/general/IR-trailing-semicolon.md) | Place semicolons immediately after statement text and require a final semicolon only in multi-statement files. | Yes | [View Details](rules/general/IR-trailing-semicolon.md) |
+| [`IR-trailing-whitespace`](rules/general/IR-trailing-whitespace.md) | Remove spaces and tabs at the ends of SQL lines. | Yes | [View Details](rules/general/IR-trailing-whitespace.md) |
 | [`IR-unresolved-alias`](rules/general/IR-unresolved-alias.md) | Detect references to table aliases or qualifiers that are not declared in the query context. | No | [View Details](rules/general/IR-unresolved-alias.md) |
 
 ## Query Structure Rules

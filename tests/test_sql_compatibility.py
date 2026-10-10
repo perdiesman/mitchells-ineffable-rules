@@ -32,11 +32,39 @@ from mir.rules.sql.subquery_indent import SubqueryIndentRule
 from mir.rules.sql.table_function_indent import TableFunctionIndentRule
 from mir.rules.sql.table_alias_as import TableAliasAsRule
 from mir.rules.sql.trailing_semicolon import TrailingSemicolonRule
+from mir.rules.sql.trailing_whitespace import TrailingWhitespaceRule
 from mir.rules.sql.unresolved_alias import UnresolvedAliasRule
 from mir.rules.sql.where_multi import WhereMultiRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_constraint_parentheses_are_not_removed(self):
+        source = (
+            "CREATE TABLE sample_item (\n"
+            "    item_id INTEGER,\n"
+            "    owner_id INTEGER,\n"
+            "    PRIMARY KEY (item_id),\n"
+            "    FOREIGN KEY (owner_id) REFERENCES sample_owner (owner_id),\n"
+            "    UNIQUE (owner_id),\n"
+            "    CHECK (item_id > 0)\n"
+            ");"
+        )
+
+        rule = ParenSingleRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
+    def test_trailing_whitespace_is_removed_without_changing_line_endings(self):
+        source = "SELECT item_id  \r\nFROM sample_item;\t\r\n"
+        expected = "SELECT item_id\r\nFROM sample_item;\r\n"
+        rule = TrailingWhitespaceRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+
     def test_multiline_case_stays_with_its_leading_additive_operator(self):
         source = (
             "    first_label\n"

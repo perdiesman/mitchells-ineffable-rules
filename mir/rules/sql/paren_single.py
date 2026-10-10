@@ -117,7 +117,7 @@ class ParenSingleRule(BaseRule):
                         "CONCAT", "SUBSTR", "DATE_PART", "NOW", "STRING_AGG",
                         "DATE", "FILTER", "ANY", "SOME", "EXISTS", "LATERAL",
                         "CAST", "EXTRACT", "IN", "VALUES", "USING", "ROW",
-                        "CONFLICT",
+                        "CONFLICT", "KEY", "UNIQUE", "CHECK", "INCLUDE",
                     ):
                         is_special = True
                         
