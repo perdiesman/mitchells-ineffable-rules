@@ -37,6 +37,7 @@ class CaseLayoutRule(BaseRule):
         "SELECT CASE WHEN x = 1 THEN 'a' END FROM users;",
         "SELECT CASE WHEN x = 1 THEN 'a' ELSE 'b' END FROM users;",
         "SELECT \n    CASE\n        WHEN x = 1 THEN 'a'\n        WHEN x = 2 THEN 'b'\n        ELSE 'c'\n    END;",
+        "SELECT CASE WHEN x IS NULL THEN NULL ELSE CASE WHEN y = 1 THEN true ELSE false END END FROM users;",
     ]
 
     def _find_case_blocks(self, tokens: List[dict]) -> List[dict]:
@@ -113,6 +114,16 @@ class CaseLayoutRule(BaseRule):
             original_text = content[case_tok["start"]:end_tok["end"]]
             
             base_depth = depths[start_idx]
+            if any(
+                nested["start_idx"] > start_idx
+                and nested["end_idx"] < end_idx
+                for nested in blocks
+            ):
+                # Rebuilding an outer block must not reinterpret a nested
+                # CASE's WHEN/THEN/ELSE tokens as arms of the outer block.
+                # The nested block is discovered independently and may still
+                # be formatted when its own structure is safe.
+                continue
             when_count = 0
             has_else = False
             

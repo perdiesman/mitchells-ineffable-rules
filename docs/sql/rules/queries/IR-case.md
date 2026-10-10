@@ -43,3 +43,7 @@ SELECT
         ELSE 'c'
     END;
 ```
+
+```sql
+SELECT CASE WHEN x IS NULL THEN NULL ELSE CASE WHEN y = 1 THEN true ELSE false END END FROM users;
+```

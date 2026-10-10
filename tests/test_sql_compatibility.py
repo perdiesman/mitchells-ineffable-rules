@@ -1656,6 +1656,19 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.check(source, "generic.sql", {}), [])
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
 
+    def test_nested_case_is_opaque_to_outer_case_layout(self):
+        source = (
+            "SELECT CASE\n"
+            "    WHEN owner_name IS NULL THEN NULL\n"
+            "    ELSE CASE WHEN item_count = 0 THEN false ELSE true END\n"
+            "END AS enabled FROM sample_item;"
+        )
+        rule = CaseLayoutRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, source)
+        self.assertEqual(protected_sql_signature(fixed), protected_sql_signature(source))
+
     def test_protected_signature_allows_formatting_inside_dollar_quoted_code(self):
         original = "CREATE FUNCTION sample() RETURNS void AS $$ BEGIN RETURN; END; $$ LANGUAGE plpgsql;"
         formatted = "CREATE FUNCTION sample() RETURNS void AS $$ BEGIN\n    RETURN;\nEND; $$ LANGUAGE plpgsql;"
