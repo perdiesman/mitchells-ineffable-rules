@@ -1,7 +1,7 @@
 import re
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql
+from mir.rules.sql.sql_utils import get_token_depths, tokenize_sql
 from mir.rules.xml.xml_utils import tokenize_xml
 def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines: List[str], indent_size: int) -> str:
     # 1. Find the query tag in active_parents
@@ -846,34 +846,46 @@ class XmlIndentRule(BaseRule):
                                     for item in prefix_tokens
                                 )
                                 if has_local_logical_clause:
-                                    for prior_line in reversed(
-                                        content[
-                                            opening_tag_end + 1:text_line_start
-                                        ].splitlines()
-                                    ):
-                                        prior_body = prior_line.lstrip(" \t")
-                                        if not prior_body or prior_body.startswith("<"):
-                                            continue
-                                        prior_indent = prior_line[
-                                            : len(prior_line) - len(prior_body)
+                                    prefix_source = content[
+                                        opening_tag_end + 1:text_line_start
+                                    ]
+                                    prefix_tokens = tokenize_sql(prefix_source)
+                                    prefix_depths = get_token_depths(prefix_tokens)
+                                    open_parenthesis_depth = sum(
+                                        1 if item["value"] == "(" else -1
+                                        for item in prefix_tokens
+                                        if item["type"] == "PAREN"
+                                    )
+                                    owners = [
+                                        item
+                                        for index, item in enumerate(prefix_tokens)
+                                        if prefix_depths[index]
+                                        == open_parenthesis_depth
+                                        and item["type"] == "KEYWORD"
+                                        and item["value"].upper()
+                                        in {"WHERE", "ON", "HAVING", "AND", "OR"}
+                                    ]
+                                    if owners:
+                                        owner = owners[-1]
+                                        owner_line = prefix_source.splitlines()[
+                                            owner["line"] - 1
                                         ]
-                                        prior_has_clause = any(
-                                            item["type"] == "KEYWORD"
-                                            and item["value"].upper()
-                                            in {"WHERE", "ON", "HAVING"}
-                                            for item in tokenize_sql(prior_body)
-                                        )
-                                        prior_word = prior_body.split(None, 1)[0].upper()
-                                        local_logical_indent = (
-                                            prior_indent + " " * indent_size
-                                            if prior_word in {"WHERE", "HAVING"}
-                                            or (
-                                                prior_has_clause
-                                                and prior_word != "ON"
+                                        owner_body = owner_line.lstrip(" \t")
+                                        owner_indent = owner_line[
+                                            : len(owner_line) - len(owner_body)
+                                        ]
+                                        owner_word = owner["value"].upper()
+                                        if owner_word in {"AND", "OR"}:
+                                            local_logical_indent = owner_indent
+                                        elif (
+                                            owner_word == "ON"
+                                            and owner_body.upper().startswith("ON ")
+                                        ) or owner_body.startswith(")"):
+                                            local_logical_indent = owner_indent
+                                        else:
+                                            local_logical_indent = (
+                                                owner_indent + " " * indent_size
                                             )
-                                            else prior_indent
-                                        )
-                                        break
                                 open_parenthesis_depth = sum(
                                     1 if item["value"] == "(" else -1
                                     for item in prefix_tokens

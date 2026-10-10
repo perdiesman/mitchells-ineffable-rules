@@ -3731,9 +3731,44 @@ class TestRunnerIntegration(unittest.TestCase):
 
         first = process_document(config, xml_content, "generic.xml", "xml")
         second = process_document(config, first.content, "generic.xml", "xml")
+        check_config = Config()
+        check_config.profile = "commit"
+        checked = process_document(
+            check_config,
+            second.content,
+            "generic.xml",
+            "xml",
+        )
 
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(checked.diagnostics)
+
+    def test_xml_indent_preserves_between_continuation_in_dynamic_where(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="activeItems">\n'
+            '        SELECT item_id FROM sample_item\n'
+            '        <if test="start != null and end != null">\n'
+            '            WHERE\n'
+            '            recorded_at BETWEEN #{start}\n'
+            '                AND #{end}\n'
+            '                OR (completed_at BETWEEN #{start} AND #{end})\n'
+            '        </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-indent"]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
         self.assertFalse(first.diagnostics)
 
     def test_xml_mybatis_case_boolean_continuation_indent(self):

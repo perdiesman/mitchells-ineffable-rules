@@ -2758,6 +2758,35 @@ class XmlMybatisSqlRule(BaseRule):
                         "is_fixable": True,
                     })
 
+                dynamic_projection_edits = (
+                    dynamic_projection_subquery_source_edits(
+                        sql_text,
+                        mapping,
+                        content,
+                        dynamic_indent_ranges,
+                    )
+                )
+                changed_dynamic_projection_edits = [
+                    edit
+                    for edit in dynamic_projection_edits
+                    if content[edit[0]:edit[1]] != edit[2]
+                ]
+                if changed_dynamic_projection_edits:
+                    first_start = min(
+                        start
+                        for start, _, _ in changed_dynamic_projection_edits
+                    )
+                    violations.append({
+                        "rule_id": "IR-column-layout",
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "[MyBatis SQL: IR-column-layout] Align the "
+                            "dynamic projection one indentation level below "
+                            "SELECT."
+                        ),
+                        "is_fixable": True,
+                    })
+
                 excluded_guest_rule_ids = set()
                 if local_cte_mapping:
                     excluded_guest_rule_ids.update(
@@ -2891,6 +2920,20 @@ class XmlMybatisSqlRule(BaseRule):
                     ):
                         # At runtime the chosen relation is the same logical
                         # line, while the XML structure must remain separate.
+                        continue
+                    if (
+                        ev["rule_id"] == "IR-multiline-function-layout"
+                        and any(
+                            mapped_line_start == start
+                            and content[start:end] == replacement
+                            for start, end, replacement
+                            in dynamic_projection_edits
+                        )
+                    ):
+                        # A function argument owned by a dynamic XML block has
+                        # extra source indentation that the expanded guest SQL
+                        # cannot see. The projection mapper has already
+                        # verified the physical opening and closing lines.
                         continue
                     abs_line = content[:ev["mapped_offset"]].count('\n') + 1
                     if lines_filter and abs_line not in lines_filter:
