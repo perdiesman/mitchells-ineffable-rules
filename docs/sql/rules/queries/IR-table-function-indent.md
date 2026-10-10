@@ -1,6 +1,6 @@
 # IR-table-function-indent
 
-Indent multiline table-function arguments as table continuations, with joined functions and their wrapped predicate expressions nested beneath the JOIN.
+Keep a fitting table-function opener with its function name; otherwise indent multiline arguments as table continuations, with joined functions and their wrapped predicate expressions nested beneath the JOIN.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
@@ -25,6 +25,17 @@ Expected fixed output:
 FROM sample.items_for_period(
     :period
 ) AS item
+```
+
+##### short multiline table function — Fixed
+```sql
+FROM generate_series
+    (:period_start, :period_end, '15 MINUTES' :: interval) AS period
+```
+
+Expected fixed output:
+```sql
+FROM generate_series(:period_start, :period_end, '15 MINUTES'::interval) AS period
 ```
 
 ##### multiline JOIN table function — Fixed

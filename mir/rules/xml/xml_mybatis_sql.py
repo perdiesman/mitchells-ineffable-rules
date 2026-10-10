@@ -114,6 +114,43 @@ def get_all_elements_recursively(elements: List[dict]) -> List[dict]:
         res.extend(get_all_elements_recursively(el.get("children", [])))
     return res
 
+
+def _tokens_start_with_select(tokens: List[dict]) -> bool:
+    """Return whether a dynamic branch starts with a complete SELECT."""
+    for token in tokens:
+        if token["type"] in {"TEXT", "WHITESPACE"}:
+            stripped = token["value"].lstrip()
+            if stripped:
+                return stripped.upper().startswith("SELECT")
+        elif token["type"] == "TAG_OPEN_START":
+            return False
+    return False
+
+
+def _next_dynamic_body_starts_select(
+    tokens: List[dict], start_index: int
+) -> bool:
+    index = start_index
+    while index < len(tokens):
+        token = tokens[index]
+        if token["type"] == "WHITESPACE" or (
+            token["type"] == "TEXT" and not token["value"].strip()
+        ):
+            index += 1
+            continue
+        break
+    if index >= len(tokens) or tokens[index]["type"] != "TAG_OPEN_START":
+        return False
+    tag_name = tokens[index]["value"][1:].lower()
+    if tag_name not in {"if", "when", "otherwise"}:
+        return False
+    tag_end = index + 1
+    while tag_end < len(tokens) and tokens[tag_end]["type"] != "TAG_END":
+        tag_end += 1
+    if tag_end >= len(tokens) or tokens[tag_end]["value"] == "/>":
+        return False
+    return _tokens_start_with_select(tokens[tag_end + 1 :])
+
 def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], expanded_chars: List[str], mapping: List[int], is_after_tag: List[bool], state: dict = None):
     if state is None:
         state = {
@@ -322,6 +359,25 @@ def expand_tokens(inner_tokens: List[dict], sql_defs: Dict[str, List[dict]], exp
                             close_end_idx = m
                             break
                     if close_end_idx != -1:
+                        body_tokens = inner_tokens[tag_end_idx + 1 : close_idx]
+                        if (
+                            tag_name in {"if", "when", "otherwise"}
+                            and _tokens_start_with_select(body_tokens)
+                            and _next_dynamic_body_starts_select(
+                                inner_tokens, close_end_idx + 1
+                            )
+                        ):
+                            # Adjacent mutually exclusive query branches are
+                            # invalid SQL when simply concatenated.  A
+                            # source-unmappable separator lets guest rules
+                            # parse each complete SELECT independently.  The
+                            # same synthetic token participates in all
+                            # protected-signature checks and can never be
+                            # written across the XML tag boundary.
+                            for char in ";\n":
+                                expanded_chars.append(char)
+                                mapping.append(inner_tokens[close_end_idx]["start"])
+                                is_after_tag.append(True)
                         # Punctuation after a dynamic block belongs to the
                         # surrounding MyBatis structure. Mark it as crossing
                         # a tag boundary so SQL rules such as comma-style do

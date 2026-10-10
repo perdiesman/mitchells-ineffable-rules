@@ -18,6 +18,7 @@ def _normalize_inline_expression(expression: str) -> str:
     ).strip()
 
 class ColumnLayoutRule(BaseRule):
+    embedded_dynamic_indent_safe = True
     commit_profile = True
     embedded_safe = True
     trellis_safe = True
@@ -522,6 +523,15 @@ class ColumnLayoutRule(BaseRule):
         index = bisect_left(dynamic_offsets, clause["keyword_start"])
         return index < len(dynamic_offsets) and dynamic_offsets[index] < clause["list_end"]
 
+    @staticmethod
+    def _is_fully_dynamic(clause: dict, dynamic_offsets: set[int]) -> bool:
+        return bool(
+            dynamic_offsets
+            and clause["keyword_start"] in dynamic_offsets
+            and max(clause["keyword_start"], clause["list_end"] - 1)
+            in dynamic_offsets
+        )
+
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         max_length = self.get_config_value(
             rule_config,
@@ -555,12 +565,22 @@ class ColumnLayoutRule(BaseRule):
         clauses = self._parse_clauses(content)
         lines = content.splitlines()
         
-        dynamic_offsets = sorted(rule_config.get("mybatis_dynamic_offsets", set()))
+        dynamic_offset_set = rule_config.get("mybatis_dynamic_offsets", set())
+        dynamic_offsets = sorted(dynamic_offset_set)
+        boundary_offsets = sorted(rule_config.get("mybatis_boundary_offsets", set()))
         top_level_clauses = [
             cl
             for cl in clauses
             if not cl.get("is_nested", False)
-            and not self._crosses_dynamic_content(cl, dynamic_offsets)
+            and (
+                not self._crosses_dynamic_content(cl, dynamic_offsets)
+                or (
+                    self._is_fully_dynamic(cl, dynamic_offset_set)
+                    and not self._crosses_dynamic_content(
+                        cl, boundary_offsets
+                    )
+                )
+            )
         ]
         for cl in top_level_clauses:
             keyword = cl["keyword"]
@@ -580,7 +600,10 @@ class ColumnLayoutRule(BaseRule):
             
             current_clause_text = content[cl["keyword_start"]:cl["list_end"]]
 
-            if rule_config.get("mybatis_dynamic_offsets"):
+            fully_dynamic = self._is_fully_dynamic(
+                cl, dynamic_offset_set
+            ) and not self._crosses_dynamic_content(cl, boundary_offsets)
+            if dynamic_offsets and not fully_dynamic:
                 if "\n" not in current_clause_text:
                     continue
                 inner_indent = indentation + (" " * indent_size)
@@ -605,7 +628,7 @@ class ColumnLayoutRule(BaseRule):
                         )
                     )
                 continue
-            
+
             if total_len <= max_length:
                 # Expect single-line format
                 expected = single_line_clause
@@ -678,12 +701,22 @@ class ColumnLayoutRule(BaseRule):
             base_indent_spaces = 0
             
         clauses = self._parse_clauses(content)
-        dynamic_offsets = sorted(rule_config.get("mybatis_dynamic_offsets", set()))
+        dynamic_offset_set = rule_config.get("mybatis_dynamic_offsets", set())
+        dynamic_offsets = sorted(dynamic_offset_set)
+        boundary_offsets = sorted(rule_config.get("mybatis_boundary_offsets", set()))
         top_level_clauses = [
             cl
             for cl in clauses
             if not cl.get("is_nested", False)
-            and not self._crosses_dynamic_content(cl, dynamic_offsets)
+            and (
+                not self._crosses_dynamic_content(cl, dynamic_offsets)
+                or (
+                    self._is_fully_dynamic(cl, dynamic_offset_set)
+                    and not self._crosses_dynamic_content(
+                        cl, boundary_offsets
+                    )
+                )
+            )
         ]
         if not top_level_clauses:
             return content
@@ -702,14 +735,14 @@ class ColumnLayoutRule(BaseRule):
                 continue
 
             current_clause_text = content[cl["keyword_start"]:cl["list_end"]]
-            embedded_reindent_only = bool(
-                rule_config.get("mybatis_dynamic_offsets")
-            )
+            fully_dynamic = self._is_fully_dynamic(
+                cl, dynamic_offset_set
+            ) and not self._crosses_dynamic_content(cl, boundary_offsets)
+            embedded_reindent_only = bool(dynamic_offsets) and not fully_dynamic
             if embedded_reindent_only and "\n" not in current_clause_text:
                 fixed_chunks.append(content[last_idx:cl["list_end"]])
                 last_idx = cl["list_end"]
                 continue
-                
             # Recursively format nested expressions (subqueries) first
             recursively_formatted_expressions = []
             recursively_formatted_indices = set()

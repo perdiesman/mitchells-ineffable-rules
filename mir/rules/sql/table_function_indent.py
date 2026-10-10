@@ -40,9 +40,9 @@ class TableFunctionIndentRule(BaseRule):
     trellis_safe = True
     rule_id = "IR-table-function-indent"
     description = (
-        "Indent multiline table-function arguments as table continuations, with "
-        "joined functions and their wrapped predicate expressions nested beneath "
-        "the JOIN."
+        "Keep a fitting table-function opener with its function name; otherwise "
+        "indent multiline arguments as table continuations, with joined functions "
+        "and their wrapped predicate expressions nested beneath the JOIN."
     )
     category = "queries"
     is_fixable = "yes"
@@ -64,6 +64,19 @@ class TableFunctionIndentRule(BaseRule):
             "FROM sample.items_for_period(\n        :period\n    ) AS item",
             "fixed",
             "FROM sample.items_for_period(\n    :period\n) AS item",
+        ),
+        RuleCase(
+            "short multiline table function",
+            (
+                "FROM generate_series\n"
+                "    (:period_start, :period_end, '15 MINUTES' :: interval) AS period"
+            ),
+            "fixed",
+            (
+                "FROM generate_series("
+                ":period_start, :period_end, '15 MINUTES'::interval"
+                ") AS period"
+            ),
         ),
         RuleCase(
             "multiline JOIN table function",
@@ -88,6 +101,109 @@ class TableFunctionIndentRule(BaseRule):
             ),
         ),
     ]
+
+    @staticmethod
+    def _compact_tokens(tokens: List[dict]) -> str:
+        parts: List[str] = []
+        previous = None
+        pending_space = False
+        for token in tokens:
+            if token["type"] == "COMMENT":
+                return ""
+            if token["type"] == "WHITESPACE":
+                pending_space = True
+                continue
+            value = token["value"]
+            no_space_before = (
+                token["type"] in {"COMMA", "DOT", "CAST"}
+                or (token["type"] == "PAREN" and value == ")")
+            )
+            no_space_after_previous = bool(
+                previous
+                and (
+                    previous["type"] in {"DOT", "CAST"}
+                    or (
+                        previous["type"] == "PAREN"
+                        and previous["value"] == "("
+                    )
+                )
+            )
+            if pending_space and parts and not no_space_before and not no_space_after_previous:
+                parts.append(" ")
+            parts.append(value)
+            pending_space = token["type"] == "COMMA"
+            previous = token
+        return "".join(parts).strip()
+
+    def _compact_edits(
+        self, content: str, rule_config: Dict[str, Any]
+    ) -> List[dict]:
+        tokens = tokenize_sql(content)
+        lines = content.splitlines()
+        max_length = self.get_config_value(
+            rule_config,
+            "max_length",
+            120,
+        )
+        boundaries = rule_config.get("mybatis_boundary_offsets", set())
+        edits = []
+        for open_index in table_function_parens(tokens):
+            close_index = find_matching_paren(tokens, open_index)
+            if close_index is None:
+                continue
+            opening = tokens[open_index]
+            closing = tokens[close_index]
+            whitespace_before = (
+                tokens[open_index - 1]
+                if open_index > 0
+                and tokens[open_index - 1]["type"] == "WHITESPACE"
+                else None
+            )
+            if not (
+                whitespace_before
+                and "\n" in whitespace_before["value"]
+            ):
+                continue
+            edit_start = (
+                whitespace_before["start"]
+                if whitespace_before
+                and "\n" in whitespace_before["value"]
+                else opening["start"]
+            )
+            if any(edit_start < offset < closing["end"] for offset in boundaries):
+                continue
+            inner_tokens = tokens[open_index + 1 : close_index]
+            nested_depth = 0
+            has_multiple_arguments = False
+            for token in inner_tokens:
+                if token["type"] == "PAREN":
+                    nested_depth += 1 if token["value"] == "(" else -1
+                elif token["type"] == "COMMA" and nested_depth == 0:
+                    has_multiple_arguments = True
+                    break
+            if not has_multiple_arguments:
+                continue
+            compact_inner = self._compact_tokens(inner_tokens)
+            if not compact_inner:
+                continue
+            replacement = "(" + compact_inner + ")"
+            line_start = content.rfind("\n", 0, edit_start) + 1
+            line_end = content.find("\n", closing["end"])
+            if line_end == -1:
+                line_end = len(content)
+            candidate = (
+                content[line_start:edit_start]
+                + replacement
+                + content[closing["end"] : line_end]
+            )
+            if len(candidate) <= max_length:
+                edits.append({
+                    "token": opening,
+                    "start": edit_start,
+                    "end": closing["end"],
+                    "replacement": replacement,
+                })
+        return edits
 
     def _expected_indents(self, content: str, indent_size: int) -> Dict[int, str]:
         tokens = tokenize_sql(content)
@@ -167,7 +283,16 @@ class TableFunctionIndentRule(BaseRule):
             fallbacks=[(IndentRule, "indent_size")],
         )
         lines = content.splitlines()
-        violations = []
+        violations = [
+            Violation(
+                self.rule_id,
+                item["token"]["line"],
+                "A table-function call that fits should remain on one line.",
+                [lines[item["token"]["line"] - 1]],
+                True,
+            )
+            for item in self._compact_edits(content, rule_config)
+        ]
         for line_number, expected in self._expected_indents(content, indent_size).items():
             line = lines[line_number - 1]
             actual = line[: len(line) - len(line.lstrip())]
@@ -184,6 +309,14 @@ class TableFunctionIndentRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        compact_edits = self._compact_edits(content, rule_config)
+        if compact_edits:
+            chars = list(content)
+            for item in sorted(
+                compact_edits, key=lambda edit: edit["start"], reverse=True
+            ):
+                chars[item["start"] : item["end"]] = list(item["replacement"])
+            content = "".join(chars)
         indent_size = self.get_config_value(
             rule_config,
             "indent_size",

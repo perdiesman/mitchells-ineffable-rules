@@ -5,6 +5,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 class FromMultiRule(BaseRule):
     commit_profile = True
     embedded_safe = True
+    embedded_dynamic_indent_safe = True
     trellis_safe = True
     rule_id = "IR-from-multi"
     description = "Multi-table or JOINed FROM entries should be formatted with one entry per line, indented at 4 spaces."

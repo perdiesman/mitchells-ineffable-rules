@@ -1712,6 +1712,86 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_commit_profile_expands_long_simple_case(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="summary">\n'
+            '        SELECT\n'
+            '                                    CASE WHEN (sum(override_count) IS NULL) THEN false ELSE true END AS has_override\n'
+            '        FROM sample_summary\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '                                    CASE WHEN (sum(override_count) IS NULL) THEN false ELSE true END AS has_override',
+            '                                    CASE\n'
+            '                                        WHEN (sum(override_count) IS NULL) THEN false\n'
+            '                                        ELSE true\n'
+            '                                    END AS has_override',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-mybatis-sql", "IR-case"]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_formats_adjacent_complete_if_queries(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="branchQueries">\n'
+            '        WITH selected_item AS (\n'
+            '            <if test="current">\n'
+            '                SELECT item_id, owner_id, item_name\n'
+            '                FROM current_item item JOIN sample_owner owner ON owner.owner_id = item.owner_id\n'
+            '            </if>\n'
+            '            <if test="archived">\n'
+            '                SELECT item_id, owner_id, item_name\n'
+            '                FROM archived_item item JOIN sample_owner owner ON owner.owner_id = item.owner_id\n'
+            '            </if>\n'
+            '        )\n'
+            '        SELECT * FROM selected_item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="branchQueries">\n'
+            '        WITH selected_item AS (\n'
+            '            <if test="current">\n'
+            '                SELECT item_id, owner_id, item_name\n'
+            '                FROM\n'
+            '                    current_item item\n'
+            '                    JOIN sample_owner owner ON owner.owner_id = item.owner_id\n'
+            '            </if>\n'
+            '            <if test="archived">\n'
+            '                SELECT item_id, owner_id, item_name\n'
+            '                FROM\n'
+            '                    archived_item item\n'
+            '                    JOIN sample_owner owner ON owner.owner_id = item.owner_id\n'
+            '            </if>\n'
+            '        )\n'
+            '        SELECT * FROM selected_item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_conflict_update_formats_set_assignments(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
