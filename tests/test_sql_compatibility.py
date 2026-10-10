@@ -1646,6 +1646,16 @@ class TestSqlCompatibility(unittest.TestCase):
         )
         self.assertEqual(protected_sql_signature(fixed), protected_sql_signature(content))
 
+    def test_json_extraction_parentheses_are_preserved_before_cast(self):
+        source = (
+            "SELECT (payload ->> 'itemId')::INTEGER, "
+            "(payload #>> '{owner,id}')::INTEGER FROM sample_item;"
+        )
+        rule = ParenSingleRule()
+
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+
     def test_protected_signature_allows_formatting_inside_dollar_quoted_code(self):
         original = "CREATE FUNCTION sample() RETURNS void AS $$ BEGIN RETURN; END; $$ LANGUAGE plpgsql;"
         formatted = "CREATE FUNCTION sample() RETURNS void AS $$ BEGIN\n    RETURN;\nEND; $$ LANGUAGE plpgsql;"

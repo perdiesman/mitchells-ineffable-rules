@@ -94,3 +94,7 @@ SELECT item_id FROM sample_item WHERE NOT (enabled AND visible);
 ```sql
 SELECT CASE WHEN (sum(item_count) IS NULL) THEN false ELSE true END FROM sample_item;
 ```
+
+```sql
+SELECT (payload ->> 'itemId')::INTEGER FROM sample_item;
+```

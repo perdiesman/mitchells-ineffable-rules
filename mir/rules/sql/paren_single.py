@@ -51,6 +51,7 @@ class ParenSingleRule(BaseRule):
         "INSERT INTO sample_item (item_id) VALUES (:item_id) ON CONFLICT (item_id) DO NOTHING;",
         "SELECT item_id FROM sample_item WHERE NOT (enabled AND visible);",
         "SELECT CASE WHEN (sum(item_count) IS NULL) THEN false ELSE true END FROM sample_item;",
+        "SELECT (payload ->> 'itemId')::INTEGER FROM sample_item;",
     ]
 
     def _is_simple_atom(self, tokens: List[dict]) -> bool:
@@ -61,7 +62,10 @@ class ParenSingleRule(BaseRule):
                 index in boolean_indices
                 or (
                     tok["type"] == "OPERATOR"
-                    and tok["value"] in ("+", "-", "*", "/", "%", "=", "<>", "<=", ">=", "!=", "<", ">", "||")
+                    and tok["value"] in (
+                        "+", "-", "*", "/", "%", "=", "<>", "<=", ">=",
+                        "!=", "<", ">", "||", "->", "->>", "#>", "#>>",
+                    )
                 )
             ):
                 return False
