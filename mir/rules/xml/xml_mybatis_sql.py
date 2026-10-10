@@ -1517,6 +1517,122 @@ def join_case_source_edits(
     return edits
 
 
+def between_delimiter_source_edits(
+    sql_text: str,
+    mapping: List[int],
+    content: str,
+    source_range: tuple[int, int],
+    dynamic_ranges: List[tuple[int, int, int]],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Keep a mapped BETWEEN delimiter consistent with physical line length.
+
+    Embedded SQL rules run sequentially while their source map necessarily
+    describes the original XML.  An earlier indentation edit can therefore
+    make a later WHERE rule measure a stale guest offset and compact a range
+    predicate that is still too long in the physical mapper.  Decide this
+    whitespace directly from the original mapping and protect even canonical
+    no-op spans from later guest edits.
+    """
+    from mir.rules.sql.line_length import LineLengthRule
+    from mir.rules.sql.sql_utils import (
+        find_between_delimiter_indices,
+        get_token_depths,
+        source_text_length,
+        tokenize_sql,
+    )
+
+    source_start, source_end = source_range
+    max_length = LineLengthRule().get_config_value(
+        rule_config, "max_length", default_value=120
+    )
+    tokens = tokenize_sql(sql_text)
+    depths = get_token_depths(tokens)
+    edits = []
+    for depth in set(depths):
+        for delimiter_index in find_between_delimiter_indices(
+            tokens, depths, depth
+        ):
+            if delimiter_index == 0:
+                continue
+            whitespace = tokens[delimiter_index - 1]
+            delimiter = tokens[delimiter_index]
+            if whitespace["type"] != "WHITESPACE":
+                continue
+            guest_start = whitespace["start"]
+            guest_end = whitespace["end"]
+            if not (0 <= guest_start < guest_end <= len(mapping)):
+                continue
+            if any(
+                mapping[index] - mapping[index - 1] != 1
+                for index in range(guest_start + 1, guest_end)
+            ):
+                continue
+            mapped_start = mapping[guest_start]
+            mapped_end = mapping[guest_end - 1] + 1
+            if not (
+                source_start <= mapped_start <= mapped_end <= source_end
+            ):
+                continue
+
+            where_index = next(
+                (
+                    index
+                    for index in range(delimiter_index - 1, -1, -1)
+                    if depths[index] == depth
+                    and tokens[index]["type"] == "KEYWORD"
+                    and tokens[index]["value"].upper() == "WHERE"
+                ),
+                None,
+            )
+            if where_index is None:
+                continue
+            where_source = mapping[tokens[where_index]["start"]]
+            if not any(
+                range_start < where_source <= mapped_start < range_end
+                for range_start, range_end, _ in dynamic_ranges
+            ):
+                continue
+            line_start = content.rfind("\n", 0, where_source) + 1
+            line_end = content.find("\n", where_source)
+            if line_end == -1:
+                line_end = len(content)
+            source_line = content[line_start:line_end]
+            source_indent = source_line[: len(source_line) - len(source_line.lstrip())]
+
+            # Measure the compact physical source line. XML entities consume
+            # their encoded width, which source_text_length accounts for.
+            clause_end = len(tokens)
+            for index in range(delimiter_index + 1, len(tokens)):
+                token = tokens[index]
+                if depths[index] < depth:
+                    clause_end = index
+                    break
+                if (
+                    depths[index] == depth
+                    and token["type"] == "KEYWORD"
+                    and token["value"].upper() in {
+                        "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET",
+                        "RETURNING", "UNION", "INTERSECT", "EXCEPT",
+                    }
+                ):
+                    clause_end = index
+                    break
+            compact_body = "".join(
+                " " if token["type"] == "WHITESPACE" else token["value"]
+                for token in tokens[where_index:clause_end]
+            ).strip()
+            replacement = " "
+            if (
+                len(source_indent)
+                + source_text_length(compact_body, rule_config)
+                > max_length
+            ):
+                replacement = "\n" + source_indent + "    "
+            edits.append((mapped_start, mapped_end, replacement))
+    return edits
+
+
 def dynamic_body_indent_source_edits(
     content: str,
     source_range: tuple[int, int],
@@ -2391,6 +2507,14 @@ class XmlMybatisSqlRule(BaseRule):
                     content,
                     (el["start_offset"], el["end_offset"]),
                 )
+                between_edits = between_delimiter_source_edits(
+                    sql_text,
+                    mapping,
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    dynamic_indent_ranges,
+                    inner_config,
+                )
                 changed_post_choose_edits = [
                     edit
                     for edit in post_choose_edits
@@ -2406,6 +2530,24 @@ class XmlMybatisSqlRule(BaseRule):
                         "message": (
                             "Shared JOIN and clause lines after <choose> must "
                             "align with their enclosing query."
+                        ),
+                        "is_fixable": True,
+                    })
+                changed_between_edits = [
+                    edit
+                    for edit in between_edits
+                    if content[edit[0]:edit[1]] != edit[2]
+                ]
+                if changed_between_edits:
+                    first_start = min(
+                        start for start, _, _ in changed_between_edits
+                    )
+                    violations.append({
+                        "rule_id": "IR-where-multi",
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "[MyBatis SQL: IR-where-multi] Keep BETWEEN "
+                            "delimiter layout within the physical line limit."
                         ),
                         "is_fixable": True,
                     })
@@ -2848,6 +2990,14 @@ class XmlMybatisSqlRule(BaseRule):
                     content,
                     (el["start_offset"], el["end_offset"]),
                 )
+                between_edits = between_delimiter_source_edits(
+                    sql_text,
+                    mapping,
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    dynamic_indent_ranges,
+                    inner_config,
+                )
                 dynamic_body_edits = dynamic_body_indent_source_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
@@ -2871,6 +3021,7 @@ class XmlMybatisSqlRule(BaseRule):
                 layout_edits = (
                     post_choose_edits
                     + join_case_edits
+                    + between_edits
                     + dynamic_body_edits
                     + top_level_clause_edits
                     + keyword_case_edits
@@ -2980,7 +3131,7 @@ class XmlMybatisSqlRule(BaseRule):
                 protected_source_indent_spans = [
                     (start, end)
                     for start, end, _ in post_choose_edits + dynamic_body_edits
-                    + join_case_edits + top_level_clause_edits
+                    + join_case_edits + between_edits + top_level_clause_edits
                     + dynamic_projection_edits
                 ] + [
                     (start, end)
@@ -3008,6 +3159,7 @@ class XmlMybatisSqlRule(BaseRule):
                     for edit in (
                         post_choose_edits
                         + join_case_edits
+                        + between_edits
                         + dynamic_body_edits
                         + top_level_clause_edits
                         + subquery_source_edits

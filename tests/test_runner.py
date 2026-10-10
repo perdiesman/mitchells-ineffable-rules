@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from mir.engine.config import Config
 from mir.engine.runner import process_document, remap_selected_lines, run_linter
 from mir.rules.xml.xml_mybatis_sql import (
+    between_delimiter_source_edits,
     get_mybatis_protected_signatures,
     join_case_source_edits,
 )
@@ -2363,6 +2364,34 @@ class TestRunnerIntegration(unittest.TestCase):
         fixed = apply_edits(source)
         self.assertEqual(fixed, expected)
         self.assertEqual(apply_edits(fixed), expected)
+
+    def test_xml_mybatis_between_layout_uses_physical_source_width(self):
+        indent = " " * 20
+        source = (
+            indent
+            + "WHERE sample.recorded_at BETWEEN #{rangeStart} AND #{rangeEnd}"
+        )
+        sql_text = source
+        mapping = list(range(len(source)))
+        expected = source.replace(" AND #{rangeEnd}", "\n" + indent + "    AND #{rangeEnd}")
+
+        def apply_edits(content):
+            chars = list(content)
+            for start, end, replacement in sorted(
+                between_delimiter_source_edits(
+                    sql_text,
+                    mapping,
+                    content,
+                    (0, len(content)),
+                    [(0, len(content), len(indent))],
+                    {"max_length": 70},
+                ),
+                reverse=True,
+            ):
+                chars[start:end] = list(replacement)
+            return "".join(chars)
+
+        self.assertEqual(apply_edits(source), expected)
 
     def test_xml_mybatis_preserves_dynamic_in_subquery_layout(self):
         xml_content = (
