@@ -1669,6 +1669,23 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed, source)
         self.assertEqual(protected_sql_signature(fixed), protected_sql_signature(source))
 
+    def test_nested_where_layout_deduplicates_shared_whitespace_edits(self):
+        source = (
+            "SELECT event_id FROM sample_event\n"
+            "WHERE\n"
+            "    (event_start >= :start AND event_start <=\n"
+            "    :end) OR\n"
+            "    (event_end IS NOT NULL AND (event_end >= :start\n"
+            "    AND event_end <= :end)) OR\n"
+            "    (event_end IS NULL AND now() <= :end);"
+        )
+        fixed = WhereMultiRule().fix(source, "generic.sql", {})
+
+        self.assertEqual(protected_sql_signature(fixed), protected_sql_signature(source))
+        self.assertEqual(fixed.count(":start"), 2)
+        self.assertEqual(fixed.count(":end"), 3)
+        self.assertEqual(WhereMultiRule().fix(fixed, "generic.sql", {}), fixed)
+
     def test_protected_signature_allows_formatting_inside_dollar_quoted_code(self):
         original = "CREATE FUNCTION sample() RETURNS void AS $$ BEGIN RETURN; END; $$ LANGUAGE plpgsql;"
         formatted = "CREATE FUNCTION sample() RETURNS void AS $$ BEGIN\n    RETURN;\nEND; $$ LANGUAGE plpgsql;"

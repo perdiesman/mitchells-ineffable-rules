@@ -278,13 +278,15 @@ class ParenMultiRule(BaseRule):
         if not offending:
             return content
             
-        edits = []
+        edits = {}
         for item in offending:
-            edits.append((item["ws_start"], item["ws_end"], item["replacement"]))
+            edits[(item["ws_start"], item["ws_end"])] = item["replacement"]
             
-        edits.sort(key=lambda x: x[0], reverse=True)
+        edits = sorted(
+            edits.items(), key=lambda item: item[0][0], reverse=True
+        )
         chars = list(content)
-        for start, end, new_text in edits:
+        for (start, end), new_text in edits:
             chars[start:end] = list(new_text)
             
         return "".join(chars)
