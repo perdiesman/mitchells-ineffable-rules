@@ -627,6 +627,7 @@ class XmlIndentRule(BaseRule):
                         is_logical_continuation = first_word in {"AND", "OR"}
                         open_parenthesis_depth = 0
                         has_local_logical_clause = False
+                        local_logical_indent = None
                         if is_logical_continuation:
                             opening_tag_end = content.find(
                                 ">", dynamic_parent["token"]["start"]
@@ -640,6 +641,35 @@ class XmlIndentRule(BaseRule):
                                     and item["value"].upper() in {"WHERE", "ON", "HAVING"}
                                     for item in prefix_tokens
                                 )
+                                if has_local_logical_clause:
+                                    for prior_line in reversed(
+                                        content[
+                                            opening_tag_end + 1:text_line_start
+                                        ].splitlines()
+                                    ):
+                                        prior_body = prior_line.lstrip(" \t")
+                                        if not prior_body or prior_body.startswith("<"):
+                                            continue
+                                        prior_indent = prior_line[
+                                            : len(prior_line) - len(prior_body)
+                                        ]
+                                        prior_has_clause = any(
+                                            item["type"] == "KEYWORD"
+                                            and item["value"].upper()
+                                            in {"WHERE", "ON", "HAVING"}
+                                            for item in tokenize_sql(prior_body)
+                                        )
+                                        prior_word = prior_body.split(None, 1)[0].upper()
+                                        local_logical_indent = (
+                                            prior_indent + " " * indent_size
+                                            if prior_word in {"WHERE", "HAVING"}
+                                            or (
+                                                prior_has_clause
+                                                and prior_word != "ON"
+                                            )
+                                            else prior_indent
+                                        )
+                                        break
                                 open_parenthesis_depth = sum(
                                     1 if item["value"] == "(" else -1
                                     for item in prefix_tokens
@@ -653,14 +683,29 @@ class XmlIndentRule(BaseRule):
                             or (
                                 is_logical_continuation
                                 and text_line not in case_continuation_lines
-                                and open_parenthesis_depth <= 0
-                                and not has_local_logical_clause
-                                and actual_indent != minimum_indent
+                                and (
+                                    (
+                                        has_local_logical_clause
+                                        and local_logical_indent is not None
+                                        and actual_indent != local_logical_indent
+                                    )
+                                    or (
+                                        not has_local_logical_clause
+                                        and open_parenthesis_depth <= 0
+                                        and actual_indent != minimum_indent
+                                    )
+                                )
                             )
                             or malformed_dynamic_indent
                             or len(actual_indent) < len(minimum_indent)
                         ):
-                            explicit_expected_indent[text_line] = minimum_indent
+                            explicit_expected_indent[text_line] = (
+                                local_logical_indent
+                                if is_logical_continuation
+                                and has_local_logical_clause
+                                and local_logical_indent is not None
+                                else minimum_indent
+                            )
 
             # Track depth transitions
             if t["type"] == "TAG_OPEN_START":

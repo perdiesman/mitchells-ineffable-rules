@@ -1609,6 +1609,42 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_dynamic_nested_where_aligns_boolean_conditions(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <update id="enableItems">\n'
+            '        UPDATE sample_item item\n'
+            '        SET enabled = TRUE\n'
+            '        WHERE\n'
+            '            <if test="restricted">\n'
+            '                EXISTS (\n'
+            '                    SELECT 1\n'
+            '                    FROM sample_role role\n'
+            '                    WHERE\n'
+            '                        role.item_id = item.id\n'
+            '                    AND role.role_name = #{roleName}\n'
+            '                )\n'
+            '                OR\n'
+            '            </if>\n'
+            '            item.owner_name IN (#{ownerName})\n'
+            '    </update>\n'
+            '</mapper>\n'
+        )
+        expected = xml_content.replace(
+            '                    AND role.role_name = #{roleName}\n',
+            '                        AND role.role_name = #{roleName}\n',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_does_not_merge_optional_range_bounds(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
