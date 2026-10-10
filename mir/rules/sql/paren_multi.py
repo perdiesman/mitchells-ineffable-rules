@@ -56,6 +56,7 @@ class ParenMultiRule(BaseRule):
         for i, tok in enumerate(tokens):
             if tok["type"] == "PAREN" and tok["value"] == "(":
                 in_where_or_on = False
+                owning_clause = None
                 for idx in range(i - 1, -1, -1):
                     t = tokens[idx]
                     if depths[idx] == depths[i]:
@@ -63,6 +64,7 @@ class ParenMultiRule(BaseRule):
                             break
                         if t["type"] == "KEYWORD" and t["value"].upper() in ("WHERE", "ON"):
                             in_where_or_on = True
+                            owning_clause = t["value"].upper()
                             break
                         if t["type"] == "KEYWORD" and t["value"].upper() in ("SELECT", "FROM", "GROUP", "ORDER", "LIMIT", "WITH"):
                             break
@@ -99,6 +101,33 @@ class ParenMultiRule(BaseRule):
                         paren_indent += char
                     else:
                         break
+
+                previous_active_idx = next(
+                    (
+                        index
+                        for index in range(i - 1, -1, -1)
+                        if tokens[index]["type"]
+                        not in {"WHITESPACE", "COMMENT"}
+                    ),
+                    None,
+                )
+                if (
+                    not line_prefix.strip()
+                    and previous_active_idx is not None
+                    and tokens[previous_active_idx]["type"] == "KEYWORD"
+                    and tokens[previous_active_idx]["value"].upper()
+                    in {"AND", "OR"}
+                ):
+                    boolean_line_start = content.rfind(
+                        "\n", 0, tokens[previous_active_idx]["start"]
+                    ) + 1
+                    boolean_prefix = content[
+                        boolean_line_start:tokens[previous_active_idx]["start"]
+                    ]
+                    paren_indent = boolean_prefix[
+                        : len(boolean_prefix)
+                        - len(boolean_prefix.lstrip(" \t"))
+                    ]
                         
                 expected_content_indent = paren_indent + "    "
                 expected_close_indent = paren_indent
@@ -108,7 +137,8 @@ class ParenMultiRule(BaseRule):
                     for item in tokens[i:close_idx + 1]
                 )
                 if (
-                    not any(
+                    owning_clause != "ON"
+                    and not any(
                         item["type"] == "COMMENT"
                         for item in tokens[i:close_idx + 1]
                     )

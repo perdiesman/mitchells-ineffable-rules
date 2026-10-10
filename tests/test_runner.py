@@ -3628,6 +3628,110 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_short_filter_where_predicate_compacts_to_one_line(self):
+        sql_content = (
+            "SELECT\n"
+            "    count(*) FILTER (\n"
+            "        WHERE activity.state = 'active'\n"
+            "          AND activity.pid != pg_backend_pid()\n"
+            "    ) AS active_query_count\n"
+            "FROM pg_stat_activity activity;\n"
+        )
+        expected = sql_content.replace(
+            "activity.state = 'active'\n          AND",
+            "activity.state = 'active' AND",
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_nested_filter_parenthesis_tracks_its_expression_indent(self):
+        sql_content = (
+            "SELECT\n"
+            "    coalesce(\n"
+            "        max(value) FILTER (\n"
+            "        WHERE active AND current\n"
+            "    ),\n"
+            "        0\n"
+            "    ) AS current_value\n"
+            "FROM sample_record;\n"
+        )
+        expected = sql_content.replace(
+            "        WHERE active AND current\n    ),",
+            "            WHERE active AND current\n        ),",
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_dynamic_where_formats_parenthesized_or_arms(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="boundedRecords">\n'
+            '        SELECT record_id\n'
+            '        FROM sample_record\n'
+            '        <if test="bounded">\n'
+            '            WHERE\n'
+            '            (\n'
+            '                record_table.record_start &gt;= #{start}\n'
+            '                AND record_table.record_start &lt;= #{end}\n'
+            '            )\n'
+            '                OR\n'
+            '            (\n'
+            '            record_table.extraordinarily_long_record_completion_timestamp IS NOT NULL\n'
+            '                AND record_table.extraordinarily_long_record_completion_timestamp BETWEEN #{start} AND #{end}\n'
+            '            )\n'
+            '        </if>\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="boundedRecords">\n'
+            '        SELECT record_id\n'
+            '        FROM sample_record\n'
+            '        <if test="bounded">\n'
+            '            WHERE\n'
+            '                record_table.record_start BETWEEN #{start} AND #{end}\n'
+            '                OR (\n'
+            '                    record_table.extraordinarily_long_record_completion_timestamp IS NOT NULL\n'
+            '                    AND record_table.extraordinarily_long_record_completion_timestamp BETWEEN #{start} AND #{end}\n'
+            '                )\n'
+            '        </if>\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(
+            config, first.content, "generic.xml", "xml"
+        )
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_short_update_clauses_compact_when_expressions_are_single_line(self):
         sql_content = (
             "UPDATE sample_record\n"

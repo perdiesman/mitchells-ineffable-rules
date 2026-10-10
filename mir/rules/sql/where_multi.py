@@ -139,24 +139,130 @@ class WhereMultiRule(BaseRule):
                 )
                 if is_filter_where:
                     filter_token = tokens[previous_active[1]]
+                    filter_open_idx = previous_active[0]
                     filter_line_start = content.rfind(
                         "\n", 0, filter_token["start"]
                     ) + 1
                     filter_line = content[filter_line_start:filter_token["start"]]
                     filter_indent = len(filter_line) - len(filter_line.lstrip())
+                    filter_inner_indent = " " * (filter_indent + 4)
                     filter_where_single = "".join(
                         " " if token["type"] == "WHITESPACE" else token["value"]
                         for token in tokens[i:clause_end]
                     ).strip()
+                    filter_group_single = f"FILTER ({filter_where_single})"
+                    if (
+                        "\n" not in content[
+                            tokens[filter_open_idx]["start"]:
+                            tokens[clause_end]["end"]
+                        ]
+                        and not any(
+                            token["type"] == "COMMENT"
+                            for token in tokens[filter_open_idx:clause_end]
+                        )
+                        and source_text_length(
+                            filter_line + filter_group_single,
+                            rule_config,
+                        ) <= max_len
+                    ):
+                        for index in range(filter_open_idx + 1, clause_end):
+                            item = tokens[index]
+                            if item["type"] != "WHITESPACE":
+                                continue
+                            replacement = (
+                                ""
+                                if index in {filter_open_idx + 1, clause_end - 1}
+                                else " "
+                            )
+                            if item["value"] != replacement:
+                                violations.append({
+                                    "token": item,
+                                    "ws_start": item["start"],
+                                    "ws_end": item["end"],
+                                    "replacement": replacement,
+                                })
+                        continue
+                    where_whitespace = (
+                        tokens[i - 1]
+                        if i > 0 and tokens[i - 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    expected_where_whitespace = "\n" + filter_inner_indent
+                    if (
+                        where_whitespace is None
+                        or where_whitespace["value"]
+                        != expected_where_whitespace
+                    ):
+                        violations.append({
+                            "token": tok,
+                            "ws_start": (
+                                where_whitespace["start"]
+                                if where_whitespace
+                                else tok["start"]
+                            ),
+                            "ws_end": tok["start"],
+                            "replacement": expected_where_whitespace,
+                        })
+                    if (
+                        clause_end < n
+                        and tokens[clause_end]["type"] == "PAREN"
+                        and tokens[clause_end]["value"] == ")"
+                    ):
+                        close_whitespace = (
+                            tokens[clause_end - 1]
+                            if tokens[clause_end - 1]["type"]
+                            == "WHITESPACE"
+                            else None
+                        )
+                        expected_close_whitespace = (
+                            "\n" + " " * filter_indent
+                        )
+                        if (
+                            close_whitespace is None
+                            or close_whitespace["value"]
+                            != expected_close_whitespace
+                        ):
+                            violations.append({
+                                "token": tokens[clause_end],
+                                "ws_start": (
+                                    close_whitespace["start"]
+                                    if close_whitespace
+                                    else tokens[clause_end]["start"]
+                                ),
+                                "ws_end": tokens[clause_end]["start"],
+                                "replacement": expected_close_whitespace,
+                            })
                     if (
                         filter_indent + 4
                         + source_text_length(filter_where_single, rule_config)
                         <= max_len
                     ):
                         # FILTER owns its required WHERE parentheses. When its
-                        # predicate fits on the indented inner line, line-length
-                        # formatting may expand the call without turning the
-                        # predicate itself into a multiline WHERE clause.
+                        # predicate fits on the indented inner line, give it one
+                        # canonical compact form rather than preserving legacy
+                        # continuation alignment inside the function call.
+                        last_active_idx = next(
+                            (
+                                index
+                                for index in range(clause_end - 1, i, -1)
+                                if tokens[index]["type"]
+                                not in {"WHITESPACE", "COMMENT"}
+                            ),
+                            None,
+                        )
+                        if last_active_idx is not None:
+                            for index in range(i + 1, last_active_idx):
+                                item = tokens[index]
+                                if (
+                                    item["type"] == "WHITESPACE"
+                                    and item["value"] != " "
+                                ):
+                                    violations.append({
+                                        "token": item,
+                                        "ws_start": item["start"],
+                                        "ws_end": item["end"],
+                                        "replacement": " ",
+                                    })
                         continue
                 for delimiter_idx in find_between_delimiter_indices(
                     tokens, depths, outer_depth, i + 1, clause_end
@@ -342,6 +448,37 @@ class WhereMultiRule(BaseRule):
                                 "ws_end": t["start"],
                                 "replacement": expected_replacement
                             })
+
+                        next_active_idx = next(
+                            (
+                                index
+                                for index in range(actual_idx + 1, clause_end)
+                                if tokens[index]["type"]
+                                not in {"WHITESPACE", "COMMENT"}
+                            ),
+                            None,
+                        )
+                        if (
+                            next_active_idx is not None
+                            and tokens[next_active_idx]["type"] == "PAREN"
+                            and tokens[next_active_idx]["value"] == "("
+                        ):
+                            whitespace_after = (
+                                tokens[next_active_idx - 1]
+                                if tokens[next_active_idx - 1]["type"]
+                                == "WHITESPACE"
+                                else None
+                            )
+                            if (
+                                whitespace_after is not None
+                                and whitespace_after["value"] != " "
+                            ):
+                                violations.append({
+                                    "token": tokens[next_active_idx],
+                                    "ws_start": whitespace_after["start"],
+                                    "ws_end": whitespace_after["end"],
+                                    "replacement": " ",
+                                })
 
                         next_boolean = min(
                             (index for index in boolean_indices if index > actual_idx),

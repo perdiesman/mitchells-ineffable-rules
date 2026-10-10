@@ -727,6 +727,9 @@ def dynamic_sql_indent_source_edits(
     """Map source-contiguous SQL indentation fixes without a text diff."""
     from mir.rules.sql.from_multi import FromMultiRule
     from mir.rules.sql.join_on_multi import JoinOnMultiRule
+    from mir.rules.sql.paren_multi import ParenMultiRule
+    from mir.rules.sql.sql_utils import tokenize_sql
+    from mir.rules.sql.where_multi import WhereMultiRule
 
     edits = []
     source_content = rule_config.get("original_xml", "")
@@ -734,7 +737,32 @@ def dynamic_sql_indent_source_edits(
         "source_range", (0, len(source_content))
     )[0]
     items = []
-    for rule in (FromMultiRule(), JoinOnMultiRule()):
+    sql_tokens = tokenize_sql(sql_text)
+    dynamic_offsets = rule_config.get("mybatis_dynamic_offsets", set())
+    candidate_rules = (
+        FromMultiRule(),
+        JoinOnMultiRule(),
+        WhereMultiRule(),
+        ParenMultiRule(),
+    )
+    if rule_config.get("_disable_all"):
+        enabled = set(rule_config.get("_rules_to_enable", []))
+        all_configs = rule_config.get("_all_configs", {})
+        candidate_rules = tuple(
+            rule
+            for rule in candidate_rules
+            if isinstance(rule, (FromMultiRule, JoinOnMultiRule))
+            or rule.rule_id in enabled
+            or f"sql:{rule.rule_id}" in enabled
+            or (
+                isinstance(all_configs.get(rule.rule_id), dict)
+                and all_configs[rule.rule_id].get("enabled") is True
+            )
+        )
+    disabled = set(rule_config.get("_rules_to_disable", []))
+    for rule in candidate_rules:
+        if rule.rule_id in disabled or f"sql:{rule.rule_id}" in disabled:
+            continue
         active_config = rule_config
         if isinstance(rule, FromMultiRule):
             active_config = dict(rule_config)
@@ -792,6 +820,27 @@ def dynamic_sql_indent_source_edits(
             # A JOIN synthesized beyond a dynamic branch must not force its
             # one-relation FROM to expand. A derived-table opener is different:
             # its continuation is physically present in the same text body.
+            continue
+        if (
+            isinstance(source_rule, WhereMultiRule)
+            and item["token"]["start"]
+            in dynamic_offsets
+            and max(
+                (
+                    token["start"]
+                    for token in sql_tokens
+                    if token["start"] <= item["token"]["start"]
+                    and token["type"] == "KEYWORD"
+                    and token["value"].upper() == "WHERE"
+                ),
+                default=-1,
+            ) not in dynamic_offsets
+        ):
+            # The XML indentation rule owns a boolean whose token begins just
+            # after an opening dynamic tag. In source form the tag represents
+            # the guest SQL line break, so mapping WHERE's synthetic newline
+            # back into the tag body would over-indent the element and cycle
+            # with the structural XML layout.
             continue
         dynamic_indent = max(
             (
@@ -1899,6 +1948,7 @@ def between_delimiter_source_edits(
     from mir.rules.sql.line_length import LineLengthRule
     from mir.rules.sql.sql_utils import (
         find_between_delimiter_indices,
+        find_boolean_operator_indices,
         get_token_depths,
         source_text_length,
         tokenize_sql,
@@ -1980,9 +2030,28 @@ def between_delimiter_source_edits(
                 ):
                     clause_end = index
                     break
+            boolean_indices = find_boolean_operator_indices(
+                tokens, depths, depth, where_index + 1, clause_end
+            )
+            condition_start = max(
+                (
+                    index + 1
+                    for index in boolean_indices
+                    if index < delimiter_index
+                ),
+                default=where_index + 1,
+            )
+            condition_end = min(
+                (
+                    index
+                    for index in boolean_indices
+                    if index > delimiter_index
+                ),
+                default=clause_end,
+            )
             compact_body = "".join(
                 " " if token["type"] == "WHITESPACE" else token["value"]
-                for token in tokens[where_index:clause_end]
+                for token in tokens[condition_start:condition_end]
             ).strip()
             replacement = " "
             if (
@@ -2964,6 +3033,52 @@ class XmlMybatisSqlRule(BaseRule):
                         ),
                         "is_fixable": True,
                     })
+                mapped_indent_config = dict(inner_config)
+                mapped_indent_config.update({
+                    "ignored_comma_offsets": ignored_comma_offsets,
+                    "mybatis_dynamic_offsets": {
+                        idx
+                        for idx, after_tag in enumerate(is_after_tag)
+                        if after_tag
+                    },
+                    "mybatis_foreach_offsets": mapped_offsets_in_ranges(
+                        mapping, foreach_ranges
+                    ),
+                    "mybatis_boundary_offsets": boundary_offsets,
+                    "mybatis_source_mapping": mapping,
+                    "base_indent": base_indent,
+                    "tag_ranges": tag_ranges,
+                    "original_xml": content,
+                    "source_range": (
+                        el["start_offset"], el["end_offset"]
+                    ),
+                })
+                mapped_indent_edits = dynamic_sql_indent_source_edits(
+                    sql_text,
+                    mapping,
+                    tag_ranges,
+                    dynamic_indent_ranges,
+                    mapped_indent_config,
+                )
+                changed_mapped_indent_edits = [
+                    edit
+                    for edit in mapped_indent_edits
+                    if content[edit[0]:edit[1]] != edit[2]
+                ]
+                if changed_mapped_indent_edits:
+                    first_start = min(
+                        start
+                        for start, _, _ in changed_mapped_indent_edits
+                    )
+                    violations.append({
+                        "rule_id": self.rule_id,
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "Source-mapped SQL continuations must align with "
+                            "their owning clause."
+                        ),
+                        "is_fixable": True,
+                    })
                 top_level_clause_edits = top_level_clause_source_edits(
                     sql_text,
                     mapping,
@@ -3707,6 +3822,11 @@ class XmlMybatisSqlRule(BaseRule):
                     if bridge_state["mybatis_dynamic_indent_ranges"]
                     else set()
                 )
+                # WHERE layout is applied through exact source-mapped edits
+                # above. Running the embedded copy as well can express the
+                # same logical newline at both sides of a source-map boundary,
+                # producing doubled blank lines in otherwise static SQL.
+                excluded_guest_rule_ids.add("IR-where-multi")
                 if has_unresolved_include(el, sql_defs):
                     excluded_guest_rule_ids.add("IR-paren-single")
                 if keyword_case_edits:
