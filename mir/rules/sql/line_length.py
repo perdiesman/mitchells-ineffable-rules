@@ -1,6 +1,25 @@
+import re
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.indent import IndentRule
+
+
+_BULK_INSERT_LINE = re.compile(
+    r"^\s*INSERT\s+INTO\b.+\bVALUES\s*\(", re.IGNORECASE
+)
+
+
+def bulk_insert_lines(content: str, threshold: int) -> set[int]:
+    """Return repeated one-row data statements exempt from layout expansion."""
+    if threshold <= 0:
+        return set()
+    candidates = {
+        line_number
+        for line_number, line in enumerate(content.splitlines(), start=1)
+        if _BULK_INSERT_LINE.match(line)
+    }
+    return candidates if len(candidates) >= threshold else set()
+
 
 def wrap_comment_line(line: str, max_length: int) -> List[str]:
     # Find leading indentation
@@ -56,7 +75,8 @@ class LineLengthRule(BaseRule):
     rule_id = "IR-line-length"
     description = (
         "Lines must not exceed the configured maximum length. Overlong "
-        "keyword-owned IN, VALUES, and TABLE lists wrap one item per line."
+        "keyword-owned IN, VALUES, and TABLE lists wrap one item per line. "
+        "Large repeated one-row INSERT data dumps remain compact."
     )
     category = "general"
     is_fixable = "sometimes"
@@ -64,7 +84,8 @@ class LineLengthRule(BaseRule):
     
     default_config = {
         "max_length": 120,
-        "base_indent": 0
+        "base_indent": 0,
+        "bulk_insert_threshold": 100,
     }
     config_options = {
         "max_length": {
@@ -75,7 +96,14 @@ class LineLengthRule(BaseRule):
             "default": 0,
             "description": "Base indentation offset (in spaces or leading space string) to subtract before checking line lengths.",
             "fallback": "IR-indent:base_indent"
-        }
+        },
+        "bulk_insert_threshold": {
+            "default": 100,
+            "description": (
+                "Number of repeated one-row INSERT statements that marks a "
+                "file as a bulk data dump; use 0 to disable the exemption."
+            ),
+        },
     }
     
     examples = [
@@ -87,6 +115,13 @@ class LineLengthRule(BaseRule):
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         max_length = rule_config.get("max_length", self.default_config["max_length"])
+        bulk_lines = bulk_insert_lines(
+            content,
+            rule_config.get(
+                "bulk_insert_threshold",
+                self.default_config["bulk_insert_threshold"],
+            ),
+        )
         base_indent_opt = self.get_config_value(
             rule_config,
             "base_indent",
@@ -116,6 +151,8 @@ class LineLengthRule(BaseRule):
         violations = []
         lines = content.splitlines()
         for idx, line in enumerate(lines, start=1):
+            if idx in bulk_lines:
+                continue
             effective_len = len(line) - base_indent_spaces
             if effective_len > max_length:
                 violations.append(
@@ -132,6 +169,14 @@ class LineLengthRule(BaseRule):
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
         max_length = rule_config.get("max_length", self.default_config["max_length"])
+        if bulk_insert_lines(
+            content,
+            rule_config.get(
+                "bulk_insert_threshold",
+                self.default_config["bulk_insert_threshold"],
+            ),
+        ):
+            return content
 
         # Collapse a simple one-argument call when its surrounding expression
         # fits after compaction. This also repairs calls expanded during an

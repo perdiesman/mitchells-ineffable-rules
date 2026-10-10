@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from mir.engine.config import Config
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.engine.runner import process_document, remap_selected_lines, run_linter
+from mir.rules.sql.line_length import LineLengthRule
 from mir.rules.xml.xml_mybatis_sql import (
     between_delimiter_source_edits,
     get_mybatis_protected_signatures,
@@ -601,6 +602,33 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
+
+    def test_sql_line_length_preserves_bulk_insert_rows(self):
+        rows = "".join(
+            "INSERT INTO sample_item (item_id, item_description) "
+            f"VALUES ({item_id}, 'an intentionally long generic description "
+            "that represents imported source data and should stay compact');\n"
+            for item_id in range(3)
+        )
+        rule = LineLengthRule()
+        config = {"max_length": 80, "bulk_insert_threshold": 3}
+
+        self.assertEqual(rule.fix(rows, "generic.sql", config), rows)
+        self.assertFalse(rule.check(rows, "generic.sql", config))
+
+        commit_config = Config()
+        commit_config.profile = "commit"
+        commit_config.fix = True
+        commit_config.lines = {2}
+        commit_config.rule_configs = {
+            "IR-line-length": {"bulk_insert_threshold": 3, "max_length": 80}
+        }
+        result = process_document(
+            commit_config, rows, "generic.sql", "sql"
+        )
+
+        self.assertEqual(result.content, rows)
+        self.assertFalse(result.diagnostics)
 
     def test_commit_profile_wraps_long_comment_on_literal_unchanged(self):
         sql_content = (
