@@ -36,6 +36,57 @@ from mir.rules.sql.where_multi import WhereMultiRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_multiline_case_stays_with_its_leading_additive_operator(self):
+        source = (
+            "    first_label\n"
+            "        || CASE WHEN category = 'primary' THEN 'one' "
+            "WHEN category = 'secondary' THEN 'two' ELSE 'other' END"
+        )
+        expected = (
+            "    first_label\n"
+            "        || CASE\n"
+            "            WHEN category = 'primary' THEN 'one'\n"
+            "            WHEN category = 'secondary' THEN 'two'\n"
+            "            ELSE 'other'\n"
+            "        END"
+        )
+        rule = CaseLayoutRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+
+    def test_column_layout_preserves_additive_case_continuation_levels(self):
+        source = (
+            "SELECT\n"
+            "    item_id,\n"
+            "    label_prefix\n"
+            "        || CASE\n"
+            "            WHEN category = 'primary' THEN 'one'\n"
+            "            ELSE 'other'\n"
+            "        END AS label,\n"
+            "    created_at\n"
+            "FROM sample_item"
+        )
+        rule = ColumnLayoutRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
+    def test_column_layout_uses_case_limit_for_compaction(self):
+        source = (
+            "            SELECT\n"
+            "                item_id,\n"
+            "                slot_number,\n"
+            "                CASE WHEN run_count = 1 THEN 1 ELSE run_count + 1 END AS required_count\n"
+            "            FROM sample_item"
+        )
+        rule = ColumnLayoutRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
     def test_plpgsql_message_level_can_be_a_sql_identifier(self):
         source = "WITH info AS (SELECT item_id FROM sample_item) SELECT * FROM info;"
         rule = PlpgsqlKeywordCaseRule()

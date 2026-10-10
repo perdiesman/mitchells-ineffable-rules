@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.line_length import LineLengthRule
 from mir.rules.sql.indent import IndentRule
+from mir.rules.sql.case_when_wrap import CaseWhenWrapRule
 from mir.rules.sql.sql_utils import tokenize_sql
 
 
@@ -120,6 +121,22 @@ class ColumnLayoutRule(BaseRule):
             + ",\n".join(f"{inner_indent}{expression}" for expression in distinct_on)
             + f"\n{indentation})"
         )
+
+    def _expression_line_limit(
+        self,
+        expressions: List[str],
+        max_length: int,
+        rule_config: Dict[str, Any],
+    ) -> int:
+        if not any(re.search(r"\bCASE\b", expression, re.IGNORECASE) for expression in expressions):
+            return max_length
+        case_max_length = self.get_config_value(
+            rule_config,
+            "case_max_line_length",
+            default_value=110,
+            fallbacks=[(CaseWhenWrapRule, "max_line_length")],
+        )
+        return min(max_length, case_max_length)
 
     def _parse_clauses(self, content: str) -> List[dict]:
         """
@@ -505,12 +522,27 @@ class ColumnLayoutRule(BaseRule):
         else:
             orig_base_len = 0
             
-        rebuilt = [new_indent + lines[0].lstrip()]
+        first_body = lines[0].lstrip()
+        rebuilt = [new_indent + first_body]
+        case_indent = new_indent if first_body.upper().startswith("CASE") else None
         for l in lines[1:]:
             stripped = l.lstrip()
             if stripped == "":
                 rebuilt.append("")
             else:
+                upper = stripped.upper()
+                if re.match(r"^(?:\+|-|\*|/|\|\|)\s+CASE\b", upper):
+                    case_indent = new_indent + " " * indent_size
+                    rebuilt.append(case_indent + stripped)
+                    continue
+                if case_indent is not None:
+                    if upper.startswith(("WHEN ", "ELSE ")):
+                        rebuilt.append(case_indent + " " * indent_size + stripped)
+                        continue
+                    if upper.startswith("END"):
+                        rebuilt.append(case_indent + stripped)
+                        case_indent = None
+                        continue
                 l_indent = len(l) - len(stripped)
                 relative_indent = max(0, l_indent - orig_base_len)
                 rebuilt.append(new_indent + " " * relative_indent + stripped)
@@ -597,6 +629,9 @@ class ColumnLayoutRule(BaseRule):
             single_line_clause = f"{prefix} {', '.join(expressions)}"
             effective_indent_len = max(0, len(indentation) - base_indent_spaces)
             total_len = effective_indent_len + len(single_line_clause)
+            expression_max_length = self._expression_line_limit(
+                expressions, max_length, rule_config
+            )
             
             current_clause_text = content[cl["keyword_start"]:cl["list_end"]]
 
@@ -629,7 +664,7 @@ class ColumnLayoutRule(BaseRule):
                     )
                 continue
 
-            if total_len <= max_length:
+            if total_len <= expression_max_length:
                 # Expect single-line format
                 expected = single_line_clause
                 if current_clause_text != expected:
@@ -761,10 +796,13 @@ class ColumnLayoutRule(BaseRule):
             single_line_clause = f"{prefix} {', '.join(expressions)}"
             effective_indent_len = max(0, len(indentation) - base_indent_spaces)
             total_len = effective_indent_len + len(single_line_clause)
+            expression_max_length = self._expression_line_limit(
+                expressions, max_length, rule_config
+            )
             
             if (
                 not embedded_reindent_only
-                and total_len <= max_length
+                and total_len <= expression_max_length
                 and not any("\n" in expr for expr in expressions)
             ):
                 formatted = single_line_clause

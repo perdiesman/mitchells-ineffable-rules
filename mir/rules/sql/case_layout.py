@@ -178,7 +178,9 @@ class CaseLayoutRule(BaseRule):
                 else:
                     break
                     
-            is_inline = line_prefix.strip() != ""
+            prefix_body = line_prefix.strip()
+            is_additive_continuation = prefix_body in {"+", "-", "*", "/", "||"}
+            is_inline = prefix_body != "" and not is_additive_continuation
             if is_inline:
                 case_indent = select_indent + "    "
             else:

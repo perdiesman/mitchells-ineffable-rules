@@ -679,8 +679,7 @@ class XmlIndentRule(BaseRule):
                             len(actual_indent) % indent_size != 0
                         )
                         if (
-                            is_bind_body
-                            or (
+                            (
                                 is_logical_continuation
                                 and text_line not in case_continuation_lines
                                 and (
