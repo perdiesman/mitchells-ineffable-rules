@@ -547,6 +547,8 @@ class ColumnLayoutRule(BaseRule):
             base_indent_spaces = base_indent_opt
         else:
             base_indent_spaces = 0
+        if "original_xml" in rule_config:
+            base_indent_spaces = 0
             
         violations = []
         
@@ -578,7 +580,7 @@ class ColumnLayoutRule(BaseRule):
             
             current_clause_text = content[cl["keyword_start"]:cl["list_end"]]
 
-            if "mybatis_dynamic_offsets" in rule_config:
+            if rule_config.get("mybatis_dynamic_offsets"):
                 if "\n" not in current_clause_text:
                     continue
                 inner_indent = indentation + (" " * indent_size)
@@ -672,6 +674,8 @@ class ColumnLayoutRule(BaseRule):
             base_indent_spaces = base_indent_opt
         else:
             base_indent_spaces = 0
+        if "original_xml" in rule_config:
+            base_indent_spaces = 0
             
         clauses = self._parse_clauses(content)
         dynamic_offsets = sorted(rule_config.get("mybatis_dynamic_offsets", set()))
@@ -698,7 +702,9 @@ class ColumnLayoutRule(BaseRule):
                 continue
 
             current_clause_text = content[cl["keyword_start"]:cl["list_end"]]
-            embedded_reindent_only = "mybatis_dynamic_offsets" in rule_config
+            embedded_reindent_only = bool(
+                rule_config.get("mybatis_dynamic_offsets")
+            )
             if embedded_reindent_only and "\n" not in current_clause_text:
                 fixed_chunks.append(content[last_idx:cl["list_end"]])
                 last_idx = cl["list_end"]

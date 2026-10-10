@@ -1,6 +1,7 @@
 import unittest
 
 from mir.rules.sql.additive_wrap import AdditiveWrapRule
+from mir.rules.sql.as_spacing import ASSpacingRule
 from mir.rules.sql.function_case import FunctionCaseRule
 from mir.rules.sql.from_multi import FromMultiRule
 from mir.rules.sql.expression_split import ExpressionSplitRule
@@ -30,6 +31,72 @@ from mir.rules.sql.where_multi import WhereMultiRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_short_alias_recombines_in_mybatis_sql(self):
+        source = "    item_name\n                    AS display_name"
+        expected = "    item_name AS display_name"
+
+        rule = ASSpacingRule()
+        config = {"original_xml": "<mapper />"}
+
+        self.assertEqual(rule.fix(source, "generic.xml", config), expected)
+        self.assertEqual(rule.fix(expected, "generic.xml", config), expected)
+
+    def test_empty_mybatis_dynamic_offsets_allow_group_by_expansion(self):
+        source = (
+            "    GROUP BY first_grouping_column, second_grouping_column, "
+            "third_grouping_column, fourth_grouping_column"
+        )
+        expected = (
+            "    GROUP BY\n"
+            "        first_grouping_column,\n"
+            "        second_grouping_column,\n"
+            "        third_grouping_column,\n"
+            "        fourth_grouping_column"
+        )
+        config = {
+            "max_length": 80,
+            "mybatis_dynamic_offsets": set(),
+            "original_xml": "<mapper />",
+        }
+        rule = ColumnLayoutRule()
+
+        self.assertEqual(rule.fix(source, "generic.xml", config), expected)
+        self.assertEqual(rule.fix(expected, "generic.xml", config), expected)
+
+    def test_case_layout_keeps_a_short_boolean_condition_together(self):
+        source = (
+            "CASE WHEN enabled AND coalesce(visible, true) THEN "
+            "calculate_item_count_with_a_long_name(item_id) ELSE\n    0 END"
+        )
+        expected = (
+            "CASE\n"
+            "    WHEN enabled AND coalesce(visible, true)\n"
+            "        THEN calculate_item_count_with_a_long_name(item_id)\n"
+            "    ELSE 0\n"
+            "END"
+        )
+
+        rule = CaseLayoutRule()
+        fixed = rule.fix(source, "generic.sql", {"max_length": 80})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(
+            rule.fix(fixed, "generic.sql", {"max_length": 80}),
+            expected,
+        )
+
+    def test_short_multiline_case_condition_compacts_root_boolean(self):
+        source = (
+            "    WHEN enabled\n"
+            "        AND coalesce(visible, true) THEN item_count"
+        )
+        expected = "    WHEN enabled AND coalesce(visible, true) THEN item_count"
+
+        rule = CaseWhenWrapRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
+        self.assertEqual(rule.fix(expected, "generic.sql", {}), expected)
+
     def test_case_layout_counts_the_trailing_alias_in_the_line_limit(self):
         source = (
             "                                    CASE WHEN "
@@ -103,6 +170,47 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
         self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+
+    def test_additive_trailing_operator_moves_before_a_long_final_operand(self):
+        source = (
+            "    first_measure_with_long_name + second_measure_with_long_name +\n"
+            "                 third_measure +\n"
+            "                 fourth_measure"
+        )
+        expected = (
+            "    first_measure_with_long_name + second_measure_with_long_name\n"
+            "        + third_measure + fourth_measure"
+        )
+
+        rule = AdditiveWrapRule()
+        config = {
+            "max_line_length": 80,
+            "continuation_max_line_length": 80,
+        }
+        fixed = rule.fix(source, "generic.sql", config)
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(
+            rule.fix(fixed, "generic.sql", config),
+            expected,
+        )
+
+    def test_additive_adjacent_continuation_lines_compact_when_they_fit(self):
+        source = (
+            "    first_measure + second_measure\n"
+            "        + third_measure\n"
+            "        + fourth_measure"
+        )
+        expected = (
+            "    first_measure + second_measure\n"
+            "        + third_measure + fourth_measure"
+        )
+
+        rule = AdditiveWrapRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
 
     def test_table_function_preserves_case_nesting(self):
         source = (
@@ -308,6 +416,28 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.check(fixed, "generic.sql", {"max_line_length": 100}), [])
+
+    def test_join_preserves_a_multiline_grouped_condition(self):
+        source = (
+            "LEFT JOIN sample_counts counts ON counts.owner_id = owner.id AND (\n"
+            "    counts.category_id = category.id OR counts.category_id IS NULL\n"
+            ")"
+        )
+        expected = (
+            "LEFT JOIN sample_counts counts ON counts.owner_id = owner.id\n"
+            "    AND (\n"
+            "    counts.category_id = category.id OR counts.category_id IS NULL\n"
+            ")"
+        )
+
+        rule = JoinOnMultiRule()
+        fixed = rule.fix(source, "generic.sql", {"max_line_length": 100})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(
+            rule.fix(fixed, "generic.sql", {"max_line_length": 100}),
+            expected,
+        )
 
     def test_long_join_between_wraps_only_the_range_delimiter(self):
         source = (

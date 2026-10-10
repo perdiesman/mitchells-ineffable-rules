@@ -16,11 +16,21 @@ class AdditiveWrapRule(BaseRule):
     is_fixable = "yes"
     enabled_by_default = True
 
-    default_config = {"max_line_length": 100}
+    default_config = {
+        "max_line_length": 100,
+        "continuation_max_line_length": 120,
+    }
     config_options = {
         "max_line_length": {
             "default": 100,
             "description": "Line length threshold for wrapping additive expressions.",
+        },
+        "continuation_max_line_length": {
+            "default": 120,
+            "description": (
+                "Line length threshold for an already-wrapped additive "
+                "continuation."
+            ),
         }
     }
 
@@ -59,8 +69,8 @@ class AdditiveWrapRule(BaseRule):
         """Align existing continuations and rejoin a stranded final operand."""
         max_length = self.get_config_value(
             rule_config,
-            "max_line_length",
-            default_value=100,
+            "continuation_max_line_length",
+            default_value=120,
         )
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
@@ -80,40 +90,84 @@ class AdditiveWrapRule(BaseRule):
         for line_number, indices in active_by_line.items():
             leading_index = indices[0]
             leading = tokens[leading_index]
-            if leading["type"] != "OPERATOR" or leading["value"] not in {"+", "||"}:
-                continue
-            previous_indices = active_by_line.get(line_number - 1)
-            if not previous_indices:
-                continue
-            depth = depths[leading_index]
-            if not any(
-                tokens[index]["type"] == "OPERATOR"
-                and tokens[index]["value"] in {"+", "||"}
-                and depths[index] == depth
-                for index in previous_indices
-            ):
-                continue
-
-            previous_line = lines[line_number - 2].rstrip("\r\n")
-            previous_indent = previous_line[:
-                len(previous_line) - len(previous_line.lstrip(" \t"))
-            ]
-            previous_leading = tokens[previous_indices[0]]
-            expected_indent = previous_indent + (
-                ""
-                if previous_leading["type"] == "OPERATOR"
-                and previous_leading["value"] in {"+", "||"}
-                else "    "
-            )
             line_start = line_starts[line_number - 1]
-            actual_indent = content[line_start:leading["start"]]
-            if actual_indent != expected_indent:
-                edits.append({
-                    "token": leading,
-                    "start": line_start,
-                    "end": leading["start"],
-                    "replacement": expected_indent,
-                })
+            line = lines[line_number - 1].rstrip("\r\n")
+            line_indent = line[: len(line) - len(line.lstrip(" \t"))]
+            leading_additive = (
+                leading["type"] == "OPERATOR"
+                and leading["value"] in {"+", "||"}
+            )
+            expected_indent = line_indent
+            continuation_depth = None
+            if leading_additive:
+                previous_indices = active_by_line.get(line_number - 1)
+                continuation_depth = depths[leading_index]
+                if not previous_indices or not any(
+                    tokens[index]["type"] == "OPERATOR"
+                    and tokens[index]["value"] in {"+", "||"}
+                    and depths[index] == continuation_depth
+                    for index in previous_indices
+                ):
+                    leading_additive = False
+                else:
+                    previous_line = lines[line_number - 2].rstrip("\r\n")
+                    previous_indent = previous_line[:
+                        len(previous_line) - len(previous_line.lstrip(" \t"))
+                    ]
+                    previous_leading = tokens[previous_indices[0]]
+                    expected_indent = previous_indent + (
+                        ""
+                        if previous_leading["type"] == "OPERATOR"
+                        and previous_leading["value"] in {"+", "||"}
+                        else "    "
+                    )
+                    actual_indent = content[line_start:leading["start"]]
+                    if actual_indent != expected_indent:
+                        edits.append({
+                            "token": leading,
+                            "start": line_start,
+                            "end": leading["start"],
+                            "replacement": expected_indent,
+                        })
+
+                    following_indices = active_by_line.get(line_number + 1)
+                    if following_indices:
+                        following_leading_index = following_indices[0]
+                        following_leading = tokens[following_leading_index]
+                        if (
+                            following_leading["type"] == "OPERATOR"
+                            and following_leading["value"] in {"+", "||"}
+                            and depths[following_leading_index]
+                            == continuation_depth
+                        ):
+                            whitespace_before_following = (
+                                tokens[following_leading_index - 1]
+                                if following_leading_index > 0
+                                and tokens[following_leading_index - 1]["type"]
+                                == "WHITESPACE"
+                                else None
+                            )
+                            following_line = lines[line_number].rstrip(
+                                "\r\n"
+                            ).lstrip(" \t")
+                            joined_line = (
+                                expected_indent
+                                + line.lstrip(" \t")
+                                + " "
+                                + following_line
+                            )
+                            if (
+                                whitespace_before_following is not None
+                                and "\n" in whitespace_before_following["value"]
+                                and source_text_length(joined_line, rule_config)
+                                <= max_length
+                            ):
+                                edits.append({
+                                    "token": following_leading,
+                                    "start": whitespace_before_following["start"],
+                                    "end": whitespace_before_following["end"],
+                                    "replacement": " ",
+                                })
 
             trailing_index = indices[-1]
             trailing = tokens[trailing_index]
@@ -121,9 +175,8 @@ class AdditiveWrapRule(BaseRule):
             if (
                 trailing["type"] != "OPERATOR"
                 or trailing["value"] not in {"+", "||"}
-                or depths[trailing_index] != depth
                 or not following_indices
-                or depths[following_indices[0]] != depth
+                or depths[following_indices[0]] != depths[trailing_index]
             ):
                 continue
             whitespace = (
@@ -135,7 +188,7 @@ class AdditiveWrapRule(BaseRule):
             following = tokens[following_indices[0]]
             if whitespace is None or "\n" not in whitespace["value"]:
                 continue
-            current_line = lines[line_number - 1].rstrip("\r\n").lstrip(" \t")
+            current_line = line.lstrip(" \t")
             following_line = lines[line_number].rstrip("\r\n").lstrip(" \t")
             joined_line = expected_indent + current_line + " " + following_line
             if source_text_length(joined_line, rule_config) <= max_length:
@@ -145,6 +198,26 @@ class AdditiveWrapRule(BaseRule):
                     "end": following["start"],
                     "replacement": " ",
                 })
+            elif not leading_additive:
+                whitespace_before = (
+                    tokens[trailing_index - 1]
+                    if trailing_index > 0
+                    and tokens[trailing_index - 1]["type"] == "WHITESPACE"
+                    else None
+                )
+                if (
+                    whitespace_before is not None
+                    and "\n" not in whitespace_before["value"]
+                ):
+                    edits.append({
+                        "token": trailing,
+                        "start": whitespace_before["start"],
+                        "end": following["start"],
+                        "replacement": (
+                            "\n" + line_indent + "    "
+                            + trailing["value"] + " "
+                        ),
+                    })
         return edits
 
     def _find_edits(self, content: str, rule_config: Dict[str, Any]) -> List[dict]:
@@ -152,6 +225,11 @@ class AdditiveWrapRule(BaseRule):
             rule_config,
             "max_line_length",
             default_value=100,
+        )
+        continuation_max_length = self.get_config_value(
+            rule_config,
+            "continuation_max_line_length",
+            default_value=120,
         )
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
@@ -165,6 +243,12 @@ class AdditiveWrapRule(BaseRule):
         edits = []
         for line_number, raw_line in enumerate(lines, start=1):
             line = raw_line.rstrip("\r\n")
+            if (
+                line.lstrip(" \t").startswith(("+", "||"))
+                and source_text_length(line, rule_config)
+                <= continuation_max_length
+            ):
+                continue
             if source_text_length(line, rule_config) <= max_length:
                 continue
             line_start = line_starts[line_number - 1]
@@ -265,12 +349,22 @@ class AdditiveWrapRule(BaseRule):
         for item in sorted(edits, key=lambda edit: edit["start"], reverse=True):
             chars[item["start"] : item["end"]] = list(item["replacement"])
         fixed = "".join(chars)
-        continuation_edits = self._find_continuation_edits(fixed, rule_config)
-        chars = list(fixed)
-        for item in sorted(
-            continuation_edits,
-            key=lambda edit: edit["start"],
-            reverse=True,
-        ):
-            chars[item["start"] : item["end"]] = list(item["replacement"])
-        return "".join(chars)
+        for _ in range(8):
+            continuation_edits = self._find_continuation_edits(
+                fixed,
+                rule_config,
+            )
+            if not continuation_edits:
+                break
+            chars = list(fixed)
+            for item in sorted(
+                continuation_edits,
+                key=lambda edit: edit["start"],
+                reverse=True,
+            ):
+                chars[item["start"] : item["end"]] = list(item["replacement"])
+            updated = "".join(chars)
+            if updated == fixed:
+                break
+            fixed = updated
+        return fixed

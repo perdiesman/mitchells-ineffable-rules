@@ -224,6 +224,32 @@ class CaseWhenWrapRule(BaseRule):
                                 "replacement": "\n" + indent,
                             }
                         )
+            else:
+                for boolean_index in find_boolean_operator_indices(
+                    tokens,
+                    depths,
+                    depths[index],
+                    index + 1,
+                    then_index,
+                ):
+                    boolean_whitespace = (
+                        tokens[boolean_index - 1]
+                        if boolean_index > 0
+                        and tokens[boolean_index - 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    if (
+                        boolean_whitespace is not None
+                        and boolean_whitespace["value"] != " "
+                    ):
+                        edits.append(
+                            {
+                                "token": tokens[boolean_index],
+                                "start": boolean_whitespace["start"],
+                                "end": boolean_whitespace["end"],
+                                "replacement": " ",
+                            }
+                        )
             expected_then_whitespace = "\n" + indent if should_wrap_then else " "
             if whitespace["value"] != expected_then_whitespace:
                 edits.append(

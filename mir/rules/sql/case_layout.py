@@ -1,6 +1,12 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import find_boolean_operator_indices, tokenize_sql, get_token_depths
+from mir.rules.sql.case_when_wrap import CaseWhenWrapRule
+from mir.rules.sql.sql_utils import (
+    find_boolean_operator_indices,
+    get_token_depths,
+    source_text_length,
+    tokenize_sql,
+)
 from mir.rules.sql.indent import IndentRule
 from mir.rules.sql.line_length import LineLengthRule
 
@@ -53,12 +59,19 @@ class CaseLayoutRule(BaseRule):
         return blocks
 
     def _find_violations(self, content: str, rule_config: Dict[str, Any]) -> List[dict]:
-        max_len = self.get_config_value(
+        line_max_len = self.get_config_value(
             rule_config,
             "max_length",
-            default_value=100,
+            default_value=120,
             fallbacks=[(LineLengthRule, "max_length")]
         )
+        case_max_len = self.get_config_value(
+            rule_config,
+            "max_line_length",
+            default_value=110,
+            fallbacks=[(CaseWhenWrapRule, "max_line_length")],
+        )
+        max_len = min(line_max_len, case_max_len)
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
         blocks = self._find_case_blocks(tokens)
@@ -117,16 +130,16 @@ class CaseLayoutRule(BaseRule):
             if line_end == -1:
                 line_end = len(content)
             line_suffix = content[end_tok["end"]:line_end]
-            effective_prefix_len = max(0, len(line_prefix) - base_indent_spaces)
-            
             # Simple inline allows exactly one WHEN condition and optional ELSE
             is_simple_inline = (
                 case_tok["line"] == end_tok["line"]
                 and when_count == 1
                 and (
-                    effective_prefix_len
-                    + len(original_text.strip())
-                    + len(line_suffix)
+                    source_text_length(
+                        line_prefix + original_text.strip() + line_suffix,
+                        rule_config,
+                    )
+                    - base_indent_spaces
                 ) <= max_len
             )
             
@@ -222,17 +235,26 @@ class CaseLayoutRule(BaseRule):
                                 part_str = re.sub(r"\s+", " ", part_str)
                             cond_strs.append(part_str)
                             
-                        is_multiline = len(cond_strs) > 1 or len(f"{case_indent}    WHEN {cond_strs[0]} THEN {res_text}") > max_len
-                        
-                        if is_multiline:
-                            first_line = f"\n{case_indent}    WHEN {cond_strs[0]}"
+                        compact_condition = " ".join(cond_strs)
+                        condition_line = (
+                            f"{case_indent}    WHEN {compact_condition}"
+                        )
+                        inline_arm = f"{condition_line} THEN {res_text}"
+
+                        if source_text_length(inline_arm, rule_config) > max_len:
+                            if source_text_length(condition_line, rule_config) <= max_len:
+                                first_line = f"\n{condition_line}"
+                                remaining_conditions = []
+                            else:
+                                first_line = f"\n{case_indent}    WHEN {cond_strs[0]}"
+                                remaining_conditions = cond_strs[1:]
                             subsequent_lines = []
-                            for cs in cond_strs[1:]:
+                            for cs in remaining_conditions:
                                 subsequent_lines.append(f"\n{case_indent}        {cs}")
                             then_line = f"\n{case_indent}        THEN {res_text}"
                             line_text = first_line + "".join(subsequent_lines) + then_line
                         else:
-                            line_text = f"\n{case_indent}    WHEN {cond_strs[0]} THEN {res_text}"
+                            line_text = f"\n{inline_arm}"
                             
                         rebuilt_parts.append(line_text)
                         
@@ -253,6 +275,7 @@ class CaseLayoutRule(BaseRule):
                 elif val_upper == "ELSE":
                     else_tokens = tokens[start_c:end_c]
                     else_text = "".join([t["value"] for t in else_tokens]).strip()
+                    else_text = " ".join(else_text.split())
                     line_text = f"\n{case_indent}    ELSE {else_text}"
                     rebuilt_parts.append(line_text)
                     
@@ -262,6 +285,9 @@ class CaseLayoutRule(BaseRule):
                         ws_tok = tokens[kw_token_idx - 1]
                     expected_ws = f"\n{case_indent}    "
                     if not ws_tok or ws_tok["value"] != expected_ws:
+                        needs_fix = True
+                    original_else = content[kw_tok["start"]:tokens[end_c]["start"]]
+                    if original_else.strip() != line_text.strip():
                         needs_fix = True
                         
                 i_idx += 1

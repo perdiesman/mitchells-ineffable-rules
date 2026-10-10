@@ -4,6 +4,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import (
     find_between_delimiter_indices,
     find_boolean_operator_indices,
+    find_matching_paren,
     get_token_depths,
     tokenize_sql,
 )
@@ -167,6 +168,18 @@ class JoinOnMultiRule(BaseRule):
                 )
                 
                 on_clause_tokens = tokens[i : clause_end]
+                has_multiline_group = False
+                for group_index in range(i + 1, clause_end):
+                    group_token = tokens[group_index]
+                    if group_token["type"] != "PAREN" or group_token["value"] != "(":
+                        continue
+                    group_close_index = find_matching_paren(tokens, group_index)
+                    if (
+                        group_close_index is not None
+                        and tokens[group_close_index]["line"] > group_token["line"]
+                    ):
+                        has_multiline_group = True
+                        break
                 on_clause_single = "".join(
                     " " if t["type"] == "WHITESPACE" else t["value"]
                     for t in on_clause_tokens
@@ -333,6 +346,7 @@ class JoinOnMultiRule(BaseRule):
                     estimated_line_len <= max_len
                     and not has_dynamic_boolean
                     and not join_target_multiline
+                    and not has_multiline_group
                 ):
                     if not any(
                         token["type"] == "COMMENT"
