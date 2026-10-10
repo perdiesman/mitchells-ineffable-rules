@@ -443,6 +443,46 @@ class XmlIndentRule(BaseRule):
                     "message": "MyBatis foreach continuation should start on the line after IN.",
                 })
 
+        # Source-mapped SQL can contain repeated CASE branches on opposite
+        # sides of dynamic tags. Keep boolean continuations anchored to their
+        # WHEN line even when the embedded diff cannot identify the repeated
+        # whitespace span unambiguously.
+        active_case_indent = None
+        case_line_starts = [0]
+        case_line_starts.extend(
+            offset + 1 for offset, char in enumerate(content) if char == "\n"
+        )
+        for line_index, line_text in enumerate(lines):
+            line_start = case_line_starts[line_index]
+            if not any(start < line_start < end for start, end in query_ranges):
+                active_case_indent = None
+                continue
+            stripped = line_text.strip()
+            if not stripped or stripped.startswith("<"):
+                continue
+            upper = stripped.upper()
+            actual_indent = line_text[: len(line_text) - len(line_text.lstrip(" \t"))]
+            if upper.startswith("WHEN "):
+                active_case_indent = (
+                    None if " THEN " in f" {upper} " else actual_indent
+                )
+                continue
+            if active_case_indent is None:
+                continue
+            if upper.startswith(("AND ", "OR ")):
+                expected_indent = active_case_indent + " " * indent_size
+                if actual_indent != expected_indent:
+                    violations.append({
+                        "line": line_index + 1,
+                        "start_offset": line_start,
+                        "end_offset": line_start + len(actual_indent),
+                        "replacement": expected_indent,
+                        "message": "Multiline CASE conditions should align one indent beyond WHEN.",
+                    })
+                continue
+            if upper.startswith(("THEN ", "ELSE", "END", "WHEN ")):
+                active_case_indent = None
+
         # Build line starts mapping
         line_starts = [0]
         for offset, char in enumerate(content):
