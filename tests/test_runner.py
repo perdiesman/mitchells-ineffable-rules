@@ -3238,6 +3238,26 @@ class TestRunnerIntegration(unittest.TestCase):
             )
             self.assertEqual(content, expected)
 
+    def test_xml_multiline_self_closing_marker_aligns_with_opening_tag(self):
+        xml_content = (
+            '<root>\n'
+            '    <child first="one"\n'
+            '           second="two"\n'
+            '        />\n'
+            '</root>\n'
+        )
+        expected = xml_content.replace('        />', '    />')
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_generated_dynamic_lists_converge_in_one_run(self):
         fields = [
             ("id", "INTEGER"),
@@ -3300,6 +3320,40 @@ class TestRunnerIntegration(unittest.TestCase):
             any("Formatter did not converge" in item for item in first.diagnostics)
         )
         self.assertNotIn("IR-xml-indent", [item[0].rule_id for item in first.violations])
+
+    def test_xml_mybatis_fragment_anchors_its_first_clause_to_the_tag(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="itemSource">\n'
+            '              FROM sample_item item\n'
+            '         LEFT JOIN sample_owner owner\n'
+            '                ON owner.id = item.owner_id\n'
+            '        <if test="activeOnly">\n'
+            '            WHERE item.active\n'
+            '        </if>\n'
+            '    </sql>\n'
+            '</mapper>\n'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="itemSource">\n'
+            '        FROM\n'
+            '            sample_item item\n'
+            '            LEFT JOIN sample_owner owner ON owner.id = item.owner_id\n'
+            '            <if test="activeOnly">WHERE item.active</if>\n'
+            '    </sql>\n'
+            '</mapper>\n'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
 
     def test_xml_mybatis_foreach_continuation_indentation(self):
         xml_content = (

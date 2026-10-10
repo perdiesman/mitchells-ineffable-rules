@@ -219,6 +219,47 @@ class XmlIndentRule(BaseRule):
             if el["tag"] in ("select", "insert", "update", "delete", "sql")
         ]
         for element in elements:
+            if element["tag"] not in {"select", "insert", "update", "delete", "sql"}:
+                continue
+            body_start = tokens[element["open_end_idx"]]["end"]
+            body_end = tokens[element["end_idx"]]["start"]
+            body = content[body_start:body_end]
+            first_clause = re.match(
+                r"\A[ \t\r\n]*(?:WITH|SELECT|FROM|UPDATE|INSERT|DELETE)\b",
+                body,
+                re.IGNORECASE,
+            )
+            if first_clause is None:
+                continue
+            clause_start = body_start + first_clause.end()
+            matched_text = content[body_start:clause_start]
+            clause_word = re.search(
+                r"(?:WITH|SELECT|FROM|UPDATE|INSERT|DELETE)\b\Z",
+                matched_text,
+                re.IGNORECASE,
+            )
+            if clause_word is None:
+                continue
+            clause_start = body_start + clause_word.start()
+            line_start = content.rfind("\n", 0, clause_start) + 1
+            if line_start < body_start:
+                # Inline SQL follows the opening XML tag on the same line;
+                # there is no standalone clause indentation to normalize.
+                continue
+            actual_indent = content[line_start:clause_start]
+            tag_line_start = content.rfind("\n", 0, element["start_offset"]) + 1
+            tag_prefix = content[tag_line_start:element["start_offset"]]
+            tag_indent = tag_prefix[: len(tag_prefix) - len(tag_prefix.lstrip(" \t"))]
+            expected_indent = tag_indent + " " * indent_size
+            if actual_indent != expected_indent:
+                violations.append({
+                    "line": content.count("\n", 0, clause_start) + 1,
+                    "start_offset": line_start,
+                    "end_offset": clause_start,
+                    "replacement": expected_indent,
+                    "message": "The first MyBatis SQL clause should align one level inside its XML tag.",
+                })
+        for element in elements:
             if element["tag"] != "delete":
                 continue
             body_start = tokens[element["open_end_idx"]]["end"]
@@ -722,6 +763,11 @@ class XmlIndentRule(BaseRule):
                         depth += 1
                     else:  # self closing tag "/>"
                         if tag_stack:
+                            line_start_idx = content.rfind("\n", 0, t["start"]) + 1
+                            if not content[line_start_idx:t["start"]].strip():
+                                opening_indent = tag_stack[-1].get("resolved_indent")
+                                if opening_indent is not None:
+                                    explicit_expected_indent[line] = opening_indent
                             tag_stack.pop()
                     last_open_start = None
 

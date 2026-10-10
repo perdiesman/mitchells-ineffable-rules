@@ -25,7 +25,8 @@ class XmlSelfClosingRule(BaseRule):
     ]
     additional_validations = [
         "<root />",
-        "<root attr=\"val\" />"
+        "<root attr=\"val\" />",
+        "<root\n    attr=\"val\"\n/>",
     ]
 
     def _find_violations(self, content: str) -> List[dict]:
@@ -34,12 +35,20 @@ class XmlSelfClosingRule(BaseRule):
         n = len(tokens)
         for i, t in enumerate(tokens):
             if t["type"] == "TAG_END" and t["value"] == "/>":
+                line_start = content.rfind("\n", 0, t["start"]) + 1
+                if line_start > 0 and not content[line_start:t["start"]].strip():
+                    # A multiline tag owns the newline and indentation before
+                    # its closing marker; the one-space rule is only for an
+                    # ending that shares a line with the final attribute.
+                    continue
                 # Check preceding token
                 has_violation = False
                 start_offset = t["start"]
                 if i > 0:
                     prev = tokens[i - 1]
                     if prev["type"] == "WHITESPACE":
+                        if "\n" in prev["value"] or "\r" in prev["value"]:
+                            continue
                         if prev["value"] != " ":
                             has_violation = True
                             start_offset = prev["start"]
