@@ -3115,6 +3115,7 @@ class XmlMybatisSqlRule(BaseRule):
                     ),
                     "mybatis_boundary_offsets": boundary_offsets,
                     "mybatis_source_mapping": mapping,
+                    "mybatis_dynamic_indent_ranges": dynamic_indent_ranges,
                     "base_indent": base_indent,
                     "tag_ranges": tag_ranges,
                     "original_xml": content,
@@ -3166,6 +3167,34 @@ class XmlMybatisSqlRule(BaseRule):
                         "message": (
                             "Source-mapped SQL continuations must align with "
                             "their owning clause."
+                        ),
+                        "is_fixable": True,
+                    })
+                mapped_subquery_edits = dynamic_subquery_source_edits(
+                    sql_text,
+                    mapping,
+                    content,
+                    mapped_indent_config,
+                )
+                changed_mapped_subquery_edits = [
+                    edit
+                    for edit in mapped_subquery_edits
+                    if content[edit[0]:edit[1]] != edit[2]
+                    and el["start_offset"] <= edit[0] <= edit[1]
+                    <= el["end_offset"]
+                ]
+                if changed_mapped_subquery_edits:
+                    first_start = min(
+                        start
+                        for start, _, _ in changed_mapped_subquery_edits
+                    )
+                    violations.append({
+                        "rule_id": "IR-subquery-indent",
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "[MyBatis SQL: IR-subquery-indent] Subquery "
+                            "contents and closing parenthesis must align in "
+                            "the physical XML source."
                         ),
                         "is_fixable": True,
                     })
@@ -3271,6 +3300,11 @@ class XmlMybatisSqlRule(BaseRule):
                 # or reusable fragment to whitespace that the host fixer must
                 # intentionally leave unchanged.
                 excluded_guest_rule_ids.add("IR-where-multi")
+                if dynamic_indent_ranges:
+                    # The expanded guest omits XML indentation and can report
+                    # already-canonical subqueries. The exact source mapper
+                    # above is both the checker and fixer for this case.
+                    excluded_guest_rule_ids.add("IR-subquery-indent")
                 if local_cte_mapping:
                     excluded_guest_rule_ids.update(
                         rule.rule_id
