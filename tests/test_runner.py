@@ -1230,6 +1230,50 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_column_include_does_not_own_following_where(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT <include refid="ColumnList" />\n'
+            '        FROM sample_item\n'
+            '        WHERE enabled = TRUE\n'
+            '        <if test="codes != null">\n'
+            '            AND item_code IN\n'
+            '            <foreach collection="codes" item="code" open="(" close=")" separator=",">\n'
+            '                #{code}\n'
+            '            </foreach>\n'
+            '        </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            <include refid="ColumnList" />\n'
+            '        FROM sample_item\n'
+            '        WHERE\n'
+            '            enabled\n'
+            '            <if test="codes != null">\n'
+            '                AND item_code IN\n'
+            '                    <foreach collection="codes" item="code" open="(" close=")" separator=",">\n'
+            '                        #{code}\n'
+            '                    </foreach>\n'
+            '            </if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_reusable_dynamic_column_list_is_clean(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

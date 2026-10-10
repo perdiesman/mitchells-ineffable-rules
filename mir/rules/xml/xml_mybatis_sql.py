@@ -2209,9 +2209,9 @@ def dynamic_where_source_edits(
             )
         ):
             continue
-        if "<include" not in content[
-            source_start:element["start_offset"]
-        ].lower():
+        if not has_include_relation_before(
+            content, source_start, element["start_offset"]
+        ):
             continue
         open_end = content.find(
             ">", element["start_offset"], element["end_offset"]
@@ -2330,9 +2330,9 @@ def dynamic_where_source_ranges(
             )
         ):
             continue
-        if "<include" not in content[
-            source_start:element["start_offset"]
-        ].lower():
+        if not has_include_relation_before(
+            content, source_start, element["start_offset"]
+        ):
             continue
         open_end = content.find(
             ">", element["start_offset"], element["end_offset"]
@@ -2363,7 +2363,7 @@ def physical_where_source_edits(
     edits = []
     for match in re.finditer(r"(?im)^([ \t]*)WHERE\b", fragment):
         where_start = source_start + match.start()
-        if "<include" not in content[source_start:where_start].lower():
+        if not has_include_relation_before(content, source_start, where_start):
             continue
         if any(start < where_start < end for start, end, _ in dynamic_ranges):
             continue
@@ -2420,12 +2420,26 @@ def include_subquery_source_ranges(
     source_start, source_end = source_range
     fragment = content[source_start:source_end]
     pattern = re.compile(
-        r"(?is)\bSELECT\s+\*\s+FROM\s*\(\s*<include\b[^>]*/>\s*\)\s+AS\b"
+        r"(?is)\bSELECT\s+\*\s+FROM\s*\(\s*<include\b[^>]*/>\s*\)"
+        r"\s+(?:AS\s+)?[A-Za-z_][A-Za-z0-9_$]*"
     )
     return [
         (source_start + match.start(), source_start + match.end())
         for match in pattern.finditer(fragment)
     ]
+
+
+def has_include_relation_before(
+    content: str,
+    source_start: int,
+    position: int,
+) -> bool:
+    """Return whether an included query supplies a preceding derived table."""
+    return bool(re.search(
+        r"(?is)\bFROM\s*\(\s*<include\b[^>]*/>\s*\)"
+        r"\s+(?:AS\s+)?[A-Za-z_][A-Za-z0-9_$]*",
+        content[source_start:position],
+    ))
 
 
 def multiline_foreach_function_source_edits(
