@@ -120,6 +120,32 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
         self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
 
+    def test_line_length_reports_literal_data_as_nonfixable(self):
+        assignment = (
+            "    description = '"
+            + "generic immutable descriptive value " * 5
+            + "',"
+        )
+        dynamic_sql = (
+            "query_text := 'SELECT item_id\n"
+            + "    WHERE "
+            + "generic_condition = generic_value AND " * 4
+            + "generic_flag = true';"
+        )
+        rule = LineLengthRule()
+
+        assignment_violation = rule.check(
+            assignment, "generic.sql", {"max_length": 80}
+        )
+        dynamic_violation = rule.check(
+            dynamic_sql, "generic.sql", {"max_length": 80}
+        )
+
+        self.assertEqual(len(assignment_violation), 1)
+        self.assertFalse(assignment_violation[0].is_fixable)
+        self.assertEqual(len(dynamic_violation), 1)
+        self.assertFalse(dynamic_violation[0].is_fixable)
+
     def test_multiline_case_stays_with_its_leading_additive_operator(self):
         source = (
             "    first_label\n"

@@ -1,6 +1,6 @@
 # IR-line-length
 
-Lines must not exceed the configured maximum length. Overlong keyword-owned IN, VALUES, and TABLE lists wrap one item per line, and long foreign-key constraints wrap their detail clauses. Large repeated one-row INSERT data dumps remain compact.
+Lines must not exceed the configured maximum length. Overlong keyword-owned IN, VALUES, and TABLE lists wrap one item per line, and long foreign-key constraints wrap their detail clauses. Large repeated one-row INSERT data dumps remain compact. Literal data that cannot be wrapped without changing its value is reported as nonfixable.
 
 - **Auto-Fixable**: Sometimes
 - **Enabled by Default**: Yes

@@ -1,11 +1,17 @@
 import re
+from bisect import bisect_right
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.indent import IndentRule
+from mir.rules.sql.sql_utils import tokenize_sql
 
 
 _BULK_INSERT_LINE = re.compile(
     r"^\s*INSERT\s+INTO\b.+\bVALUES\s*\(", re.IGNORECASE
+)
+_OPAQUE_STRING_ASSIGNMENT = re.compile(
+    r"^\s*(?:SET\s+)?[A-Za-z_][\w.]*\s*=\s*'(?:''|[^'])*'[,;]?\s*$",
+    re.IGNORECASE,
 )
 
 
@@ -77,7 +83,9 @@ class LineLengthRule(BaseRule):
         "Lines must not exceed the configured maximum length. Overlong "
         "keyword-owned IN, VALUES, and TABLE lists wrap one item per line, "
         "and long foreign-key constraints wrap their detail clauses. "
-        "Large repeated one-row INSERT data dumps remain compact."
+        "Large repeated one-row INSERT data dumps remain compact. Literal "
+        "data that cannot be wrapped without changing its value is reported "
+        "as nonfixable."
     )
     category = "general"
     is_fixable = "sometimes"
@@ -149,6 +157,31 @@ class LineLengthRule(BaseRule):
             # wrapper that should be discounted.
             base_indent_spaces = 0
             
+        line_starts = []
+        offset = 0
+        for physical_line in content.splitlines(keepends=True):
+            line_starts.append(offset)
+            offset += len(physical_line)
+        if not line_starts and content:
+            line_starts.append(0)
+
+        opaque_lines = set()
+        for token in tokenize_sql(content):
+            if token["type"] != "STRING" or token["value"].startswith("$"):
+                continue
+            start_line = bisect_right(line_starts, token["start"]) - 1
+            end_line = bisect_right(
+                line_starts,
+                max(token["start"], token["end"] - 1),
+            ) - 1
+            if "\n" in token["value"]:
+                # Physical lines wholly inside a conventional SQL string are
+                # data, including dynamic SQL text, and cannot be reformatted
+                # without changing the literal value.
+                opaque_lines.update(range(start_line + 1, end_line + 2))
+            elif len(token["value"]) > max_length:
+                opaque_lines.add(start_line + 1)
+
         violations = []
         lines = content.splitlines()
         for idx, line in enumerate(lines, start=1):
@@ -156,13 +189,17 @@ class LineLengthRule(BaseRule):
                 continue
             effective_len = len(line) - base_indent_spaces
             if effective_len > max_length:
+                is_opaque = (
+                    idx in opaque_lines
+                    or _OPAQUE_STRING_ASSIGNMENT.match(line) is not None
+                )
                 violations.append(
                     Violation(
                         rule_id=self.rule_id,
                         line_number=idx,
                         message=f"Line exceeds maximum length of {max_length} characters (actual effective length: {effective_len}, total length: {len(line)}).",
                         offending_lines=[line],
-                        is_fixable=True
+                        is_fixable=not is_opaque
                     )
                 )
                 
@@ -182,7 +219,7 @@ class LineLengthRule(BaseRule):
         # Collapse a simple one-argument call when its surrounding expression
         # fits after compaction. This also repairs calls expanded during an
         # earlier pass before their enclosing SELECT layout had stabilized.
-        from mir.rules.sql.sql_utils import find_matching_paren, tokenize_sql
+        from mir.rules.sql.sql_utils import find_matching_paren
         from mir.rules.sql.table_function_indent import table_function_parens
 
         # Constraint declarations are schema clauses, not function calls.
