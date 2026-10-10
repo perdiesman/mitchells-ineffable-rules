@@ -66,6 +66,44 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(rule.fix(source, "generic.xml", config), expected)
 
+    def test_wrapped_join_operator_keeps_its_condition_on_the_same_line(self):
+        source = (
+            "    JOIN sample_owner owner ON owner.organization_identifier = item.organization_identifier\n"
+            "        AND\n"
+            "owner.external_identifier = item.owner_external_identifier"
+        )
+        expected = (
+            "    JOIN sample_owner owner ON owner.organization_identifier = item.organization_identifier\n"
+            "        AND owner.external_identifier = item.owner_external_identifier"
+        )
+        rule = JoinOnMultiRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+
+    def test_join_predicate_subquery_compacts_when_on_line_fits(self):
+        source = (
+            "                            LEFT JOIN sample_county county\n"
+            "                                ON county.state_id = (\n"
+            "                                    SELECT state_id\n"
+            "                                    FROM sample_state\n"
+            "                                    WHERE code = 'AA'\n"
+            "                                )"
+        )
+        expected = (
+            "                            LEFT JOIN sample_county county\n"
+            "                                ON county.state_id = "
+            "(SELECT state_id FROM sample_state WHERE code = 'AA')"
+        )
+        rule = SubqueryIndentRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+
     def test_additive_wrap_uses_join_continuation_limit(self):
         source = (
             "            JOIN sample_window window ON item.recorded_at "

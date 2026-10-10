@@ -268,6 +268,27 @@ class JoinOnMultiRule(BaseRule):
                             join_prefix_for_on.rstrip() + " ON " + left
                         )
                         second_candidate = expected_indent + right
+                        right_active = [
+                            item
+                            for item in tokens[actual_idx + 1:first_condition_end]
+                            if item["type"] not in ("WHITESPACE", "COMMENT")
+                        ]
+                        right_is_subquery = bool(
+                            len(right_active) >= 2
+                            and right_active[0]["type"] == "PAREN"
+                            and right_active[0]["value"] == "("
+                            and right_active[1]["type"] == "KEYWORD"
+                            and right_active[1]["value"].upper() == "SELECT"
+                        )
+                        compact_on_candidate = (
+                            expected_indent
+                            + "ON "
+                            + left
+                            + " "
+                            + candidate["value"]
+                            + " "
+                            + right
+                        )
                         if (
                             right
                             and len(right) > max_len // 3
@@ -275,6 +296,10 @@ class JoinOnMultiRule(BaseRule):
                             <= max_len
                             and len(second_candidate) <= max_len
                             and len(first_candidate) + 1 + len(right) > max_len
+                            and not (
+                                right_is_subquery
+                                and len(compact_on_candidate) <= max_len
+                            )
                         ):
                             operator_split = actual_idx
                         break
@@ -429,6 +454,40 @@ class JoinOnMultiRule(BaseRule):
                             "ws_start": ws_before["start"] if ws_before else t["start"],
                             "ws_end": t["start"],
                             "replacement": expected_replacement
+                        })
+                    next_active_idx = next(
+                        (
+                            index
+                            for index in range(actual_idx + 1, clause_end)
+                            if tokens[index]["type"]
+                            not in ("WHITESPACE", "COMMENT")
+                        ),
+                        None,
+                    )
+                    if next_active_idx is None:
+                        continue
+                    next_active = tokens[next_active_idx]
+                    crosses_dynamic_boundary = (
+                        next_active["start"] in mybatis_dynamic_offsets
+                        or any(
+                            t["end"] <= offset <= next_active["start"]
+                            for offset in mybatis_boundary_offsets
+                        )
+                    )
+                    if crosses_dynamic_boundary:
+                        continue
+                    ws_after = (
+                        tokens[actual_idx + 1]
+                        if actual_idx + 1 < len(tokens)
+                        and tokens[actual_idx + 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    if ws_after is None or ws_after["value"] != " ":
+                        violations.append({
+                            "token": t,
+                            "ws_start": ws_after["start"] if ws_after else t["end"],
+                            "ws_end": ws_after["end"] if ws_after else t["end"],
+                            "replacement": " ",
                         })
                             
         return violations

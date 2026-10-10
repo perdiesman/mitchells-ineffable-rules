@@ -62,6 +62,22 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
         closing_start = content.find(f"</{tag_name}", opening_end + 1)
         if opening_end != -1 and closing_start != -1:
             dynamic_text = content[opening_end + 1:closing_start].strip().upper()
+            if re.match(
+                r"(?:(?:LEFT|RIGHT|FULL)(?:\s+OUTER)?|INNER|CROSS)?\s*JOIN\b",
+                dynamic_text,
+            ):
+                for k in range(t["line"] - 2, query_line - 1, -1):
+                    previous = lines[k]
+                    if not previous.strip():
+                        continue
+                    previous_text = previous.strip().upper()
+                    if previous_text.startswith(("AND ", "OR ")):
+                        previous_indent = previous[
+                            : len(previous) - len(previous.lstrip(" \t"))
+                        ]
+                        if len(previous_indent) >= indent_size:
+                            return previous_indent[:-indent_size]
+                    break
             if dynamic_text in {"LEFT", "RIGHT", "INNER", "FULL", "CROSS"}:
                 for k in range(t["line"] - 2, query_line - 1, -1):
                     candidate = lines[k]
@@ -113,7 +129,7 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
                             
                         extra_indent_keywords = {
                             "FROM", "WHERE", "SELECT", "HAVING", "ON", "USING", "VALUES", "SET", 
-                            "AND", "OR", "IN", "JOIN", "LEFT", "RIGHT", "INNER", "CROSS", "FULL", "WITH",
+                            "IN", "JOIN", "LEFT", "RIGHT", "INNER", "CROSS", "FULL", "WITH",
                             "CASE", "THEN", "ELSE", "BEGIN", "EXCEPTION",
                             "(", "+", "-", "/", "||"
                         }

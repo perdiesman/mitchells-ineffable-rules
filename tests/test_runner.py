@@ -2181,6 +2181,76 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, first.content)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_formats_dynamic_group_by_items(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="groupedItems">\n'
+            '        SELECT count(*)\n'
+            '        FROM sample_item item\n'
+            '        GROUP BY item.organization_identifier, item.owner_identifier,\n'
+            '        <if test="byState">item.state_identifier</if>\n'
+            '        <if test="byCounty">item.county_identifier, item.state_identifier</if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '        GROUP BY item.organization_identifier, item.owner_identifier,\n',
+            '        GROUP BY\n'
+            '            item.organization_identifier,\n'
+            '            item.owner_identifier,\n',
+        ).replace(
+            '        <if test="byState">',
+            '            <if test="byState">',
+        ).replace(
+            '        <if test="byCounty">',
+            '            <if test="byCounty">',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_compacts_short_dynamic_order_by_suffix(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="orderedItems">\n'
+            '        SELECT item_identifier\n'
+            '        FROM sample_item\n'
+            '        ORDER BY item_name\n'
+            '        <if test="byLocation">\n'
+            '            , state_code, county_name\n'
+            '        </if>\n'
+            '        ;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="orderedItems">\n'
+            '        SELECT item_identifier\n'
+            '        FROM sample_item\n'
+            '        ORDER BY item_name '
+            '<if test="byLocation">, state_code, county_name</if>;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_choose_branches_do_not_extend_join_predicates(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

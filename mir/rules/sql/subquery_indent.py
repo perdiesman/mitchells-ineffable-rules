@@ -185,6 +185,86 @@ class SubqueryIndentRule(BaseRule):
                         expected_close_indent = open_indent + "    "
                     else:
                         expected_close_indent = open_indent
+
+                    has_mybatis_boundary = any(
+                        tok["start"] < offset < tokens[close_idx]["end"]
+                        for offset in rule_config.get(
+                            "mybatis_boundary_offsets", set()
+                        )
+                    )
+                    on_token = next(
+                        (
+                            tokens[index]
+                            for index in range(i - 1, -1, -1)
+                            if tokens[index]["line"] == tok["line"]
+                            and depths[index] == depths[i]
+                            and tokens[index]["type"] == "KEYWORD"
+                            and tokens[index]["value"].upper() == "ON"
+                        ),
+                        None,
+                    )
+                    if (
+                        not is_from_join
+                        and not has_mybatis_boundary
+                        and on_token is not None
+                    ):
+                        inner_tokens = tokens[next_active_idx:close_idx]
+                        if not any(
+                            token["type"] == "COMMENT" for token in inner_tokens
+                        ):
+                            compact_inner = "".join(
+                                " " if token["type"] == "WHITESPACE" else token["value"]
+                                for token in inner_tokens
+                            ).strip()
+                            line_start = content.rfind("\n", 0, tok["start"]) + 1
+                            line_end = content.find("\n", tokens[close_idx]["end"])
+                            if line_end == -1:
+                                line_end = len(content)
+                            candidate_prefix = content[line_start:tok["end"]]
+                            on_line_start = content.rfind(
+                                "\n", 0, on_token["start"]
+                            ) + 1
+                            on_prefix = content[
+                                on_line_start:on_token["start"]
+                            ]
+                            if on_prefix.strip():
+                                leading = on_prefix[
+                                    : len(on_prefix) - len(on_prefix.lstrip())
+                                ]
+                                candidate_prefix = (
+                                    leading
+                                    + "    "
+                                    + content[on_token["start"]:tok["end"]]
+                                )
+                            else:
+                                candidate_prefix = content[
+                                    on_line_start:tok["end"]
+                                ]
+                            candidate_line = (
+                                candidate_prefix
+                                + compact_inner
+                                + content[tokens[close_idx]["start"]:line_end]
+                            )
+                            from mir.rules.sql.line_length import LineLengthRule
+                            max_length = self.get_config_value(
+                                rule_config,
+                                "max_length",
+                                default_value=120,
+                                fallbacks=[(LineLengthRule, "max_length")],
+                            )
+                            if len(candidate_line) <= max_length:
+                                violations.append({
+                                    "type": "compact_subquery",
+                                    "open_tok": tok,
+                                    "close_tok": tokens[close_idx],
+                                    "first_sub_tok": next_active,
+                                    "open_line": tok["line"],
+                                    "close_line": tokens[close_idx]["line"],
+                                    "ws_start": tok["end"],
+                                    "ws_end": tokens[close_idx]["start"],
+                                    "replacement": compact_inner,
+                                })
+                                continue
                     expected_content_indent = expected_close_indent + "    "
                     subquery_depth = depths[next_active_idx]
                     clause_lines = {
@@ -289,6 +369,12 @@ class SubqueryIndentRule(BaseRule):
             return (
                 content[: item["ws_start"]]
                 + " "
+                + content[item["ws_end"] :]
+            )
+        if item.get("type") == "compact_subquery":
+            return (
+                content[: item["ws_start"]]
+                + item["replacement"]
                 + content[item["ws_end"] :]
             )
 

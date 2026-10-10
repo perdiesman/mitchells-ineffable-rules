@@ -399,7 +399,9 @@ def fix_embedded_content(
         extra_fix_args["original_protected_signature"] = protected_sql_signature(
             guest_text
         )
-        extra_fix_args["expected_protected_signature"] = protected_sql_signature(fixed_text)
+        extra_fix_args["expected_protected_signature"] = protected_sql_signature(
+            fixed_text
+        )
                 
     edits = []
     if fixed_text != guest_text:
@@ -533,17 +535,8 @@ def fix_embedded_content(
                                     ))
                             line_offset += len(guest_line)
                     else:
-                        repeated_selects = (
-                            guest_block.lower().count("select") > 1
-                            and fixed_block.lower().count("select")
-                            == guest_block.lower().count("select")
-                        )
                         char_matcher = difflib.SequenceMatcher(
-                            (
-                                (lambda char: char.isspace())
-                                if repeated_selects
-                                else None
-                            ),
+                            lambda char: char.isspace(),
                             guest_block,
                             fixed_block,
                             autojunk=False,

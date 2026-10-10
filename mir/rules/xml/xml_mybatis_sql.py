@@ -589,9 +589,14 @@ def dynamic_column_layout_edits(
             clause, max_length, indent_size, 0
         )
         single_line = f"{prefix} {', '.join(clause['expressions'])}"
-        if source_text_length(
+        fits_single_line = source_text_length(
             clause["indentation"] + single_line, rule_config
-        ) <= max_length:
+        ) <= max_length
+        dynamic_group_is_already_multiline = (
+            clause["keyword"].startswith("GROUP BY")
+            and "\n" in sql_text[clause["keyword_start"]:clause["list_end"]]
+        )
+        if fits_single_line and not dynamic_group_is_already_multiline:
             continue
 
         inner_indent = clause["indentation"] + (" " * indent_size)
@@ -681,6 +686,18 @@ def dynamic_sql_indent_source_edits(
             for range_start, range_end, _ in dynamic_ranges
         ):
             continue
+        dynamic_indent = max(
+            (
+                expected_indent
+                for range_start, range_end, expected_indent in dynamic_ranges
+                if range_start < source_end <= range_end
+            ),
+            default=0,
+        )
+        if "\n" in replacement and dynamic_indent:
+            head, tail = replacement.rsplit("\n", 1)
+            if not tail.strip() and len(tail) < dynamic_indent:
+                replacement = head + "\n" + (" " * dynamic_indent)
         edits.append(
             (source_start, source_end, replacement)
         )
@@ -706,7 +723,7 @@ def dynamic_subquery_source_edits(
 
     edits = []
     for item in rule._find_violations(sql_text, rule_config):
-        if item.get("type") == "compact_join_opener":
+        if item.get("type") in {"compact_join_opener", "compact_subquery"}:
             continue
         if item["first_sub_tok"]["line"] == item["open_tok"]["line"]:
             continue
@@ -751,6 +768,83 @@ def dynamic_subquery_source_edits(
             edits.append(
                 (source_line_start, source_body_start, expected)
             )
+    return edits
+
+
+def resolve_source_edits(
+    edits: List[tuple[int, int, str]],
+) -> List[tuple[int, int, str]]:
+    """Deduplicate edits and reject overlaps the same way for validation and output."""
+    seen = set()
+    unique_edits = []
+    for edit in edits:
+        if edit not in seen:
+            seen.add(edit)
+            unique_edits.append(edit)
+    unique_edits.sort(key=lambda item: (item[0], item[1]))
+    resolved = []
+    last_end = -1
+    for start, end, replacement in unique_edits:
+        if start == end:
+            if start > last_end:
+                resolved.append((start, end, replacement))
+                last_end = end
+        elif start >= last_end:
+            resolved.append((start, end, replacement))
+            last_end = end
+    return resolved
+
+
+def compact_dynamic_order_by_edits(
+    content: str,
+    source_range: tuple[int, int],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Compact a trailing optional ORDER BY suffix when its XML line fits."""
+    import re
+
+    from mir.rules.sql.line_length import LineLengthRule
+    from mir.rules.sql.sql_utils import source_text_length, tokenize_sql
+
+    start, end = source_range
+    fragment = content[start:end]
+    pattern = re.compile(
+        r"(?m)^([ \t]*)ORDER[ \t]+BY[ \t]+([^\n<;]+?)[ \t]*\n"
+        r"[ \t]*(<if\b[^>]*>)(.*?)(</if>)[ \t]*\n[ \t]*;",
+        re.DOTALL,
+    )
+    max_length = LineLengthRule().get_config_value(
+        rule_config,
+        "max_length",
+        default_value=120,
+    )
+    edits = []
+    for match in pattern.finditer(fragment):
+        body = match.group(4)
+        if "<" in body or "--" in body or "/*" in body:
+            continue
+        body_tokens = tokenize_sql(body)
+        compact_body = "".join(
+            " " if token["type"] == "WHITESPACE" else token["value"]
+            for token in body_tokens
+        ).strip()
+        replacement = (
+            match.group(1)
+            + "ORDER BY "
+            + match.group(2).strip()
+            + " "
+            + match.group(3)
+            + compact_body
+            + match.group(5)
+            + ";"
+        )
+        if source_text_length(replacement, rule_config) > max_length:
+            continue
+        edits.append((
+            start + match.start(),
+            start + match.end(),
+            replacement,
+        ))
     return edits
 
 
@@ -893,6 +987,22 @@ class XmlMybatisSqlRule(BaseRule):
                             "[MyBatis SQL: IR-column-layout] Align the "
                             "dynamic column list one indentation level below "
                             "its keyword."
+                        ),
+                        "is_fixable": True,
+                    })
+                order_edits = compact_dynamic_order_by_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                if order_edits:
+                    first_start = min(start for start, _, _ in order_edits)
+                    violations.append({
+                        "rule_id": self.rule_id,
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "Compact the optional ORDER BY suffix when the "
+                            "complete XML line fits."
                         ),
                         "is_fixable": True,
                     })
@@ -1089,17 +1199,25 @@ class XmlMybatisSqlRule(BaseRule):
                         join_config,
                     )
                 )
-                # Direct source-layout helpers are authorized to move only
-                # whitespace.  Expanded MyBatis SQL can contain synthetic or
-                # repeated mappings, so enforce that invariant again at the
-                # common boundary before combining their edits with semantic
-                # guest-rule fixes.
+                dynamic_order_edits = compact_dynamic_order_by_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                layout_edits.extend(dynamic_order_edits)
+                # Direct layout helpers are authorized to move only
+                # whitespace, except for exact structural compaction that
+                # preserves the complete SQL and XML token sequence.
+                trusted_structural_edits = set(dynamic_order_edits)
                 layout_edits = [
                     (start, end, replacement)
                     for start, end, replacement in layout_edits
                     if (
-                        (start == end or content[start:end].isspace())
-                        and (not replacement or replacement.isspace())
+                        (start, end, replacement) in trusted_structural_edits
+                        or (
+                            (start == end or content[start:end].isspace())
+                            and (not replacement or replacement.isspace())
+                        )
                     )
                 ]
                 edits = fix_embedded_content(
@@ -1108,6 +1226,11 @@ class XmlMybatisSqlRule(BaseRule):
                     mapping=mapping,
                     file_path=file_path,
                     rule_config=inner_config,
+                    excluded_rule_ids=(
+                        {"IR-null-coalesce"}
+                        if bridge_state["mybatis_dynamic_indent_ranges"]
+                        else None
+                    ),
                     require_embedded_safe=True,
                     extra_fix_args=bridge_state,
                 )
@@ -1127,6 +1250,7 @@ class XmlMybatisSqlRule(BaseRule):
                     ]
                     if len(fragment_edits) != len(edits):
                         continue
+                    fragment_edits = resolve_source_edits(fragment_edits)
                     for start, end, replacement in sorted(fragment_edits, reverse=True):
                         relative_start = start - fragment_start
                         relative_end = end - fragment_start
@@ -1154,27 +1278,7 @@ class XmlMybatisSqlRule(BaseRule):
         if not all_xml_edits:
             return content
 
-        seen_edits = set()
-        unique_edits = []
-        for start, end, replacement in all_xml_edits:
-            key = (start, end, replacement)
-            if key not in seen_edits:
-                seen_edits.add(key)
-                unique_edits.append((start, end, replacement))
-
-        unique_edits.sort(key=lambda x: (x[0], x[1]))
-        resolved_edits = []
-        last_end = -1
-        for start, end, replacement in unique_edits:
-            if start == end:
-                if start > last_end:
-                    resolved_edits.append((start, end, replacement))
-                    last_end = end
-            else:
-                if start >= last_end:
-                    resolved_edits.append((start, end, replacement))
-                    last_end = end
-
+        resolved_edits = resolve_source_edits(all_xml_edits)
         resolved_edits.sort(key=lambda x: x[0], reverse=True)
         chars = list(content)
         for start, end, new_text in resolved_edits:

@@ -233,6 +233,60 @@ class ExpressionSplitRule(BaseRule):
 
             def get_case1_edits():
                 case1_edits = []
+                # A long JOIN line may become valid simply by moving ON to its
+                # continuation indent. Preserve a compact scalar subquery in
+                # that predicate so JoinOnMultiRule can make that higher-level
+                # split instead of expanding the parentheses first.
+                on_token = next(
+                    (
+                        token
+                        for token in active_tokens
+                        if token["type"] == "KEYWORD"
+                        and token["value"].upper() == "ON"
+                    ),
+                    None,
+                )
+                if on_token is not None:
+                    for candidate_open in active_tokens:
+                        if (
+                            candidate_open["type"] != "PAREN"
+                            or candidate_open["value"] != "("
+                            or candidate_open["start"] < on_token["end"]
+                        ):
+                            continue
+                        candidate_open_index = get_index(candidate_open)
+                        candidate_close_index = find_matching_paren(
+                            tokens, candidate_open_index
+                        )
+                        if candidate_close_index is None:
+                            continue
+                        first_inner = next(
+                            (
+                                tokens[index]
+                                for index in range(
+                                    candidate_open_index + 1,
+                                    candidate_close_index,
+                                )
+                                if tokens[index]["type"]
+                                not in ("WHITESPACE", "COMMENT")
+                            ),
+                            None,
+                        )
+                        if not (
+                            first_inner
+                            and first_inner["type"] == "KEYWORD"
+                            and first_inner["value"].upper() == "SELECT"
+                        ):
+                            continue
+                        on_expression = "".join(
+                            " " if token["type"] == "WHITESPACE" else token["value"]
+                            for token in tokens[
+                                get_index(on_token):candidate_close_index + 1
+                            ]
+                        ).strip()
+                        if len(base_indent) + 4 + len(on_expression) <= max_len:
+                            return []
+
                 # Fallback to Case 1: Split on first non-empty open parenthesis on this line
                 open_tok = None
                 for t_before in active_tokens:
