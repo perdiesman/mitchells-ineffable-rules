@@ -1045,10 +1045,6 @@ class XmlIndentRule(BaseRule):
                             )
                             continue
                         first_word = line_text.strip().split(None, 1)[0].upper()
-                        is_bind_body = bool(re.match(
-                            r"^(?:#\{|\$\{)[^}]+\},?$",
-                            line_text.strip(),
-                        ))
                         is_logical_continuation = first_word in {"AND", "OR"}
                         open_parenthesis_depth = 0
                         opening_tag_end = content.find(
@@ -1140,13 +1136,6 @@ class XmlIndentRule(BaseRule):
                                         and actual_indent != minimum_indent
                                     )
                                 )
-                            )
-                            or (
-                                defer_sql_text
-                                and is_bind_body
-                                and dynamic_parent["tag"] == "foreach"
-                                and open_parenthesis_depth <= 0
-                                and actual_indent != minimum_indent
                             )
                             or malformed_dynamic_indent
                             or len(actual_indent) < len(minimum_indent)

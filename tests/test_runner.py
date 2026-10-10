@@ -166,6 +166,33 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
 
+    def test_xml_mybatis_keeps_select_bind_columns_nested_in_foreach(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="items">\n'
+            '        <foreach collection="items" item="item">\n'
+            '            INSERT INTO sample_history (item_id, started_at, observed_at)\n'
+            '            SELECT\n'
+            '                item.extraordinarily_long_external_item_identifier AS extraordinarily_long_item_identifier,\n'
+            '                #{startedAt},\n'
+            '                #{startedAt}\n'
+            '            FROM sample_item item\n'
+            '        </foreach>\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_expands_long_distinct_from_row(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
