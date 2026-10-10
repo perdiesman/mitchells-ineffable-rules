@@ -77,6 +77,7 @@ def parse_xml_elements(tokens: List[dict]) -> List[dict]:
             frame = {
                 "tag": token["value"][1:].lower(),
                 "attrs": attrs,
+                "depth": len(stack),
                 "start_idx": index,
                 "open_end_idx": tag_end,
                 "children": [],
@@ -475,23 +476,16 @@ def expand_tokens(
                         continue
         i += 1
 def get_element_base_indent(el: dict, tokens: List[dict], content: str, rule_config: Dict[str, Any]) -> str:
-    tag_start_offset = el.get("start_offset", 0)
-    line_start = content.rfind("\n", 0, tag_start_offset) + 1
-    tag_line_prefix = content[line_start:tag_start_offset]
-    tag_indent = ""
-    for char in tag_line_prefix:
-        if char in (" ", "\t"):
-            tag_indent += char
-        else:
-            break
-            
     xml_indent_config = rule_config.get("_all_configs", {}).get("IR-xml-indent", {})
     if isinstance(xml_indent_config, bool):
         xml_indent_size = 4
     else:
         xml_indent_size = xml_indent_config.get("indent_size", 4)
         
-    return tag_indent + " " * xml_indent_size
+    # Anchor SQL to XML structure rather than the tag's current whitespace.
+    # Otherwise an incorrectly indented statement tag makes the SQL bridge and
+    # IR-xml-indent alternate forever between two indentation widths.
+    return " " * ((el.get("depth", 0) + 1) * xml_indent_size)
 
 
 def get_dynamic_indent_ranges(

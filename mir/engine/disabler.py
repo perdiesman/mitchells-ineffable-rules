@@ -6,6 +6,8 @@ from typing import Dict, Set, List, Tuple
 START_RE = re.compile(r"IR-start-([a-zA-Z0-9_-]+)")
 END_RE = re.compile(r"IR-end-([a-zA-Z0-9_-]+)")
 SINGLE_RE = re.compile(r"IR-([a-zA-Z0-9_-]+)")
+FORMATTER_OFF_RE = re.compile(r"@formatter\s*:\s*off\b", re.IGNORECASE)
+FORMATTER_ON_RE = re.compile(r"@formatter\s*:\s*on\b", re.IGNORECASE)
 
 def get_file_language(file_path: str) -> str:
     ext = os.path.splitext(file_path)[1].lower()
@@ -229,6 +231,13 @@ def get_disabled_rules_map(content: str, file_path: str) -> Dict[str, Set[int]]:
         line_has_start_or_end = False
         
         for comment in comments:
+            if FORMATTER_OFF_RE.search(comment):
+                active_blocks.add("IR-all")
+                line_has_start_or_end = True
+            if FORMATTER_ON_RE.search(comment):
+                active_blocks.discard("IR-all")
+                line_has_start_or_end = True
+
             # 1. Parse start block
             starts = START_RE.findall(comment)
             for s in starts:

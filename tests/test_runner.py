@@ -28,6 +28,56 @@ class TestRunnerIntegration(unittest.TestCase):
             f.write(content)
         return filepath
 
+    def test_xml_formatter_off_region_is_not_fixed(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <!--@formatter:off-->\n'
+            '    <select id="kept">select  item_id from sample_item</select>\n'
+            '    <!-- @formatter:on -->\n'
+            '    <select id="fixed">select item_id from sample_item</select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '    <select id="fixed">select item_id from sample_item</select>',
+            '    <select id="fixed">SELECT item_id FROM sample_item</select>',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+
+    def test_mybatis_sql_indent_uses_structural_xml_depth(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '     <delete id="remove">\n'
+            '        delete from sample_item\n'
+            '    </delete>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <delete id="remove">\n'
+            '        DELETE\n'
+            '        FROM sample_item\n'
+            '    </delete>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_selected_lines_follow_inserted_formatter_output(self):
         original = "SELECT value\nFROM sample\nWHERE enabled = true\n"
         fixed = "SELECT value\nFROM\n    sample\nWHERE enabled = true\n"

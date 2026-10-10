@@ -409,6 +409,8 @@ def process_document(
 
                 if has_trellis_syntax(current):
                     template_dialect = "trellis"
+            disabled_content = None
+            disabled_by_rule: dict[str, set[int]] = {}
             for rule in fix_rules:
                 rule_config = resolve_rule_config(
                     config,
@@ -424,9 +426,25 @@ def process_document(
                 except Exception as error:
                     result.diagnostics.append(f"Error fixing rule {rule.rule_id} on {path}: {error}")
                     continue
-                if active_selection.restricted:
+                has_disable_directive = (
+                    "IR-" in current or "@formatter" in current.lower()
+                )
+                if has_disable_directive and disabled_content != current:
+                    disabled_by_rule = get_disabled_rules_map(current, path)
+                    disabled_content = current
+                protected_lines = (
+                    disabled_by_rule.get(rule.rule_id, set())
+                    | disabled_by_rule.get("IR-all", set())
+                )
+                if active_selection.restricted or protected_lines:
+                    allowed_lines = (
+                        set(active_selection.allowed)
+                        if active_selection.restricted
+                        else set(range(1, len(current.splitlines()) + 1))
+                    )
+                    allowed_lines.difference_update(protected_lines)
                     fixed = apply_filtered_fixes(
-                        current, fixed, set(active_selection.allowed)
+                        current, fixed, allowed_lines
                     )
                 if config.profile == "commit" and lang == "sql" and fixed != current:
                     from mir.rules.sql.sql_utils import protected_sql_signature
