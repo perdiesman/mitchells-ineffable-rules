@@ -979,6 +979,25 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(ClauseAlignmentRule().fix(content, "generic.sql", {}), content)
 
+    def test_clause_alignment_keeps_mybatis_branches_independent(self):
+        source = (
+            "            SELECT item_id\n"
+            "            FROM current_item\n"
+            "            UNION ALL\n"
+            "                    SELECT item_id\n"
+            "                    FROM archived_item\n"
+            "                    WHERE archived"
+        )
+        branch_start = source.index("                    SELECT", source.index("UNION ALL"))
+        config = {
+            "mybatis_boundary_offsets": set(),
+            "mybatis_dynamic_offsets": set(range(branch_start, len(source))),
+        }
+        rule = ClauseAlignmentRule()
+
+        self.assertEqual(rule.check(source, "generic.xml", config), [])
+        self.assertEqual(rule.fix(source, "generic.xml", config), source)
+
     def test_cte_and_lateral_parentheses_are_not_function_calls(self):
         content = (
             "WITH sample_rows AS (SELECT item_id FROM sample_item)\n"

@@ -733,6 +733,20 @@ def dynamic_subquery_source_edits(
         line_offsets.append(offset)
         offset += len(line)
 
+    dynamic_offsets = rule_config.get("mybatis_dynamic_offsets", set())
+    dynamic_source_ranges = rule_config.get(
+        "mybatis_dynamic_indent_ranges", []
+    )
+
+    def is_dynamic_source_offset(guest_offset: int) -> bool:
+        if not (0 <= guest_offset < len(mapping)):
+            return False
+        source_offset = mapping[guest_offset]
+        return any(
+            range_start < source_offset < range_end
+            for range_start, range_end, _ in dynamic_source_ranges
+        )
+
     edits = []
     scan_config = dict(rule_config)
     scan_config.pop("source_mapped_subquery_compaction", None)
@@ -803,6 +817,17 @@ def dynamic_subquery_source_edits(
             guest_body_start = line_offsets[line_number - 1] + len(guest_indent)
             if guest_body_start >= len(mapping):
                 continue
+            if (
+                (
+                    guest_body_start in dynamic_offsets
+                    or is_dynamic_source_offset(guest_body_start)
+                )
+                and not (
+                    open_guest_offset in dynamic_offsets
+                    or is_dynamic_source_offset(open_guest_offset)
+                )
+            ):
+                continue
             source_body_start = mapping[guest_body_start]
             # Synthetic SQL separators and repeated fragment expansion can
             # make a guest line number point into the middle of its source
@@ -830,7 +855,6 @@ def dynamic_subquery_source_edits(
     # aligned and therefore reports no violation.
     sql_tokens = tokenize_sql(sql_text)
     depths = get_token_depths(sql_tokens)
-    dynamic_offsets = rule_config.get("mybatis_dynamic_offsets", set())
     clause_keywords = {
         "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "HAVING",
         "LIMIT", "UNION", "INTERSECT", "EXCEPT",
@@ -872,8 +896,14 @@ def dynamic_subquery_source_edits(
         ):
             continue
         if (
-            sql_tokens[select_index]["start"] in dynamic_offsets
-            and open_token["start"] not in dynamic_offsets
+            (
+                sql_tokens[select_index]["start"] in dynamic_offsets
+                or is_dynamic_source_offset(sql_tokens[select_index]["start"])
+            )
+            and not (
+                open_token["start"] in dynamic_offsets
+                or is_dynamic_source_offset(open_token["start"])
+            )
         ):
             # A dynamic tag supplies an alternative SELECT inside an outer
             # CTE/derived-table parenthesis. Its extra source indentation is
@@ -909,6 +939,21 @@ def dynamic_subquery_source_edits(
                 and token["type"] == "KEYWORD"
                 and token["value"].upper() in clause_keywords
             ):
+                if (
+                    (
+                        token["start"] in dynamic_offsets
+                        or is_dynamic_source_offset(token["start"])
+                    )
+                    and not (
+                        open_token["start"] in dynamic_offsets
+                        or is_dynamic_source_offset(open_token["start"])
+                    )
+                ):
+                    # The outer CTE/derived-table parenthesis owns its static
+                    # clauses, but a nested MyBatis branch owns the additional
+                    # source indentation of clauses it contributes later in
+                    # that same SQL depth (for example after UNION ALL).
+                    continue
                 source_indent_edit(token["start"], content_indent)
         source_indent_edit(sql_tokens[close_index]["start"], close_indent)
 
@@ -2027,6 +2072,7 @@ class XmlMybatisSqlRule(BaseRule):
                             "IR-join-on-multi",
                             "IR-null-coalesce",
                             "IR-paren-single",
+                            "IR-subquery-indent",
                         }
                         if bridge_state["mybatis_dynamic_indent_ranges"]
                         else None

@@ -1,3 +1,4 @@
+from bisect import bisect_right
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
@@ -29,8 +30,16 @@ class ClauseAlignmentRule(BaseRule):
         "SELECT item_id\nFROM sample_item\nWHERE parent_id IS NOT DISTINCT FROM :parent_id;",
     ]
 
-    def _parse_clauses(self, content: str) -> List[dict]:
+    def _parse_clauses(
+        self,
+        content: str,
+        rule_config: Dict[str, Any] | None = None,
+    ) -> List[dict]:
         tokens = tokenize_sql(content)
+        dynamic_boundaries = sorted(
+            (rule_config or {}).get("mybatis_boundary_offsets", set())
+        )
+        dynamic_offsets = (rule_config or {}).get("mybatis_dynamic_offsets", set())
         paren_stack: List[int] = []
         statement_number = 0
         clauses = []
@@ -107,7 +116,18 @@ class ClauseAlignmentRule(BaseRule):
                     "space_start": space_start,
                     "indentation": indentation,
                     "is_first_on_line": is_first_on_line,
-                    "scope": (statement_number, *paren_stack),
+                    # XML tags are absent from the expanded SQL. Without a
+                    # boundary component, clauses in separate MyBatis
+                    # branches appear to share a query scope and a static
+                    # UNION branch can pull a nested dynamic SELECT out to
+                    # its own indentation. Clauses within one text node still
+                    # share a segment and align normally.
+                    "scope": (
+                        statement_number,
+                        *paren_stack,
+                        bisect_right(dynamic_boundaries, token["start"]),
+                        token["start"] in dynamic_offsets,
+                    ),
                 })
             active_indices.append(index)
 
@@ -115,7 +135,7 @@ class ClauseAlignmentRule(BaseRule):
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
-        clauses = self._parse_clauses(content)
+        clauses = self._parse_clauses(content, rule_config)
         lines = content.splitlines()
         
         scope_groups = {}
@@ -175,7 +195,7 @@ class ClauseAlignmentRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        clauses = self._parse_clauses(content)
+        clauses = self._parse_clauses(content, rule_config)
         if not clauses:
             return content
             
