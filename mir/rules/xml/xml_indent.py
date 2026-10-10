@@ -443,6 +443,21 @@ class XmlIndentRule(BaseRule):
                     "message": "MyBatis foreach continuation should start on the line after IN.",
                 })
 
+        dynamic_join_modifier = re.compile(
+            r"(?im)^([ \t]*)<if\b[^>\n]*>\s*"
+            r"(?:LEFT|RIGHT|FULL|INNER|CROSS)\s*</if>([ \t]+)(?=JOIN\b)"
+        )
+        for match in dynamic_join_modifier.finditer(content):
+            if not any(start < match.start() < end for start, end in query_ranges):
+                continue
+            violations.append({
+                "line": content.count("\n", 0, match.start()) + 1,
+                "start_offset": match.start(2),
+                "end_offset": match.end(2),
+                "replacement": "\n" + match.group(1),
+                "message": "A JOIN controlled by a dynamic modifier should start on its own line.",
+            })
+
         # Source-mapped SQL can contain repeated CASE branches on opposite
         # sides of dynamic tags. Keep boolean continuations anchored to their
         # WHEN line even when the embedded diff cannot identify the repeated

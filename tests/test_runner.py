@@ -2369,6 +2369,57 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_dynamic_join_modifier_starts_join_line(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="joinedItems">\n'
+            '        SELECT item.item_id\n'
+            '        FROM\n'
+            '            sample_item item\n'
+            '            <if test="includeMissing">LEFT</if> JOIN sample_owner entity_alias USING (owner_id)\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '</if> JOIN sample_owner',
+            '</if>\n            JOIN sample_owner',
+        )
+        config = Config()
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_compacts_short_static_order_by(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="orderedItems">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        ORDER BY\n'
+            '            item_name,\n'
+            '            recorded_at\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            'ORDER BY\n            item_name,\n            recorded_at',
+            'ORDER BY item_name, recorded_at',
+        )
+        config = Config()
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_choose_branches_do_not_extend_join_predicates(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

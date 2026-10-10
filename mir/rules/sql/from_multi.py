@@ -182,6 +182,15 @@ class FromMultiRule(BaseRule):
                                         and prev_upper == "NATURAL"
                                     )
                                     if is_compound_continuation:
+                                        if t["start"] in rule_config.get(
+                                            "mybatis_dynamic_offsets", set()
+                                        ):
+                                            # The modifier may be emitted by a
+                                            # dynamic XML tag. Preserve the
+                                            # source boundary before JOIN so
+                                            # the tag remains a distinct
+                                            # programming-language step.
+                                            continue
                                         if any(
                                             token["type"] == "COMMENT"
                                             for token in tokens[prev_active_idx + 1:start_ws]

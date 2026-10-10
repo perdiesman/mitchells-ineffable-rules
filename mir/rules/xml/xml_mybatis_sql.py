@@ -848,6 +848,63 @@ def compact_dynamic_order_by_edits(
     return edits
 
 
+def compact_static_order_by_edits(
+    content: str,
+    source_range: tuple[int, int],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Compact a static multiline ORDER BY list when the source line fits."""
+    import re
+
+    from mir.rules.sql.line_length import LineLengthRule
+    from mir.rules.sql.sql_utils import source_text_length
+
+    start, end = source_range
+    fragment = content[start:end]
+    lines = fragment.splitlines(keepends=True)
+    line_offsets = []
+    offset = 0
+    for line in lines:
+        line_offsets.append(offset)
+        offset += len(line)
+    max_length = LineLengthRule().get_config_value(
+        rule_config,
+        "max_length",
+        default_value=120,
+    )
+    edits = []
+    for index, raw_line in enumerate(lines):
+        line = raw_line.rstrip("\r\n")
+        match = re.match(r"^([ \t]*)ORDER[ \t]+BY[ \t]*$", line, re.IGNORECASE)
+        if match is None:
+            continue
+        continuation_indent = match.group(1) + "    "
+        items = []
+        final_index = index
+        for candidate_index in range(index + 1, len(lines)):
+            candidate = lines[candidate_index].rstrip("\r\n")
+            if not candidate.startswith(continuation_indent):
+                break
+            body = candidate[len(continuation_indent):]
+            if not body or body.startswith("<") or "--" in body or "/*" in body:
+                break
+            items.append(body.strip())
+            final_index = candidate_index
+            if not body.rstrip().endswith(","):
+                break
+        if not items or final_index == index or items[-1].endswith(","):
+            continue
+        replacement = match.group(1) + "ORDER BY " + " ".join(items)
+        if source_text_length(replacement, rule_config) > max_length:
+            continue
+        edit_start = start + line_offsets[index]
+        edit_end = start + line_offsets[final_index] + len(
+            lines[final_index].rstrip("\r\n")
+        )
+        edits.append((edit_start, edit_end, replacement))
+    return edits
+
+
 def sql_trailing_whitespace_source_edits(
     content: str,
     sql_text: str,
@@ -1092,6 +1149,19 @@ class XmlMybatisSqlRule(BaseRule):
                         ),
                         "is_fixable": True,
                     })
+                static_order_edits = compact_static_order_by_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                if static_order_edits:
+                    first_start = min(start for start, _, _ in static_order_edits)
+                    violations.append({
+                        "rule_id": self.rule_id,
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": "Compact the ORDER BY list when the line fits.",
+                        "is_fixable": True,
+                    })
 
                 embedded_violations = check_embedded_content(
                     guest_language="sql",
@@ -1291,6 +1361,12 @@ class XmlMybatisSqlRule(BaseRule):
                     inner_config,
                 )
                 layout_edits.extend(dynamic_order_edits)
+                static_order_edits = compact_static_order_by_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                )
+                layout_edits.extend(static_order_edits)
                 layout_edits.extend(
                     sql_trailing_whitespace_source_edits(
                         content,
@@ -1302,7 +1378,9 @@ class XmlMybatisSqlRule(BaseRule):
                 # Direct layout helpers are authorized to move only
                 # whitespace, except for exact structural compaction that
                 # preserves the complete SQL and XML token sequence.
-                trusted_structural_edits = set(dynamic_order_edits)
+                trusted_structural_edits = set(
+                    dynamic_order_edits + static_order_edits
+                )
                 layout_edits = [
                     (start, end, replacement)
                     for start, end, replacement in layout_edits
