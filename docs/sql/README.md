@@ -35,7 +35,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
-| [`IR-additive-wrap`](rules/queries/IR-additive-wrap.md) | Long additive expressions should wrap before an operator, with all continuation operators aligned one indentation level in. | Yes | [View Details](rules/queries/IR-additive-wrap.md) |
+| [`IR-additive-wrap`](rules/queries/IR-additive-wrap.md) | Long additive expressions should wrap before an operator, with all continuation operators aligned one indentation level in. Under-indented subtraction and operands following a trailing multiplicative operator align with their surrounding expression. | Yes | [View Details](rules/queries/IR-additive-wrap.md) |
 | [`IR-alias-as`](rules/queries/IR-alias-as.md) | Column aliases must use the AS keyword. | Yes | [View Details](rules/queries/IR-alias-as.md) |
 | [`IR-between`](rules/queries/IR-between.md) | Standardize range predicate check of form 'a >= b AND a <= c' to 'a BETWEEN b AND c'. | Yes | [View Details](rules/queries/IR-between.md) |
 | [`IR-boolean-comparison`](rules/queries/IR-boolean-comparison.md) | Standardize boolean comparison predicates to use idiomatic boolean predicates. | Yes | [View Details](rules/queries/IR-boolean-comparison.md) |

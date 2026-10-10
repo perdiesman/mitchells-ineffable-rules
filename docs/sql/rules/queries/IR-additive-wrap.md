@@ -1,6 +1,6 @@
 # IR-additive-wrap
 
-Long additive expressions should wrap before an operator, with all continuation operators aligned one indentation level in.
+Long additive expressions should wrap before an operator, with all continuation operators aligned one indentation level in. Under-indented subtraction and operands following a trailing multiplicative operator align with their surrounding expression.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes

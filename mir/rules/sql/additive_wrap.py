@@ -4,6 +4,10 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import get_token_depths, source_text_length, tokenize_sql
 
 
+_LEADING_CONTINUATION_OPERATORS = {"+", "||"}
+_TRAILING_CONTINUATION_OPERATORS = {"+", "-", "||"}
+
+
 class AdditiveWrapRule(BaseRule):
     commit_profile = True
     embedded_safe = True
@@ -11,7 +15,9 @@ class AdditiveWrapRule(BaseRule):
     rule_id = "IR-additive-wrap"
     description = (
         "Long additive expressions should wrap before an operator, with all "
-        "continuation operators aligned one indentation level in."
+        "continuation operators aligned one indentation level in. "
+        "Under-indented subtraction and operands following a trailing "
+        "multiplicative operator align with their surrounding expression."
     )
     category = "queries"
     is_fixable = "yes"
@@ -111,8 +117,41 @@ class AdditiveWrapRule(BaseRule):
             line_indent = line[: len(line) - len(line.lstrip(" \t"))]
             leading_additive = (
                 leading["type"] == "OPERATOR"
-                and leading["value"] in {"+", "||"}
+                and leading["value"] in _LEADING_CONTINUATION_OPERATORS
             )
+            if leading["type"] == "OPERATOR" and leading["value"] == "-":
+                previous_indices = active_by_line.get(line_number - 1)
+                previous_active_index = next(
+                    (
+                        index
+                        for index in range(leading_index - 1, -1, -1)
+                        if tokens[index]["type"]
+                        not in {"WHITESPACE", "COMMENT"}
+                    ),
+                    None,
+                )
+                if previous_indices and previous_active_index is not None:
+                    previous_line = lines[line_number - 2].rstrip("\r\n")
+                    previous_indent = previous_line[:
+                        len(previous_line)
+                        - len(previous_line.lstrip(" \t"))
+                    ]
+                    is_binary_subtraction = (
+                        depths[previous_active_index] == depths[leading_index]
+                        and tokens[previous_active_index]["type"]
+                        not in {"OPERATOR", "COMMA"}
+                    )
+                    actual_indent = content[line_start:leading["start"]]
+                    if (
+                        is_binary_subtraction
+                        and len(actual_indent) < len(previous_indent)
+                    ):
+                        edits.append({
+                            "token": leading,
+                            "start": line_start,
+                            "end": leading["start"],
+                            "replacement": previous_indent,
+                        })
             expected_indent = line_indent
             continuation_depth = None
             if leading_additive:
@@ -138,6 +177,14 @@ class AdditiveWrapRule(BaseRule):
                     and tokens[previous_active_index]["type"]
                     not in {"OPERATOR", "COMMA"}
                     and not (
+                        tokens[previous_active_index]["type"] == "KEYWORD"
+                        and tokens[previous_active_index]["value"].upper()
+                        in {
+                            "BY", "CASE", "ELSE", "FROM", "JOIN", "ON",
+                            "SELECT", "SET", "THEN", "WHEN", "WHERE",
+                        }
+                    )
+                    and not (
                         tokens[previous_active_index]["type"] == "PAREN"
                         and tokens[previous_active_index]["value"] == "("
                     )
@@ -153,7 +200,8 @@ class AdditiveWrapRule(BaseRule):
                     expected_indent = previous_indent + (
                         ""
                         if previous_leading["type"] == "OPERATOR"
-                        and previous_leading["value"] in {"+", "||"}
+                        and previous_leading["value"]
+                        in _LEADING_CONTINUATION_OPERATORS
                         else "    "
                     )
                     # Expression splitting can strand the first additive
@@ -174,7 +222,8 @@ class AdditiveWrapRule(BaseRule):
                     )
                     previous_has_additive = any(
                         tokens[index]["type"] == "OPERATOR"
-                        and tokens[index]["value"] in {"+", "||"}
+                        and tokens[index]["value"]
+                        in _LEADING_CONTINUATION_OPERATORS
                         and depths[index] == continuation_depth
                         for index in previous_indices
                     )
@@ -208,7 +257,8 @@ class AdditiveWrapRule(BaseRule):
                         following_leading = tokens[following_leading_index]
                         if (
                             following_leading["type"] == "OPERATOR"
-                            and following_leading["value"] in {"+", "||"}
+                            and following_leading["value"]
+                            in _LEADING_CONTINUATION_OPERATORS
                             and depths[following_leading_index]
                             == continuation_depth
                         ):
@@ -245,8 +295,38 @@ class AdditiveWrapRule(BaseRule):
             trailing = tokens[trailing_index]
             following_indices = active_by_line.get(line_number + 1)
             if (
+                trailing["type"] == "OPERATOR"
+                and trailing["value"] in {"*", "/"}
+                and not (trailing["value"] == "*" and len(indices) == 1)
+                and following_indices
+                and depths[following_indices[0]] == depths[trailing_index]
+                and not (
+                    tokens[following_indices[0]]["type"] == "KEYWORD"
+                    and tokens[following_indices[0]]["value"].upper()
+                    == "FROM"
+                )
+            ):
+                following = tokens[following_indices[0]]
+                following_line_start = line_starts[line_number]
+                actual_indent = content[
+                    following_line_start:following["start"]
+                ]
+                if actual_indent != line_indent:
+                    edits.append({
+                        "token": trailing,
+                        "start": following_line_start,
+                        "end": following["start"],
+                        "replacement": line_indent,
+                    })
+                continue
+            if (
                 trailing["type"] != "OPERATOR"
-                or trailing["value"] not in {"+", "-", "||"}
+                or trailing["value"]
+                not in _TRAILING_CONTINUATION_OPERATORS
+                or (
+                    trailing["value"] == "*"
+                    and len(indices) == 1
+                )
                 or not following_indices
                 or depths[following_indices[0]] != depths[trailing_index]
             ):

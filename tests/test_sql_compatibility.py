@@ -625,6 +625,53 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
         self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
 
+    def test_underindented_subtraction_matches_the_previous_operand(self):
+        source = (
+            "        first_measure_with_an_extraordinarily_long_name\n"
+            "    - second_measure_with_an_extraordinarily_long_name"
+        )
+        expected = (
+            "        first_measure_with_an_extraordinarily_long_name\n"
+            "        - second_measure_with_an_extraordinarily_long_name"
+        )
+
+        rule = AdditiveWrapRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+
+    def test_multiplicative_operand_matches_the_operator_line(self):
+        source = (
+            "        first_measure / second_measure *\n"
+            "                         calculate_measure(\n"
+            "                             third_measure\n"
+            "                         )"
+        )
+        expected = source.replace(
+            "                         calculate_measure(",
+            "        calculate_measure(",
+        )
+
+        rule = AdditiveWrapRule()
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+
+    def test_select_wildcard_is_not_an_arithmetic_continuation(self):
+        source = (
+            "SELECT\n"
+            "    DISTINCT ON (item_id) *\n"
+            "FROM sample_item;"
+        )
+
+        rule = AdditiveWrapRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
     def test_additive_trailing_operator_moves_before_a_long_final_operand(self):
         source = (
             "    first_measure_with_long_name + second_measure_with_long_name +\n"
