@@ -128,7 +128,11 @@ class ParenSameOpRule(BaseRule):
                     t = tokens[idx]
                     d = depths[idx]
                     if d == outer_depth:
-                        if t["type"] == "KEYWORD" and t["value"].upper() in ("SELECT", "FROM", "WHERE", "HAVING", "LIMIT", "ORDER", "GROUP"):
+                        if t["type"] == "KEYWORD" and t["value"].upper() in (
+                            "SELECT", "FROM", "WHERE", "HAVING", "LIMIT",
+                            "ORDER", "GROUP", "CASE", "WHEN", "THEN",
+                            "ELSE", "END",
+                        ):
                             break
                         if t["type"] == "KEYWORD" and t["value"].upper() == opposite_op:
                             has_opposite = True
@@ -142,7 +146,11 @@ class ParenSameOpRule(BaseRule):
                         t = tokens[idx]
                         d = depths[idx]
                         if d == outer_depth:
-                            if t["type"] == "KEYWORD" and t["value"].upper() in ("SELECT", "FROM", "WHERE", "HAVING", "LIMIT", "ORDER", "GROUP"):
+                            if t["type"] == "KEYWORD" and t["value"].upper() in (
+                                "SELECT", "FROM", "WHERE", "HAVING", "LIMIT",
+                                "ORDER", "GROUP", "CASE", "WHEN", "THEN",
+                                "ELSE", "END",
+                            ):
                                 break
                             if t["type"] == "KEYWORD" and t["value"].upper() == opposite_op:
                                 has_opposite = True

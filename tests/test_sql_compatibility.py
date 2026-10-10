@@ -930,6 +930,20 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.check(source, "generic.sql", {}), [])
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
 
+    def test_case_arm_does_not_inherit_boolean_operators_from_later_clauses(self):
+        source = (
+            "SELECT CASE WHEN (enabled AND (visible OR public)) THEN 1 ELSE 0 END "
+            "FROM sample_item WHERE owner_id = :owner_id OR shared;"
+        )
+        expected = source.replace(
+            "WHEN (enabled AND (visible OR public))",
+            "WHEN enabled AND (visible OR public)",
+        )
+        rule = ParenSameOpRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(expected, "generic.sql", {}), [])
+
     def test_between_delimiter_is_not_a_boolean_condition_boundary(self):
         where_source = (
             "SELECT item_id FROM sample_item WHERE recorded_at BETWEEN :start\n"

@@ -17,14 +17,24 @@ SQL keywords must be in uppercase.
 `left`, `right`
 
 #### Default `KEYWORDS`
-`alter`, `and`, `as`, `case`, `create`, `delete`, `distinct`, `drop`, `else`, `end`, `from`, `group by`, `having`, `index`, `inner`, `insert`, `into`, `join`, `lateral`, `left`, `limit`, `on`, `or`, `order by`, `outer`, `recursive`, `right`, `select`, `set`, `table`, `then`, `union`, `update`, `values`, `when`, `where`, `with`
+`alter`, `and`, `as`, `case`, `create`, `delete`, `distinct`, `drop`, `else`, `end`, `from`, `group by`, `having`, `index`, `inner`, `insert`, `into`, `is`, `is null`, `join`, `lateral`, `left`, `limit`, `on`, `or`, `order by`, `outer`, `recursive`, `right`, `select`, `set`, `table`, `then`, `union`, `update`, `values`, `when`, `where`, `with`
 
-#### ❌ Violating Example
+#### ❌ Violating Example #1
 ```sql
 select id, username from users where active = true;
 ```
 
-####  Correct Example
+####  Correct Example #1
 ```sql
 SELECT id, username FROM users WHERE active = true;
+```
+
+#### ❌ Violating Example #2
+```sql
+SELECT item_id FROM sample_item WHERE owner_id is null;
+```
+
+####  Correct Example #2
+```sql
+SELECT item_id FROM sample_item WHERE owner_id IS NULL;
 ```

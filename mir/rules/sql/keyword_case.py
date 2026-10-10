@@ -8,7 +8,7 @@ KEYWORDS = [
     "set", "delete", "create", "table", "drop", "alter", "index",
     "left", "right", "inner", "outer", "as", "having", "union",
     "with", "distinct", "recursive", "case", "when", "then", "else", "end",
-    "lateral"
+    "lateral", "is", "is null"
 ]
 
 FUNCTION_KEYWORD_AMBIGUITIES = {"left", "right"}
@@ -44,7 +44,11 @@ class KeywordCaseRule(BaseRule):
         {
             "violating": "select id, username from users where active = true;",
             "correct": "SELECT id, username FROM users WHERE active = true;"
-        }
+        },
+        {
+            "violating": "SELECT item_id FROM sample_item WHERE owner_id is null;",
+            "correct": "SELECT item_id FROM sample_item WHERE owner_id IS NULL;",
+        },
     ]
     additional_validations = []
 
