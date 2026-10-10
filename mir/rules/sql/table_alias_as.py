@@ -4,6 +4,7 @@ from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths, find_clause_
 
 class TableAliasAsRule(BaseRule):
     commit_profile = True
+    commit_semantic_rewrite = True
     embedded_safe = True
     rule_id = "IR-table-alias-as"
     description = (

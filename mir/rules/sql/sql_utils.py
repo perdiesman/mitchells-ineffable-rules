@@ -115,6 +115,11 @@ def protected_sql_signature(content: str) -> tuple[tuple[str, str], ...]:
     """Return syntax that conservative fixes must preserve byte-for-byte."""
     protected = []
     tokens = tokenize_sql(content)
+    cast_target_offsets = {
+        (token["start"], token["end"])
+        for group in find_cast_target_token_groups(tokens, content)
+        for token in group
+    }
     for token in tokens:
         token_type = token["type"]
         value = token["value"]
@@ -126,6 +131,15 @@ def protected_sql_signature(content: str) -> tuple[tuple[str, str], ...]:
             protected.append((token_type, value))
         elif token_type == "IDENTIFIER" and value.startswith('"'):
             protected.append(("QUOTED_IDENTIFIER", value))
+        elif (
+            token_type in {"KEYWORD", "IDENTIFIER"}
+            and (token["start"], token["end"]) not in cast_target_offsets
+        ):
+            # Case-only rules may change either token class without changing
+            # SQL meaning.  Preserve the normalized word itself so a
+            # source-mapping error cannot silently turn ``AND`` into a new
+            # identifier such as ``ANDnd``.
+            protected.append(("WORD", value.lower()))
     for group in find_cast_target_token_groups(tokens, content):
         normalized_target = "".join(
             token["value"].lower()

@@ -6,6 +6,7 @@ Table and subquery aliases should not use AS; preserve the author's optional AS 
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
 - **Commit Profile**: Yes
+- **Intentional Semantic Rewrite**: Yes
 - **MyBatis Safe**: Yes
 - **Trellis Safe**: No
 - **Configuration Options**:

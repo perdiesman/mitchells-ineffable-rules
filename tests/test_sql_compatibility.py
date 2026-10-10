@@ -1628,6 +1628,15 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(protected_sql_signature(original), protected_sql_signature(formatted))
 
+    def test_protected_signature_rejects_corrupted_keyword_identifier(self):
+        original = "SELECT item_id FROM sample_item WHERE enabled AND ready;"
+        corrupted = "SELECT item_id FROM sample_item WHERE enabled ANDnd ready;"
+
+        self.assertNotEqual(
+            protected_sql_signature(original),
+            protected_sql_signature(corrupted),
+        )
+
     def test_protected_signature_normalizes_cast_case_but_preserves_identity(self):
         original = "SELECT :county_fips::text[];"
         changed = "SELECT :county_fips::TEXT[];"

@@ -411,6 +411,7 @@ def fix_embedded_content(
     if extra_fix_args is not None:
         from mir.rules.sql.sql_utils import protected_sql_signature
 
+        extra_fix_args["semantic_changed"] = semantic_changed
         extra_fix_args["original_protected_signature"] = protected_sql_signature(
             guest_text
         )

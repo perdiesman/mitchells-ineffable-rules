@@ -2848,6 +2848,13 @@ class XmlMybatisSqlRule(BaseRule):
                     edit for edit in edits
                     if not overlaps_protected_source_indent(edit)
                 ]
+                if bridge_state.get("semantic_changed"):
+                    # Token rewrites need an exact source-mapped pass. Mixing
+                    # them with a large layout reflow can make overlapping
+                    # diffs discard only part of the semantic edit (for
+                    # example removing OUTER and ASC but retaining INNER).
+                    # The convergence loop applies layout on the next pass.
+                    layout_edits = []
                 layout_edits = [
                     edit
                     for edit in layout_edits
@@ -2939,7 +2946,10 @@ class XmlMybatisSqlRule(BaseRule):
             return content
 
         resolved_edits = resolve_source_edits(all_xml_edits)
-        resolved_edits.sort(key=lambda x: x[0], reverse=True)
+        # At one source offset, replace the existing range before inserting
+        # indentation. Applying the insertion first shifts the replacement
+        # onto the new spaces and can produce text such as ``FROM    from``.
+        resolved_edits.sort(key=lambda x: (x[0], x[1]), reverse=True)
         chars = list(content)
         for start, end, new_text in resolved_edits:
             chars[start:end] = list(new_text)
