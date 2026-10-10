@@ -812,6 +812,12 @@ class XmlIndentRule(BaseRule):
             prefix = content[line_start:token["start"]]
             sql_prefix = prefix.rstrip(" \t")
             same_line = bool(sql_prefix)
+            if same_line and 0 < token["line"] <= len(lines):
+                if len(lines[token["line"] - 1]) <= 120:
+                    # A compact IN/foreach expression follows the same
+                    # fit-first rule as WHERE and JOIN. Expanding it here
+                    # would be immediately reversed by the SQL bridge.
+                    continue
             if same_line:
                 in_line = sql_prefix
                 gap_start = line_start + len(sql_prefix)

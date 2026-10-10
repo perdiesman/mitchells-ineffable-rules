@@ -3623,6 +3623,105 @@ def expand_long_physical_line_edits(
     return edits
 
 
+def expand_long_row_comparison_edits(
+    content: str,
+    source_range: tuple[int, int],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Expand long DISTINCT FROM row constructors in physical XML text."""
+    from mir.rules.sql.line_length import LineLengthRule
+
+    start, end = source_range
+    max_length = LineLengthRule().get_config_value(
+        rule_config, "max_length", default_value=120
+    )
+    fragment = content[start:end]
+    edits = []
+    pattern = re.compile(
+        r"\bIS\s+(?:NOT\s+)?DISTINCT\s+FROM\s*\(",
+        re.IGNORECASE,
+    )
+    for match in pattern.finditer(fragment):
+        open_offset = start + match.end() - 1
+        depth = 1
+        quote = None
+        close_offset = None
+        cursor = open_offset + 1
+        while cursor < end:
+            char = content[cursor]
+            if quote:
+                if char == quote:
+                    if cursor + 1 < end and content[cursor + 1] == quote:
+                        cursor += 2
+                        continue
+                    quote = None
+                cursor += 1
+                continue
+            if char in {"'", '"'}:
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    close_offset = cursor
+                    break
+            cursor += 1
+        if close_offset is None:
+            continue
+        line_start = content.rfind("\n", start, open_offset) + 1
+        line_end = content.find("\n", close_offset, end)
+        if line_end == -1:
+            line_end = end
+        source = content[line_start:line_end]
+        if not any(len(line) > max_length for line in source.splitlines()):
+            continue
+        inner = content[open_offset + 1:close_offset]
+        parts = []
+        part_start = 0
+        inner_depth = 0
+        quote = None
+        for index, char in enumerate(inner):
+            if quote:
+                if char == quote:
+                    if index + 1 < len(inner) and inner[index + 1] == quote:
+                        continue
+                    quote = None
+                continue
+            if char in {"'", '"'}:
+                quote = char
+            elif char == "(":
+                inner_depth += 1
+            elif char == ")":
+                inner_depth -= 1
+            elif char == "," and inner_depth == 0:
+                parts.append(inner[part_start:index].strip())
+                part_start = index + 1
+        parts.append(inner[part_start:].strip())
+        if not parts or not all(parts):
+            continue
+        line = content[line_start:content.find("\n", line_start) if content.find("\n", line_start) != -1 else end]
+        indent = line[: len(line) - len(line.lstrip(" \t"))]
+        argument_indent = indent + "    "
+        prefix = content[line_start:open_offset + 1].rstrip()
+        suffix = content[close_offset + 1:line_end].strip()
+        replacement = (
+            prefix
+            + "\n"
+            + (",\n" + argument_indent).join(
+                argument_indent + part if index == 0 else part
+                for index, part in enumerate(parts)
+            )
+            + "\n"
+            + indent
+            + ")"
+            + suffix
+        )
+        if replacement != source:
+            edits.append((line_start, line_end, replacement))
+    return edits
+
+
 def physical_case_source_ranges(
     content: str,
     source_range: tuple[int, int],
@@ -4463,6 +4562,17 @@ class XmlMybatisSqlRule(BaseRule):
                         for existing in long_select_edits
                     ):
                         long_select_edits.append(physical_edit)
+                for row_edit in expand_long_row_comparison_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                ):
+                    if not any(
+                        max(row_edit[0], existing[0])
+                        < min(row_edit[1], existing[1])
+                        for existing in long_select_edits
+                    ):
+                        long_select_edits.append(row_edit)
                 long_select_edits = [
                     edit
                     for edit in long_select_edits
@@ -5331,6 +5441,17 @@ class XmlMybatisSqlRule(BaseRule):
                         for existing in long_select_edits
                     ):
                         long_select_edits.append(physical_edit)
+                for row_edit in expand_long_row_comparison_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    inner_config,
+                ):
+                    if not any(
+                        max(row_edit[0], existing[0])
+                        < min(row_edit[1], existing[1])
+                        for existing in long_select_edits
+                    ):
+                        long_select_edits.append(row_edit)
                 long_select_edits = [
                     edit
                     for edit in long_select_edits
