@@ -2189,6 +2189,72 @@ def dynamic_body_indent_source_edits(
     ]
 
 
+def multiline_foreach_function_source_edits(
+    content: str,
+    source_range: tuple[int, int],
+) -> List[tuple[int, int, str]]:
+    """Put a multiline foreach argument on its own function-call line."""
+    source_start, source_end = source_range
+    fragment = content[source_start:source_end]
+    edits = []
+    pattern = re.compile(
+        r"<foreach\b[^>]*>.*?</foreach>",
+        re.IGNORECASE | re.DOTALL,
+    )
+    for match in pattern.finditer(fragment):
+        if "\n" not in match.group(0):
+            continue
+        open_start = source_start + match.start()
+        close_start = content.rfind(
+            "</foreach>",
+            open_start,
+            source_start + match.end(),
+        )
+        if close_start == -1:
+            continue
+        open_line_start = content.rfind("\n", 0, open_start) + 1
+        gap_start = open_start
+        while gap_start > open_line_start and content[gap_start - 1] in " \t":
+            gap_start -= 1
+        opener_is_previous_line = gap_start == open_line_start
+        if opener_is_previous_line:
+            previous_end = max(0, open_line_start - 1)
+            previous_start = content.rfind("\n", 0, previous_end) + 1
+            source_line = content[previous_start:previous_end]
+            if not source_line.rstrip(" \t").endswith("("):
+                continue
+        else:
+            if content[gap_start - 1] != "(":
+                continue
+            source_line = content[open_line_start:gap_start]
+        base_indent = source_line[:
+            len(source_line) - len(source_line.lstrip(" \t"))
+        ]
+        argument_indent = base_indent + "    "
+        expected_gap = (
+            argument_indent
+            if opener_is_previous_line
+            else "\n" + argument_indent
+        )
+        if content[gap_start:open_start] != expected_gap:
+            edits.append((gap_start, open_start, expected_gap))
+
+        close_line_start = content.rfind("\n", 0, close_start) + 1
+        close_prefix = content[close_line_start:close_start]
+        if not close_prefix.strip() and close_prefix != argument_indent:
+            edits.append((close_line_start, close_start, argument_indent))
+        close_tag_end = close_start + len("</foreach>")
+        close_line_end = content.find("\n", close_tag_end)
+        if close_line_end == -1:
+            close_line_end = source_end
+        trailing = content[close_tag_end:close_line_end]
+        function_close = re.fullmatch(r"([^)]*)\)([^)]*)", trailing)
+        if function_close is not None:
+            close_offset = close_tag_end + len(function_close.group(1))
+            edits.append((close_offset, close_offset, "\n" + base_indent))
+    return edits
+
+
 def resolve_source_edits(
     edits: List[tuple[int, int, str]],
 ) -> List[tuple[int, int, str]]:
@@ -3018,6 +3084,12 @@ class XmlMybatisSqlRule(BaseRule):
                     dynamic_indent_ranges,
                     inner_config,
                 )
+                foreach_function_edits = (
+                    multiline_foreach_function_source_edits(
+                        content,
+                        (el["start_offset"], el["end_offset"]),
+                    )
+                )
                 changed_post_choose_edits = [
                     edit
                     for edit in post_choose_edits
@@ -3069,6 +3141,26 @@ class XmlMybatisSqlRule(BaseRule):
                         "message": (
                             "[MyBatis SQL: IR-where-multi] Keep BETWEEN "
                             "delimiter layout within the physical line limit."
+                        ),
+                        "is_fixable": True,
+                    })
+                changed_foreach_function_edits = [
+                    edit
+                    for edit in foreach_function_edits
+                    if content[edit[0]:edit[1]] != edit[2]
+                ]
+                if changed_foreach_function_edits:
+                    first_start = min(
+                        start
+                        for start, _, _ in changed_foreach_function_edits
+                    )
+                    violations.append({
+                        "rule_id": "IR-multiline-function-layout",
+                        "line": content.count("\n", 0, first_start) + 1,
+                        "message": (
+                            "[MyBatis SQL: IR-multiline-function-layout] "
+                            "Put a multiline foreach argument on its own "
+                            "indented line."
                         ),
                         "is_fixable": True,
                     })
@@ -3446,6 +3538,22 @@ class XmlMybatisSqlRule(BaseRule):
                         # line, while the XML structure must remain separate.
                         continue
                     if (
+                        ev["rule_id"] in {
+                            "IR-where-single",
+                            "IR-multiline-function-layout",
+                        }
+                        and (
+                            "<foreach" in mapped_line.lower()
+                            or next_nonempty_line.lower().startswith(
+                                "<foreach"
+                            )
+                        )
+                    ):
+                        # A multiline foreach is one runtime expression but
+                        # cannot be compacted across its physical XML tags.
+                        # Its source layout is checked by the exact helper.
+                        continue
+                    if (
                         ev["rule_id"] == "IR-multiline-function-layout"
                         and any(
                             mapped_line_start == start
@@ -3718,6 +3826,12 @@ class XmlMybatisSqlRule(BaseRule):
                     dynamic_indent_ranges,
                     inner_config,
                 )
+                foreach_function_edits = (
+                    multiline_foreach_function_source_edits(
+                        content,
+                        (el["start_offset"], el["end_offset"]),
+                    )
+                )
                 dynamic_body_edits = dynamic_body_indent_source_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
@@ -3756,6 +3870,7 @@ class XmlMybatisSqlRule(BaseRule):
                     post_choose_edits
                     + join_case_edits
                     + between_edits
+                    + foreach_function_edits
                     + dynamic_body_edits
                     + top_level_clause_edits
                     + keyword_case_edits
