@@ -75,7 +75,8 @@ class LineLengthRule(BaseRule):
     rule_id = "IR-line-length"
     description = (
         "Lines must not exceed the configured maximum length. Overlong "
-        "keyword-owned IN, VALUES, and TABLE lists wrap one item per line. "
+        "keyword-owned IN, VALUES, and TABLE lists wrap one item per line, "
+        "and long foreign-key constraints wrap their detail clauses. "
         "Large repeated one-row INSERT data dumps remain compact."
     )
     category = "general"
@@ -183,6 +184,66 @@ class LineLengthRule(BaseRule):
         # earlier pass before their enclosing SELECT layout had stabilized.
         from mir.rules.sql.sql_utils import find_matching_paren, tokenize_sql
         from mir.rules.sql.table_function_indent import table_function_parens
+
+        # Constraint declarations are schema clauses, not function calls.
+        # Keep the constraint name on its owning line and wrap its FOREIGN KEY
+        # and REFERENCES details at one continuation level.
+        constraint_tokens = tokenize_sql(content)
+        constraint_edits = []
+        constraint_lines = content.splitlines()
+        active_by_line = {}
+        for token_index, token in enumerate(constraint_tokens):
+            if token["type"] not in ("WHITESPACE", "COMMENT"):
+                active_by_line.setdefault(token["line"], []).append(token_index)
+        for line_number, indices in active_by_line.items():
+            if (
+                line_number > len(constraint_lines)
+                or len(constraint_lines[line_number - 1]) <= max_length
+            ):
+                continue
+            values = [constraint_tokens[index]["value"].upper() for index in indices]
+            if "CONSTRAINT" not in values:
+                continue
+            constraint_position = values.index("CONSTRAINT")
+            detail_positions = [
+                position
+                for position in range(constraint_position + 1, len(indices))
+                if values[position] in {"FOREIGN", "REFERENCES"}
+            ]
+            if not detail_positions:
+                continue
+            physical_line = constraint_lines[line_number - 1]
+            base_indent = physical_line[:
+                len(physical_line) - len(physical_line.lstrip(" \t"))
+            ]
+            detail_indent = base_indent + "    "
+            for position in detail_positions:
+                token_index = indices[position]
+                previous = (
+                    constraint_tokens[token_index - 1]
+                    if token_index > 0
+                    else None
+                )
+                if (
+                    previous is not None
+                    and previous["type"] == "WHITESPACE"
+                    and "\n" not in previous["value"]
+                ):
+                    constraint_edits.append(
+                        (
+                            previous["start"],
+                            previous["end"],
+                            "\n" + detail_indent,
+                        )
+                    )
+        if constraint_edits:
+            chars = list(content)
+            for start, end, replacement in sorted(
+                set(constraint_edits), reverse=True
+            ):
+                chars[start:end] = list(replacement)
+            content = "".join(chars)
+
         compact_tokens = tokenize_sql(content)
         table_function_openings = table_function_parens(compact_tokens)
         compact_edits = []

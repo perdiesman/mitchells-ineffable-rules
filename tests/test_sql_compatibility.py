@@ -96,6 +96,30 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
         self.assertFalse(rule.check(source, "generic.sql", {}))
 
+    def test_line_length_wraps_create_table_constraint_details(self):
+        source = (
+            "CREATE TABLE sample_group (\n"
+            "    owner_id INTEGER,\n"
+            "    CONSTRAINT sample_group_extraordinarily_long_owner_key "
+            "FOREIGN KEY (owner_id) REFERENCES sample_owner_registry (owner_id)\n"
+            ");"
+        )
+        expected = (
+            "CREATE TABLE sample_group (\n"
+            "    owner_id INTEGER,\n"
+            "    CONSTRAINT sample_group_extraordinarily_long_owner_key\n"
+            "        FOREIGN KEY (owner_id)\n"
+            "        REFERENCES sample_owner_registry (owner_id)\n"
+            ");"
+        )
+        rule = LineLengthRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+
     def test_multiline_case_stays_with_its_leading_additive_operator(self):
         source = (
             "    first_label\n"
