@@ -8,7 +8,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from mir.engine.config import Config
 from mir.engine.runner import process_document, remap_selected_lines, run_linter
-from mir.rules.xml.xml_mybatis_sql import get_mybatis_protected_signatures
+from mir.rules.xml.xml_mybatis_sql import (
+    get_mybatis_protected_signatures,
+    join_case_source_edits,
+)
 
 class TestRunnerIntegration(unittest.TestCase):
     def setUp(self):
@@ -936,7 +939,6 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
 
     def test_xml_mybatis_expanded_dynamic_table_function_keeps_join_indent(self):
-        self.maxDiff = None
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
             '    <sql id="periods">\n'
@@ -2333,6 +2335,34 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_repeated_join_cases_use_source_stable_layout(self):
+        source = (
+            "            LEFT JOIN sample_owner a ON CASE\n"
+            "                    WHEN item.x IS NOT NULL THEN a.id = item.x\n"
+            "                END\n"
+            "            LEFT JOIN sample_owner b ON\n"
+            "                CASE\n"
+            "                    WHEN item.x IS NOT NULL THEN b.id = item.x\n"
+            "                END\n"
+        )
+        expected = source.replace(
+            "LEFT JOIN sample_owner a ON CASE",
+            "LEFT JOIN sample_owner a ON\n                CASE",
+        )
+
+        def apply_edits(content):
+            chars = list(content)
+            for start, end, replacement in sorted(
+                join_case_source_edits(content, (0, len(content))),
+                reverse=True,
+            ):
+                chars[start:end] = list(replacement)
+            return "".join(chars)
+
+        fixed = apply_edits(source)
+        self.assertEqual(fixed, expected)
+        self.assertEqual(apply_edits(fixed), expected)
 
     def test_xml_mybatis_preserves_dynamic_in_subquery_layout(self):
         xml_content = (

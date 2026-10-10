@@ -1482,6 +1482,41 @@ def post_choose_clause_source_edits(
     return edits
 
 
+def join_case_source_edits(
+    content: str,
+    source_range: tuple[int, int],
+) -> List[tuple[int, int, str]]:
+    """Put a multiline CASE join predicate below ON in physical source.
+
+    Repeated JOIN predicates can have indistinguishable expanded SQL spans
+    after MyBatis tags are removed.  Mapping the whitespace directly avoids
+    applying one CASE layout edit to its sibling on alternating passes.
+    """
+    source_start, source_end = source_range
+    fragment = content[source_start:source_end]
+    pattern = re.compile(
+        r"(?im)^([ \t]*)(?:(?:LEFT|RIGHT|FULL)(?:[ \t]+OUTER)?|INNER|CROSS)?"
+        r"[ \t]*JOIN\b[^\r\n]*\bON(?P<gap>[ \t]*(?:\r?\n[ \t]*)?)CASE\b"
+    )
+    edits = []
+    for match in pattern.finditer(fragment):
+        case_start = source_start + match.end() - len("CASE")
+        end_match = re.search(
+            r"(?im)^([ \t]*)END\b",
+            content[case_start:source_end],
+        )
+        if end_match is None:
+            continue
+        gap_start = source_start + match.start("gap")
+        gap_end = source_start + match.end("gap")
+        expected = "\n" + match.group(1) + "    "
+        # Keep the canonical no-op span as a source-mapping guard too. When
+        # two CASE joins have the same expanded shape, a guest diff for the
+        # noncanonical sibling can otherwise be mapped onto this one.
+        edits.append((gap_start, gap_end, expected))
+    return edits
+
+
 def dynamic_body_indent_source_edits(
     content: str,
     source_range: tuple[int, int],
@@ -2352,6 +2387,10 @@ class XmlMybatisSqlRule(BaseRule):
                     content,
                     (el["start_offset"], el["end_offset"]),
                 )
+                join_case_edits = join_case_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                )
                 changed_post_choose_edits = [
                     edit
                     for edit in post_choose_edits
@@ -2805,6 +2844,10 @@ class XmlMybatisSqlRule(BaseRule):
                     content,
                     (el["start_offset"], el["end_offset"]),
                 )
+                join_case_edits = join_case_source_edits(
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                )
                 dynamic_body_edits = dynamic_body_indent_source_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
@@ -2827,6 +2870,7 @@ class XmlMybatisSqlRule(BaseRule):
                 )
                 layout_edits = (
                     post_choose_edits
+                    + join_case_edits
                     + dynamic_body_edits
                     + top_level_clause_edits
                     + keyword_case_edits
@@ -2936,7 +2980,7 @@ class XmlMybatisSqlRule(BaseRule):
                 protected_source_indent_spans = [
                     (start, end)
                     for start, end, _ in post_choose_edits + dynamic_body_edits
-                    + top_level_clause_edits
+                    + join_case_edits + top_level_clause_edits
                     + dynamic_projection_edits
                 ] + [
                     (start, end)
@@ -2963,6 +3007,7 @@ class XmlMybatisSqlRule(BaseRule):
                     edit
                     for edit in (
                         post_choose_edits
+                        + join_case_edits
                         + dynamic_body_edits
                         + top_level_clause_edits
                         + subquery_source_edits
