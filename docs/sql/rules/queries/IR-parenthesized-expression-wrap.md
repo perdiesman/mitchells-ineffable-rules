@@ -55,3 +55,10 @@ SELECT (current_count / expected_count) AS ratio;
 ```sql
 SELECT (current_count + expected_count) AS total;
 ```
+
+```sql
+SELECT (
+    coalesce(max(current_count), 0)::NUMERIC
+    / greatest(expected_count, 1)
+) - 1 AS ratio;
+```

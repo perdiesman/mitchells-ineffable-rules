@@ -16,6 +16,7 @@ from mir.rules.xml.xml_mybatis_sql import (
     physical_case_indent_source_edits,
 )
 from mir.rules.xml.xml_line_length import XmlLineLengthRule
+from mir.rules.xml.xml_indent import XmlIndentRule
 
 class TestRunnerIntegration(unittest.TestCase):
     def setUp(self):
@@ -280,6 +281,32 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second, expected)
         self.assertFalse(rule.check(first, "generic.xml", config))
 
+    def test_xml_indent_keeps_statement_terminator_with_dynamic_close(self):
+        content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        WHERE\n'
+            '            item_id IN\n'
+            '                <foreach collection="ids" item="id" open="(" close=")" separator=",">\n'
+            '                    #{id}\n'
+            '                </foreach>\n'
+            '                ;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = content.replace('</foreach>\n                ;', '</foreach>;')
+        rule = XmlIndentRule()
+        config = {"indent_size": 4}
+
+        first = rule.fix(content, "generic.xml", config)
+        second = rule.fix(first, "generic.xml", config)
+
+        self.assertEqual(first, expected)
+        self.assertEqual(second, expected)
+        self.assertFalse(rule.check(first, "generic.xml", config))
+
     def test_xml_mybatis_where_container_aligns_after_join_conditions(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
@@ -347,6 +374,77 @@ class TestRunnerIntegration(unittest.TestCase):
             '            AND (\n'
             '                recorded_timestamp_for_requested_interval &gt;= #{intervalStart}',
         )
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_mybatis_compacts_independent_where_continuations(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        WHERE tenant_id = #{tenantId}\n'
+            '            <if test="start != null">\n'
+            '                AND recorded_timestamp_for_requested_interval &gt;= #{start}\n'
+            '            </if>\n'
+            '            <if test="end != null">AND recorded_timestamp_for_requested_interval &lt;= #{end}</if>\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '        WHERE tenant_id = #{tenantId}\n',
+            '        WHERE\n'
+            '            tenant_id = #{tenantId}\n',
+        ).replace(
+            '            <if test="start != null">\n'
+            '                AND recorded_timestamp_for_requested_interval &gt;= #{start}\n'
+            '            </if>',
+            '            <if test="start != null">AND recorded_timestamp_for_requested_interval &gt;= #{start}</if>',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_mybatis_keeps_multiline_arithmetic_inside_its_group(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="ratio">\n'
+            '        SELECT\n'
+            '            (coalesce(max(current_count), 0)::NUMERIC\n'
+            '                / greatest(\n'
+            '                    coalesce(expected_count, 1)::INTEGER,\n'
+            '                    1\n'
+            '                )) - 1 AS ratio\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '            (coalesce(max(current_count), 0)::NUMERIC\n',
+            '            (\n'
+            '                coalesce(max(current_count), 0)::NUMERIC\n',
+        ).replace(
+            '                )) - 1 AS ratio\n',
+            '                )\n'
+            '            ) - 1 AS ratio\n',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
 
         first = process_document(config, xml_content, "generic.xml", "xml")
         second = process_document(config, first.content, "generic.xml", "xml")

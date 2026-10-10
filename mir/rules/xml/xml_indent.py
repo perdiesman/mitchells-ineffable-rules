@@ -249,7 +249,10 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
 class XmlIndentRule(BaseRule):
     commit_profile = True
     rule_id = "IR-xml-indent"
-    description = "Enforce correct tag nesting indentation in XML files."
+    description = (
+        "Enforce correct tag nesting indentation in XML files and keep a SQL "
+        "statement terminator attached to its preceding foreach closing tag."
+    )
     category = "general"
     is_fixable = "yes"
     enabled_by_default = True
@@ -1364,10 +1367,21 @@ class XmlIndentRule(BaseRule):
                     combined_physical_line = (
                         previous_sql + " " + collapsed + " " + following_sql
                     )
-                    if len(combined_physical_line) > 120:
+                    preceding_tokens = tokenize_sql(content[:el["start_offset"]])
+                    preceding_open_depth = sum(
+                        1 if item["value"] == "(" else -1
+                        for item in preceding_tokens
+                        if item["type"] == "PAREN"
+                    )
+                    if (
+                        preceding_open_depth > 0
+                        and len(combined_physical_line) > 120
+                    ):
                         # The embedded-SQL bridge would otherwise rejoin this
-                        # conditional with both surrounding fragments and send
-                        # XML line length back around the same cycle.
+                        # parenthesized conditional with both surrounding
+                        # fragments and send XML line length around a cycle.
+                        # Independent WHERE continuations remain compact XML
+                        # instructions when their own physical lines fit.
                         continue
                 
                 # Resolve indent from start_line
@@ -1456,6 +1470,22 @@ class XmlIndentRule(BaseRule):
                     for start, end in structural_spans
                 )
             ]
+
+        for match in re.finditer(
+            r"(?m)</foreach>(?P<gap>\n[ \t]*);[ \t]*(?=\n|$)",
+            content,
+        ):
+            gap_start, gap_end = match.span("gap")
+            violations.append({
+                "line": content.count("\n", 0, gap_end) + 1,
+                "start_offset": gap_start,
+                "end_offset": match.end(),
+                "replacement": ";",
+                "message": (
+                    "A SQL statement terminator should remain on the foreach "
+                    "closing-tag line when it fits."
+                ),
+            })
         return violations
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:

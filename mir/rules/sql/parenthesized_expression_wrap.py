@@ -70,6 +70,12 @@ class ParenthesizedExpressionWrapRule(BaseRule):
     additional_validations = [
         "SELECT (current_count / expected_count) AS ratio;",
         "SELECT (current_count + expected_count) AS total;",
+        (
+            "SELECT (\n"
+            "    coalesce(max(current_count), 0)::NUMERIC\n"
+            "    / greatest(expected_count, 1)\n"
+            ") - 1 AS ratio;"
+        ),
     ]
 
     @staticmethod
@@ -288,6 +294,58 @@ class ParenthesizedExpressionWrapRule(BaseRule):
                         and item["value"] in {"+", "-", "*", "/", "||"}
                     ):
                         operators.append(candidate)
+                next_active_after_close = next(
+                    (
+                        tokens[candidate]
+                        for candidate in range(close_index + 1, len(tokens))
+                        if tokens[candidate]["type"]
+                        not in ("WHITESPACE", "COMMENT")
+                    ),
+                    None,
+                )
+                is_additive_operand = bool(
+                    next_active_after_close is not None
+                    and next_active_after_close["type"] == "OPERATOR"
+                    and next_active_after_close["value"] in {"+", "-"}
+                )
+                if operators and is_additive_operand:
+                    first_inner_active = next(
+                        (
+                            tokens[candidate]
+                            for candidate in range(open_index + 1, close_index)
+                            if tokens[candidate]["type"]
+                            not in ("WHITESPACE", "COMMENT")
+                        ),
+                        None,
+                    )
+                    last_inner_active = next(
+                        (
+                            tokens[candidate]
+                            for candidate in range(close_index - 1, open_index, -1)
+                            if tokens[candidate]["type"]
+                            not in ("WHITESPACE", "COMMENT")
+                        ),
+                        None,
+                    )
+                    if (
+                        first_inner_active is not None
+                        and first_inner_active["line"] == token["line"]
+                    ):
+                        add_whitespace_edit(
+                            open_index,
+                            "\n" + content_indent,
+                            before=False,
+                        )
+                    if (
+                        last_inner_active is not None
+                        and last_inner_active["line"]
+                        == tokens[close_index]["line"]
+                    ):
+                        add_whitespace_edit(
+                            close_index,
+                            "\n" + base_indent,
+                            before=True,
+                        )
                 trailing_operator_lines = set()
                 for operator_index in operators:
                     next_active_index = next(
