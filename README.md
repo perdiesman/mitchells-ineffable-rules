@@ -199,6 +199,8 @@ Consumer repositories only need the pre-commit formatter hook; the time-tracking
 
 Java formatting is syntax-aware and defaults to four-space block and continuation indents, a 120-column target, K&R braces, Java-first import groups, compact constructs when they fit, and one item per line when they do not. The commit profile applies only syntax-preserving source layout; broader naming, correctness, and Javadoc checks remain ordinary configurable rules. Semantic rewrites such as removing redundant boolean comparisons require an explicit `semantic_fix: true` rule setting and never run in the commit profile.
 
+The structural layout rules cover declarations, annotated and ordinary parameter lists, argument lists, assignments, binary and ternary expressions, method chains, lambdas, switch expressions, loop headers, try-with-resources, arrays and annotation arrays, type clauses, type parameters, enums, and member spacing. Width-sensitive rules keep a construct on one line when it fits and use a stable syntax-aware continuation layout otherwise. The parser index is shared across repeated node queries so adding structural coverage does not require repeatedly walking the complete syntax tree.
+
 Changed Java lines passed through `--lines` or `--staged` expand to the enclosing declaration or member before fixes run. String literals, character literals, text blocks, and comments are part of the commit safety signature. Text-block payload indentation is preserved because changing it can change the runtime string value. Generated sources are skipped by default using common generated paths, header markers, and `@Generated`; projects can select `check` or `format` instead:
 
 ```yaml
@@ -233,6 +235,8 @@ Compatibility outputs that have completed manual review can be recorded in the i
 python scripts/prepare_compat.py
 python scripts/compat_report.py record eagle_ai --include 'backend/src/eagle_ai/sql/**/*.sql'
 python scripts/compat_report.py verify eagle_ai
+python scripts/compat_report.py record web --root local/compat/java --report local/compat/java/report.json --include '**/*.java'
+python scripts/compat_report.py verify web --root local/compat/java --report local/compat/java/report.json
 ```
 
 The preparation script maintains ignored clones of Web, AERIE, EAGLE-AI, PyGarden's Trellis branch, and the Trellis FastAPI example under `local/compat/`; pass `--refresh` only when every clone is clean. The report stores the source and formatter commits, individual SHA-256 values, and a path-sensitive aggregate SHA-256. Verification reports changed, added, and missing files within the recorded scope.
