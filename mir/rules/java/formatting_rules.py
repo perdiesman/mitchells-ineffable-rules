@@ -854,9 +854,17 @@ class ExpressionLayoutRule(BaseRule):
             prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
             suffix_length = len(_terminal_suffix(document, node))
             original = document.text(node)
-            if config.get("compact_if_fits", True) and len(prefix) + len(compact) + suffix_length <= maximum:
+            single_line_overflow = (
+                node.start_point.row == node.end_point.row
+                and len(document.content.splitlines()[node.start_point.row]) > maximum
+            )
+            if (
+                config.get("compact_if_fits", True)
+                and len(prefix) + len(compact) + suffix_length <= maximum
+                and not single_line_overflow
+            ):
                 replacement = compact
-            elif len(prefix) + len(compact) + suffix_length > maximum:
+            elif len(prefix) + len(compact) + suffix_length > maximum or single_line_overflow:
                 indent = " " * (_wrapped_continuation_depth(node, "expression") * size)
                 replacement = values[0] + "".join(
                     f"\n{indent}{op} {value}" for op, value in zip(operators, values[1:])
@@ -1004,6 +1012,22 @@ class TernaryLayoutRule(BaseRule):
             "    }\n"
             "}\n",
         ),
+        RuleCase(
+            "long condition",
+            "class Sample {\n"
+            "    String choose(Instant start, Instant end, Instant now) {\n"
+            "        return ((start.isBefore(now) || start.equals(now)) && (end.isAfter(now) || end.equals(now))) ? \"active\" : \"inactive\";\n"
+            "    }\n"
+            "}\n",
+            "fixed",
+            "class Sample {\n"
+            "    String choose(Instant start, Instant end, Instant now) {\n"
+            "        return ((start.isBefore(now) || start.equals(now)) && (end.isAfter(now) || end.equals(now)))\n"
+            "            ? \"active\"\n"
+            "            : \"inactive\";\n"
+            "    }\n"
+            "}\n",
+        ),
     ]
 
     @staticmethod
@@ -1036,20 +1060,39 @@ class TernaryLayoutRule(BaseRule):
             return None
         return f"{condition_text} ? {consequence_text} : {alternative_text}"
 
-    def _multiline_ternary(self, document, node, operator_column: int, size: int) -> Optional[list[str]]:
+    def _multiline_ternary(
+        self,
+        document,
+        node,
+        operator_column: int,
+        size: int,
+        maximum: int,
+    ) -> Optional[list[str]]:
         condition = node.child_by_field_name("condition")
         consequence = node.child_by_field_name("consequence")
         alternative = node.child_by_field_name("alternative")
         if not condition or not consequence or not alternative:
             return None
+        raw_condition = document.text(condition).strip()
         condition_text = self._compact_node(document, condition)
         consequence_text = self._compact_node(document, consequence)
         if condition_text is None or consequence_text is None:
             return None
         indent = " " * operator_column
-        lines = [condition_text, f"{indent}? {consequence_text}"]
+        condition_lines = (
+            raw_condition.splitlines()
+            if "\n" in raw_condition and operator_column + len(condition_text) > maximum
+            else [condition_text]
+        )
+        lines = condition_lines + [f"{indent}? {consequence_text}"]
         if alternative.type == "ternary_expression":
-            nested = self._multiline_ternary(document, alternative, operator_column + size, size)
+            nested = self._multiline_ternary(
+                document,
+                alternative,
+                operator_column + size,
+                size,
+                maximum,
+            )
             if nested is None:
                 return None
             lines.append(f"{indent}: {nested[0]}")
@@ -1083,7 +1126,7 @@ class TernaryLayoutRule(BaseRule):
                 replacement = compact
             else:
                 operator_column = _wrapped_continuation_depth(node, "expression") * size
-                rendered = self._multiline_ternary(document, node, operator_column, size)
+                rendered = self._multiline_ternary(document, node, operator_column, size, maximum)
                 if rendered is None or any(
                     len(prefix) + len(line) > maximum
                     if index == 0

@@ -74,3 +74,25 @@ class Sample {
 }
 
 ```
+
+##### long condition — Fixed
+```java
+class Sample {
+    String choose(Instant start, Instant end, Instant now) {
+        return ((start.isBefore(now) || start.equals(now)) && (end.isAfter(now) || end.equals(now))) ? "active" : "inactive";
+    }
+}
+
+```
+
+Expected fixed output:
+```java
+class Sample {
+    String choose(Instant start, Instant end, Instant now) {
+        return ((start.isBefore(now) || start.equals(now)) && (end.isAfter(now) || end.equals(now)))
+            ? "active"
+            : "inactive";
+    }
+}
+
+```
