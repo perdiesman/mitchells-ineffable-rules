@@ -428,8 +428,12 @@ class ParameterAnnotationLayoutRule(BaseRule):
                 continue
             compact = " ".join(document.text(parameter).split())
             prefix = lines[parameter.start_point.row][:parameter.start_point.column]
+            suffix = lines[parameter.end_point.row][parameter.end_point.column:].rstrip()
             physical_length = len(lines[parameter.start_point.row])
-            fits = len(prefix) + len(compact) <= maximum and physical_length <= maximum
+            fits = (
+                len(prefix) + len(compact) + len(suffix) <= maximum
+                and physical_length <= maximum
+            )
             size = int(config.get("indent_size", 4))
             parameter_indent = (
                 parameter.start_point.column

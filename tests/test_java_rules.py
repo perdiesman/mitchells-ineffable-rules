@@ -119,6 +119,35 @@ class TestJavaFoundation(unittest.TestCase):
         second = process_document(config, result.content, "Sample.java", "java")
         self.assertEqual(second.content, expected)
 
+    def test_long_parameter_annotations_converge_with_annotation_arguments(self):
+        source = (
+            "class Sample {\n"
+            "    void publish(\n"
+            "        @OptionalValue @RequestValue(value = \"start\") "
+            "@Converted(iso = Conversion.ISO.DATE_TIME) OffsetDateTime startTime,\n"
+            "        @OptionalValue @RequestValue(value = \"end\") "
+            "@Converted(iso = Conversion.ISO.DATE_TIME) OffsetDateTime endTime\n"
+            "    ) {}\n"
+            "}\n"
+        )
+        config = Config()
+        config.fix = True
+        config.profile = "commit"
+
+        result = process_document(config, source, "Sample.java", "java")
+
+        self.assertEqual(result.diagnostics, [])
+        self.assertIn(
+            "        @OptionalValue\n"
+            "        @RequestValue(value = \"start\")\n"
+            "        @Converted(iso = Conversion.ISO.DATE_TIME)\n"
+            "        OffsetDateTime startTime,",
+            result.content,
+        )
+        second = process_document(config, result.content, "Sample.java", "java")
+        self.assertEqual(second.content, result.content)
+        self.assertEqual(second.diagnostics, [])
+
     def test_block_suppression_prevents_partial_brace_edit(self):
         source = (
             "class Sample {\n"

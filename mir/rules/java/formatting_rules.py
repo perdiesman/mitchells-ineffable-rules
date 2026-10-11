@@ -525,6 +525,9 @@ class JavaListLayoutRule(BaseRule):
             for child in walk(node)
         )
 
+    def _line_suffix(self, document, node) -> str:
+        return ""
+
     def _replacement(self, document, node, config: Dict[str, Any]) -> Optional[str]:
         children = list(node.named_children)
         if not children or self._contains_comment(node):
@@ -534,7 +537,7 @@ class JavaListLayoutRule(BaseRule):
         compact = "(" + ", ".join(values) + ")"
         lines = document.content.splitlines()
         line_prefix = lines[node.start_point.row][:node.start_point.column]
-        line_suffix = lines[node.end_point.row][node.end_point.column:].rstrip()
+        line_suffix = self._line_suffix(document, node)
         compact_length = len(line_prefix) + len(compact) + len(line_suffix)
         maximum = int(config.get("max_length", 120))
         original = document.text(node)
@@ -602,6 +605,11 @@ class ParameterLayoutRule(JavaListLayoutRule):
     description = "Keep fitting method, constructor, lambda, and record parameters compact; otherwise use one parameter per line."
     category = "methods"
     node_types = {"formal_parameters", "record_header", "inferred_parameters"}
+
+    def _line_suffix(self, document, node) -> str:
+        line = document.content.splitlines()[node.end_point.row]
+        return line[node.end_point.column:].rstrip()
+
     cases = [
         RuleCase(
             "compact fitting parameters",
