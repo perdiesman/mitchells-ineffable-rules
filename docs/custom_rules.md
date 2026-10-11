@@ -59,6 +59,7 @@ All rule classes must subclass `BaseRule` (imported from `mir.engine.rule_interf
 - **`additional_validations`** (list of strings): Compliant code statements that must always pass check verification and remain unchanged.
 - **`cases`** (list of `RuleCase`): Typed executable documentation. Expectations are `accepted`, `reported`, `fixed`, and `not_fixed`; fixed cases also provide exact fixed output.
 - **`commit_profile`** (boolean, default: `False`): Opts the rule into the conservative staged-commit profile.
+- **`commit_semantic_rewrite`** (boolean, default: `False`): Declares that a commit-profile rule intentionally reorders protected tokens. Use sparingly; Java still validates the token multiset and comments, while SQL still applies its protected syntax checks.
 - **`embedded_safe`** (boolean, default: `False`): Declares that a SQL rule is safe when SQL is source-mapped from MyBatis XML.
 - **`trellis_safe`** (boolean, default: `False`): Declares that a SQL rule preserves Trellis directives and remains valid across conditional template branches.
 - **`fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str`**:
