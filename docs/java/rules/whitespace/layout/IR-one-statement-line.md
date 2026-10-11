@@ -13,10 +13,10 @@ Place each Java statement on its own line.
 `!=`, `%`, `%=`, `&`, `&&`, `&=`, `*`, `*=`, `+`, `+=`, `-`, `-=`, `->`, `/`, `/=`, `:`, `<`, `<<`, `<<=`, `<=`, `=`, `==`, `>`, `>=`, `>>`, `>>=`, `>>>`, `>>>=`, `?`, `^`, `^=`, `|`, `|=`, `||`
 
 #### Default `CONTAINER_TYPES`
-`annotation_type_body`, `block`, `class_body`, `enum_body`, `interface_body`, `switch_block`
+`annotation_type_body`, `block`, `class_body`, `constructor_body`, `enum_body`, `interface_body`, `switch_block`
 
 #### Default `CONTINUATION_TYPES`
-`argument_list`, `array_initializer`, `binary_expression`, `formal_parameters`, `interfaces`, `method_invocation`, `permits`, `record_header`, `resource_specification`, `super_interfaces`, `superclass`, `ternary_expression`, `throws`
+`annotation_argument_list`, `argument_list`, `array_initializer`, `assignment_expression`, `binary_expression`, `formal_parameters`, `interfaces`, `method_invocation`, `permits`, `record_header`, `resource_specification`, `super_interfaces`, `superclass`, `ternary_expression`, `throws`, `variable_declarator`
 
 #### Default `CONTROL_KEYWORDS`
 `catch`, `for`, `if`, `switch`, `synchronized`, `try`, `while`
