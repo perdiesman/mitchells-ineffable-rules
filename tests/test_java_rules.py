@@ -148,6 +148,42 @@ class TestJavaFoundation(unittest.TestCase):
         self.assertEqual(second.content, result.content)
         self.assertEqual(second.diagnostics, [])
 
+    def test_parenthesized_ternary_and_binary_chain_layouts_converge(self):
+        source = (
+            "class Sample {\n"
+            "    Date choose(Date endDate, Date fallbackDate) {\n"
+            "        Date selectedDate = (endDate == null ? Date.from(fallbackDate.toInstant().plus(24, ChronoUnit.HOURS)) : Date.from(endDate.toInstant()));\n"
+            "        return selectedDate;\n"
+            "    }\n"
+            "    String describe(Cache primaryCache, Cache secondaryCache) {\n"
+            "        return \"Primary entries: \" + primaryCache.keys().count() + \", secondary entries: \" + secondaryCache.keys().count();\n"
+            "    }\n"
+            "}\n"
+        )
+        config = Config()
+        config.fix = True
+        config.profile = "commit"
+
+        result = process_document(config, source, "Sample.java", "java")
+
+        self.assertEqual(result.diagnostics, [])
+        self.assertIn(
+            "        Date selectedDate =\n"
+            "            (endDate == null\n"
+            "                ? Date.from(fallbackDate.toInstant().plus(24, ChronoUnit.HOURS))\n"
+            "                : Date.from(endDate.toInstant()));",
+            result.content,
+        )
+        self.assertIn(
+            "            + secondaryCache\n"
+            "                .keys()\n"
+            "                .count();",
+            result.content,
+        )
+        second = process_document(config, result.content, "Sample.java", "java")
+        self.assertEqual(second.content, result.content)
+        self.assertEqual(second.diagnostics, [])
+
     def test_block_suppression_prevents_partial_brace_edit(self):
         source = (
             "class Sample {\n"

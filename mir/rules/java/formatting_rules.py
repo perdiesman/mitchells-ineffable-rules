@@ -41,6 +41,7 @@ CONTINUATION_TYPES = {
     "method_invocation",
     "binary_expression",
     "ternary_expression",
+    "parenthesized_expression",
     "assignment_expression",
     "variable_declarator",
 }
@@ -123,6 +124,7 @@ def _expected_depth(node, row: int) -> int:
     switch_group_depth = 0
     switch_rule_depth = 0
     ternary_depth = 0
+    parenthesized_depth = 0
     within_switch_expression = False
     current = node.parent
     while current is not None:
@@ -170,10 +172,12 @@ def _expected_depth(node, row: int) -> int:
                 if current.type == "method_invocation":
                     if node.type == ".":
                         continuations.add("chain")
-                elif current.type in {"binary_expression", "ternary_expression"}:
+                elif current.type in {"binary_expression", "ternary_expression", "parenthesized_expression"}:
                     continuations.add("expression")
                     if current.type == "ternary_expression":
                         ternary_depth += 1
+                    elif current.type == "parenthesized_expression":
+                        parenthesized_depth += 1
                 elif current.type in {"assignment_expression", "variable_declarator"}:
                     if "chain" not in continuations and not within_switch_expression and (not within_list or any(
                         start_row > current.start_point.row
@@ -199,6 +203,7 @@ def _expected_depth(node, row: int) -> int:
     depth += max(0, switch_group_depth - int(node.type in {"case", "default"}))
     depth += max(0, switch_rule_depth - int(node.type in {"case", "default"}))
     depth += max(0, ternary_depth - 1)
+    depth += parenthesized_depth
     depth += len(continuations) + list_depth
     return max(0, depth)
 
@@ -212,14 +217,17 @@ def _wrapped_continuation_depth(node, category: str) -> int:
     switch_group_depth = 0
     switch_rule_depth = 0
     ternary_depth = int(node.type == "ternary_expression")
+    parenthesized_depth = 0
     current = node.parent
     while current is not None:
         if current.type in CONTAINER_TYPES:
             depth += 1
-        elif current.type in {"binary_expression", "ternary_expression"}:
+        elif current.type in {"binary_expression", "ternary_expression", "parenthesized_expression"}:
             continuations.add("expression")
             if current.type == "ternary_expression":
                 ternary_depth += 1
+            elif current.type == "parenthesized_expression":
+                parenthesized_depth += 1
         elif current.type in {"assignment_expression", "variable_declarator"}:
             if category != "chain" and (list_depth == 0 or any(
                 start_row > current.start_point.row
@@ -250,6 +258,7 @@ def _wrapped_continuation_depth(node, category: str) -> int:
         + switch_group_depth
         + switch_rule_depth
         + max(0, ternary_depth - 1)
+        + parenthesized_depth
     )
 
 
@@ -733,7 +742,15 @@ class ChainLayoutRule(BaseRule):
             )
             compact_length = len(prefix) + len(compact) + suffix_length
             original = document.text(node)
-            if config.get("compact_if_fits", True) and compact_length <= maximum:
+            multiline_binary_parent = any(
+                ancestor.type == "binary_expression" and ancestor.start_point.row < ancestor.end_point.row
+                for ancestor in _ancestors(node.parent)
+            )
+            if (
+                config.get("compact_if_fits", True)
+                and compact_length <= maximum
+                and not ("\n" in original and multiline_binary_parent)
+            ):
                 replacement = compact
             elif compact_length > maximum:
                 indent = " " * (_wrapped_continuation_depth(node, "chain") * size)
@@ -973,7 +990,10 @@ class TernaryLayoutRule(BaseRule):
         protected = {"line_comment", "block_comment", "string_literal", "character_literal", "text_block"}
         if any(child.type in protected for child in walk(node)):
             return None
-        return " ".join(text.split())
+        compact = " ".join(text.split())
+        for opening, closing in (("(", ")"), ("[", "]"), ("{", "}")):
+            compact = compact.replace(opening + " ", opening).replace(" " + closing, closing)
+        return compact
 
     def _compact_ternary(self, document, node) -> Optional[str]:
         condition = node.child_by_field_name("condition")
@@ -1031,13 +1051,25 @@ class TernaryLayoutRule(BaseRule):
             if compact is None:
                 continue
             prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
-            if config.get("compact_if_fits", True) and len(prefix) + len(compact) <= maximum:
+            end_line = document.content.splitlines()[node.end_point.row]
+            suffix = end_line[node.end_point.column:].rstrip()
+            suffix_length = (
+                len(suffix)
+                if suffix and all(character in ")]},;" for character in suffix)
+                else 0
+            )
+            if (
+                config.get("compact_if_fits", True)
+                and len(prefix) + len(compact) + suffix_length <= maximum
+            ):
                 replacement = compact
             else:
                 operator_column = _wrapped_continuation_depth(node, "expression") * size
                 rendered = self._multiline_ternary(document, node, operator_column, size)
                 if rendered is None or any(
-                    len(prefix) + len(line) > maximum if index == 0 else len(line) > maximum
+                    len(prefix) + len(line) > maximum
+                    if index == 0
+                    else len(line) + (suffix_length if index == len(rendered) - 1 else 0) > maximum
                     for index, line in enumerate(rendered)
                 ):
                     continue
