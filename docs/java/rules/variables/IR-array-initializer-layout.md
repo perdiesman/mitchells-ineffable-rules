@@ -69,3 +69,19 @@ Expected fixed output:
 class Sample {}
 
 ```
+
+##### preserve trailing comma — Fixed
+```java
+class Sample { String[] labels = {"FirstExtraordinarilyDescriptiveLabel", "SecondExtraordinarilyDescriptiveLabel", "ThirdExtraordinarilyDescriptiveLabel",}; }
+
+```
+
+Expected fixed output:
+```java
+class Sample { String[] labels = {
+        "FirstExtraordinarilyDescriptiveLabel",
+        "SecondExtraordinarilyDescriptiveLabel",
+        "ThirdExtraordinarilyDescriptiveLabel",
+    }; }
+
+```

@@ -1139,6 +1139,16 @@ class ArrayInitializerLayoutRule(BaseRule):
             "    })\n"
             "class Sample {}\n",
         ),
+        RuleCase(
+            "preserve trailing comma",
+            "class Sample { String[] labels = {\"FirstExtraordinarilyDescriptiveLabel\", \"SecondExtraordinarilyDescriptiveLabel\", \"ThirdExtraordinarilyDescriptiveLabel\",}; }\n",
+            "fixed",
+            "class Sample { String[] labels = {\n"
+            "        \"FirstExtraordinarilyDescriptiveLabel\",\n"
+            "        \"SecondExtraordinarilyDescriptiveLabel\",\n"
+            "        \"ThirdExtraordinarilyDescriptiveLabel\",\n"
+            "    }; }\n",
+        ),
     ]
 
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
@@ -1156,7 +1166,9 @@ class ArrayInitializerLayoutRule(BaseRule):
             values = [document.text(child).strip() for child in node.named_children]
             if not values or any("\n" in value for value in values):
                 continue
-            compact = "{" + ", ".join(values) + "}"
+            original = document.text(node)
+            trailing_comma = original[:-1].rstrip().endswith(",")
+            compact = "{" + ", ".join(values) + ("," if trailing_comma else "") + "}"
             prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
             if config.get("compact_if_fits", True) and len(prefix) + len(compact) <= maximum:
                 replacement = compact
@@ -1164,10 +1176,13 @@ class ArrayInitializerLayoutRule(BaseRule):
                 depth = _wrapped_continuation_depth(node, "list")
                 indent = " " * (depth * size)
                 close_indent = " " * (max(0, depth - 1) * size)
-                replacement = "{\n" + ",\n".join(indent + value for value in values) + "\n" + close_indent + "}"
+                rendered = ",\n".join(indent + value for value in values)
+                if trailing_comma:
+                    rendered += ","
+                replacement = "{\n" + rendered + "\n" + close_indent + "}"
             else:
                 continue
-            if replacement != document.text(node) and edit_is_authorized(node, config):
+            if replacement != original and edit_is_authorized(node, config):
                 edits.append(JavaEdit(node.start_byte, node.end_byte, replacement))
                 claimed.append((node.start_byte, node.end_byte))
         return edits
