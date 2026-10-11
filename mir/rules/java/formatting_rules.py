@@ -532,16 +532,19 @@ class JavaListLayoutRule(BaseRule):
         values = [document.text(child).strip() for child in children]
         has_multiline_value = any("\n" in value for value in values)
         compact = "(" + ", ".join(values) + ")"
-        line_prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
+        lines = document.content.splitlines()
+        line_prefix = lines[node.start_point.row][:node.start_point.column]
+        line_suffix = lines[node.end_point.row][node.end_point.column:].rstrip()
+        compact_length = len(line_prefix) + len(compact) + len(line_suffix)
         maximum = int(config.get("max_length", 120))
         original = document.text(node)
         if (
             not has_multiline_value
             and config.get("compact_if_fits", True)
-            and len(line_prefix) + len(compact) <= maximum
+            and compact_length <= maximum
         ):
             return compact if original != compact else None
-        if not has_multiline_value and "\n" not in original and len(line_prefix) + len(compact) <= maximum:
+        if not has_multiline_value and "\n" not in original and compact_length <= maximum:
             return None
         size = int(config.get("indent_size", 4))
         depth = _wrapped_continuation_depth(node, "list")
@@ -607,6 +610,34 @@ class ParameterLayoutRule(JavaListLayoutRule):
             "class Sample {\n    void publish(String first, String second) {}\n}\n",
         ),
         RuleCase("compact record header", "record Sample(String name, int count) {}\n", "accepted"),
+        RuleCase(
+            "record suffix exceeds width",
+            "public record SampleRecord(Integer id, Integer ownerId, String name, Integer status, Date modifiedAt, String notesValue) {}\n",
+            "fixed",
+            "public record SampleRecord(\n"
+            "    Integer id,\n"
+            "    Integer ownerId,\n"
+            "    String name,\n"
+            "    Integer status,\n"
+            "    Date modifiedAt,\n"
+            "    String notesValue\n"
+            ") {}\n",
+        ),
+        RuleCase(
+            "throws clause exceeds width",
+            "class Sample {\n"
+            "    private void publish(int maximumCount, int minimumCount, String categoryName, List<SampleNotification> notifications) throws Exception {}\n"
+            "}\n",
+            "fixed",
+            "class Sample {\n"
+            "    private void publish(\n"
+            "        int maximumCount,\n"
+            "        int minimumCount,\n"
+            "        String categoryName,\n"
+            "        List<SampleNotification> notifications\n"
+            "    ) throws Exception {}\n"
+            "}\n",
+        ),
     ]
 
 

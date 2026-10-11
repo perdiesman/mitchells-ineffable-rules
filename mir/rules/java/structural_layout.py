@@ -365,6 +365,104 @@ class MemberSpacingRule(BaseRule):
         return apply_java_edits(content, self._edits(content, rule_config))
 
 
+class ParameterAnnotationLayoutRule(BaseRule):
+    rule_id = "IR-parameter-annotation-layout"
+    description = "Keep fitting parameter annotations compact; otherwise place each annotation and the declared type on its own line."
+    category = "methods"
+    is_fixable = "yes"
+    commit_profile = True
+    default_config = {"max_length": 120, "indent_size": 4, "compact_if_fits": True}
+    config_options = {
+        "max_length": {"default": 120, "description": "Maximum compact parameter line length."},
+        "indent_size": {"default": 4, "description": "Parameter continuation indentation."},
+        "compact_if_fits": {"default": True, "description": "Collapse fitting annotated parameters."},
+    }
+    cases = [
+        RuleCase(
+            "long annotated parameter",
+            "class Sample {\n"
+            "    void publish(\n"
+            "        @OptionalValue @RequestValue(name = \"category\", required = false) @Converted(format = \"timestamp-with-zone\") OffsetDateTime startTime\n"
+            "    ) {}\n"
+            "}\n",
+            "fixed",
+            "class Sample {\n"
+            "    void publish(\n"
+            "        @OptionalValue\n"
+            "        @RequestValue(name = \"category\", required = false)\n"
+            "        @Converted(format = \"timestamp-with-zone\")\n"
+            "        OffsetDateTime startTime\n"
+            "    ) {}\n"
+            "}\n",
+        ),
+        RuleCase(
+            "compact annotation",
+            "class Sample { void publish(@Named String value) {} }\n",
+            "accepted",
+        ),
+    ]
+
+    @staticmethod
+    def _annotations(modifiers) -> list:
+        return [
+            child for child in modifiers.children
+            if child.type in {"annotation", "marker_annotation"}
+        ]
+
+    def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        if "@" not in content:
+            return []
+        document = parse_java(content)
+        lines = document.content.splitlines()
+        maximum = int(config.get("max_length", 120))
+        edits = []
+        for parameter in nodes_of_type(document, "formal_parameter", "spread_parameter"):
+            modifiers = next(
+                (child for child in parameter.named_children if child.type == "modifiers"),
+                None,
+            )
+            if modifiers is None or _has_comment(parameter):
+                continue
+            annotations = self._annotations(modifiers)
+            if not annotations:
+                continue
+            compact = " ".join(document.text(parameter).split())
+            prefix = lines[parameter.start_point.row][:parameter.start_point.column]
+            physical_length = len(lines[parameter.start_point.row])
+            fits = len(prefix) + len(compact) <= maximum and physical_length <= maximum
+            size = int(config.get("indent_size", 4))
+            parameter_indent = (
+                parameter.start_point.column
+                if not prefix.strip()
+                else _line_indent(document, parameter.start_point.row) + size
+            )
+            indent = " " * parameter_indent
+            desired = " " if config.get("compact_if_fits", True) and fits else "\n" + indent
+            declared_type = next(
+                (child for child in parameter.named_children if child.start_byte >= modifiers.end_byte),
+                None,
+            )
+            following_nodes = annotations[1:] + [declared_type]
+            for annotation, following in zip(annotations, following_nodes):
+                if following is None or following.start_byte < annotation.end_byte:
+                    continue
+                gap = document.source[annotation.end_byte:following.start_byte].decode()
+                if gap.strip() or gap == desired:
+                    continue
+                if span_is_authorized(document, annotation.end_byte, following.start_byte, config):
+                    edits.append(JavaEdit(annotation.end_byte, following.start_byte, desired))
+        return edits
+
+    def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
+        return [
+            _violation(self, content, edit, "Use canonical parameter annotation layout.")
+            for edit in self._edits(content, rule_config)
+        ]
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        return apply_java_edits(content, self._edits(content, rule_config))
+
+
 class LambdaLayoutRule(BaseRule):
     rule_id = "IR-lambda-layout"
     description = "Keep fitting lambda expressions compact and indent wrapped expression bodies after the arrow."

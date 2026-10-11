@@ -70,6 +70,7 @@ This document describes all JAVA linting rules supported by Mitchell's Ineffable
 | :--- | :--- | :---: | :---: |
 | [`IR-argument-layout`](rules/methods/IR-argument-layout.md) | Keep fitting Java argument and parameter lists compact; otherwise place each item on its own line. | Yes | [View Details](rules/methods/IR-argument-layout.md) |
 | [`IR-overload-grouping`](rules/methods/IR-overload-grouping.md) | Keep methods and constructors with the same name in contiguous groups. | No | [View Details](rules/methods/IR-overload-grouping.md) |
+| [`IR-parameter-annotation-layout`](rules/methods/IR-parameter-annotation-layout.md) | Keep fitting parameter annotations compact; otherwise place each annotation and the declared type on its own line. | Yes | [View Details](rules/methods/IR-parameter-annotation-layout.md) |
 | [`IR-parameter-layout`](rules/methods/IR-parameter-layout.md) | Keep fitting method, constructor, lambda, and record parameters compact; otherwise use one parameter per line. | Yes | [View Details](rules/methods/IR-parameter-layout.md) |
 
 ## Variables and Fields

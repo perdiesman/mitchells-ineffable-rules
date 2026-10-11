@@ -55,3 +55,43 @@ class Sample {
 record Sample(String name, int count) {}
 
 ```
+
+##### record suffix exceeds width — Fixed
+```java
+public record SampleRecord(Integer id, Integer ownerId, String name, Integer status, Date modifiedAt, String notesValue) {}
+
+```
+
+Expected fixed output:
+```java
+public record SampleRecord(
+    Integer id,
+    Integer ownerId,
+    String name,
+    Integer status,
+    Date modifiedAt,
+    String notesValue
+) {}
+
+```
+
+##### throws clause exceeds width — Fixed
+```java
+class Sample {
+    private void publish(int maximumCount, int minimumCount, String categoryName, List<SampleNotification> notifications) throws Exception {}
+}
+
+```
+
+Expected fixed output:
+```java
+class Sample {
+    private void publish(
+        int maximumCount,
+        int minimumCount,
+        String categoryName,
+        List<SampleNotification> notifications
+    ) throws Exception {}
+}
+
+```
