@@ -25,7 +25,7 @@ def _violation(rule: BaseRule, content: str, line: int, message: str, fixable: b
 def _protected_rows(content: str) -> set[int]:
     document = parse_java(content)
     rows = set()
-    for node in walk(document.root):
+    for node in document.nodes:
         if node.type in {"line_comment", "block_comment", "text_block"} or (
             node.type in {"string_literal", "character_literal"}
             and node.start_point.row != node.end_point.row
@@ -198,7 +198,7 @@ class JavaLineLengthRule(BaseRule):
         maximum = int(rule_config.get("max_length", 120))
         document = parse_java(content)
         exempt = set()
-        for node in walk(document.root):
+        for node in document.nodes:
             if node.type in {"package_declaration", "import_declaration", "text_block"}:
                 exempt.update(range(node.start_point.row + 1, node.end_point.row + 2))
         return [

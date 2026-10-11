@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import PurePath
 import fnmatch
 import re
-from typing import Iterable, Iterator, Optional, Sequence
+from typing import Iterable, Iterator, Mapping, Optional, Sequence
 
 from tree_sitter import Language, Node, Parser, Tree
 import tree_sitter_java
@@ -30,6 +30,8 @@ class JavaDocument:
     source: bytes
     tree: Tree
     line_starts: tuple[int, ...]
+    nodes: tuple[Node, ...]
+    nodes_by_type: Mapping[str, tuple[Node, ...]]
 
     @property
     def root(self) -> Node:
@@ -51,7 +53,19 @@ def parse_java(content: str) -> JavaDocument:
     starts = [0]
     for match in re.finditer(b"\n", source):
         starts.append(match.end())
-    return JavaDocument(content, source, JAVA_PARSER.parse(source), tuple(starts))
+    tree = JAVA_PARSER.parse(source)
+    all_nodes = tuple(walk(tree.root_node))
+    indexed: dict[str, list[Node]] = {}
+    for node in all_nodes:
+        indexed.setdefault(node.type, []).append(node)
+    return JavaDocument(
+        content,
+        source,
+        tree,
+        tuple(starts),
+        all_nodes,
+        {node_type: tuple(nodes) for node_type, nodes in indexed.items()},
+    )
 
 
 def clear_java_cache() -> None:
@@ -77,20 +91,23 @@ def walk(node: Node) -> Iterator[Node]:
 
 
 def nodes_of_type(document: JavaDocument, *types: str) -> Iterator[Node]:
-    wanted = set(types)
-    return (node for node in walk(document.root) if node.type in wanted)
+    return (
+        node
+        for node_type in types
+        for node in document.nodes_by_type.get(node_type, ())
+    )
 
 
 def error_nodes(document: JavaDocument) -> list[Node]:
     return [
         node
-        for node in walk(document.root)
+        for node in document.nodes
         if node.type == "ERROR" or node.is_missing
     ]
 
 
 def comment_nodes(document: JavaDocument) -> list[Node]:
-    return [node for node in walk(document.root) if node.type in {"line_comment", "block_comment"}]
+    return list(nodes_of_type(document, "line_comment", "block_comment"))
 
 
 def named_ancestor(node: Node, types: Iterable[str]) -> Optional[Node]:
@@ -108,7 +125,7 @@ def node_for_line(document: JavaDocument, line: int) -> Optional[Node]:
         return None
     row = line - 1
     best: Optional[Node] = None
-    for node in walk(document.root):
+    for node in document.nodes:
         if node.start_point.row <= row <= node.end_point.row:
             if best is None or node.end_byte - node.start_byte < best.end_byte - best.start_byte:
                 best = node
@@ -150,7 +167,7 @@ def nontrivia_signature(content: str) -> tuple[tuple[str, str], ...]:
     document = parse_java(content)
     ignored = {"line_comment", "block_comment"}
     leaves = []
-    for node in walk(document.root):
+    for node in document.nodes:
         if node.child_count or node.type in ignored:
             continue
         leaves.append((node.type, document.text(node)))

@@ -99,12 +99,15 @@ class TypeParameterLayoutRule(BaseRule):
         if len(prefix) + len(compact) <= maximum:
             return None
         size = int(config.get("indent_size", 4))
-        indent = _indent_for(node, size, 1)
-        close_indent = _indent_for(node, size)
+        base = _line_indent(document, node.start_point.row)
+        indent = " " * (base + size)
+        close_indent = " " * base
         replacement = "<\n" + ",\n".join(indent + value for value in values) + "\n" + close_indent + ">"
         return replacement if replacement != document.text(node) else None
 
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        if "<" not in content:
+            return []
         document = parse_java(content)
         edits = []
         for node in nodes_of_type(document, "type_parameters"):
@@ -169,6 +172,8 @@ class LoopHeaderLayoutRule(BaseRule):
         return [declaration, document.text(value).strip()], ["", ""]
 
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        if "for" not in content:
+            return []
         document = parse_java(content)
         maximum = int(config.get("max_length", 120))
         size = int(config.get("indent_size", 4))
@@ -190,8 +195,9 @@ class LoopHeaderLayoutRule(BaseRule):
             if config.get("compact_if_fits", True) and len(prefix) + len(compact) <= maximum:
                 replacement = compact
             elif len(prefix) + len(compact) > maximum:
-                indent = " " * (opening.start_point.column + size)
-                close_indent = " " * opening.start_point.column
+                base = _line_indent(document, node.start_point.row)
+                indent = " " * (base + size)
+                close_indent = " " * base
                 rendered = [indent + value + suffix for value, suffix in zip(values, suffixes)]
                 replacement = "(\n" + "\n".join(rendered) + "\n" + close_indent + ")"
             else:
@@ -230,9 +236,12 @@ class EnumLayoutRule(BaseRule):
     ]
 
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        if "enum" not in content:
+            return []
         document = parse_java(content)
         maximum = int(config.get("max_length", 120))
         size = int(config.get("indent_size", 4))
+        comments = list(nodes_of_type(document, *COMMENT_TYPES))
         edits = []
         for body in nodes_of_type(document, "enum_body"):
             constants = [child for child in body.named_children if child.type == "enum_constant"]
@@ -242,12 +251,15 @@ class EnumLayoutRule(BaseRule):
             if any("\n" in value for value in values):
                 continue
             first, last = constants[0], constants[-1]
+            if any(first.start_byte <= comment.start_byte < last.end_byte for comment in comments):
+                continue
             compact = ", ".join(values)
             prefix_length = first.start_point.column
             if config.get("compact_if_fits", True) and prefix_length + len(compact) <= maximum:
                 replacement = compact
             elif prefix_length + len(compact) > maximum:
-                indent = " " * (body.start_point.column + size)
+                base = _line_indent(document, body.parent.start_point.row)
+                indent = " " * (base + size)
                 replacement = values[0] + ",\n" + ",\n".join(indent + value for value in values[1:])
             else:
                 continue
@@ -281,10 +293,12 @@ class EmptyBodyLayoutRule(BaseRule):
     BODY_TYPES = TYPE_BODY_TYPES | {"block", "constructor_body"}
 
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        if "{\n" not in content and "{\r\n" not in content:
+            return []
         document = parse_java(content)
         edits = []
-        for node in walk(document.root):
-            if node.type not in self.BODY_TYPES or node.named_child_count or _has_comment(node):
+        for node in nodes_of_type(document, *self.BODY_TYPES):
+            if node.named_child_count or _has_comment(node):
                 continue
             if document.text(node) == "{}":
                 continue
@@ -321,8 +335,9 @@ class MemberSpacingRule(BaseRule):
 
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
         document = parse_java(content)
+        comments = list(nodes_of_type(document, *COMMENT_TYPES))
         edits = []
-        for body in (node for node in walk(document.root) if node.type in TYPE_BODY_TYPES):
+        for body in nodes_of_type(document, *TYPE_BODY_TYPES):
             members = self._members(body)
             for left, right in zip(members, members[1:]):
                 if left.type == "enum_constant" or right.type == "enum_constant":
@@ -334,7 +349,7 @@ class MemberSpacingRule(BaseRule):
                 gap = document.source[left.end_byte:right.start_byte].decode()
                 if gap.strip() or any(
                     left.end_byte <= comment.start_byte < right.start_byte
-                    for comment in nodes_of_type(document, *COMMENT_TYPES)
+                    for comment in comments
                 ):
                     continue
                 indent = " " * right.start_point.column
@@ -373,7 +388,10 @@ class LambdaLayoutRule(BaseRule):
     ]
 
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        if "->" not in content:
+            return []
         document = parse_java(content)
+        comments = list(nodes_of_type(document, *COMMENT_TYPES))
         maximum = int(config.get("max_length", 120))
         size = int(config.get("indent_size", 4))
         edits = []
@@ -385,13 +403,15 @@ class LambdaLayoutRule(BaseRule):
                 continue
             if any(
                 parameters.end_byte <= comment.start_byte < body.start_byte
-                for comment in nodes_of_type(document, *COMMENT_TYPES)
+                for comment in comments
             ):
                 continue
             parameter_text = document.text(parameters).strip()
             body_text = document.text(body).strip()
             prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
             compact_length = len(prefix) + len(parameter_text) + 4 + len(body_text)
+            before = document.source[parameters.end_byte:arrow.start_byte].decode()
+            after = document.source[arrow.end_byte:body.start_byte].decode()
             if body.type == "block":
                 desired_before = " "
                 desired_after = " "
@@ -403,11 +423,16 @@ class LambdaLayoutRule(BaseRule):
             ):
                 desired_before = " "
                 desired_after = " "
+            elif "\n" in after:
+                # Once a complex body is wrapped, JavaIndentRule owns its exact
+                # nesting depth. Keeping the existing newline prevents this
+                # rule from fighting expression/list indentation.
+                desired_before = " "
+                desired_after = after
             else:
                 desired_before = " "
-                desired_after = "\n" + " " * (node.start_point.column + size)
-            before = document.source[parameters.end_byte:arrow.start_byte].decode()
-            after = document.source[arrow.end_byte:body.start_byte].decode()
+                base = _line_indent(document, node.start_point.row)
+                desired_after = "\n" + " " * (base + size)
             if before != desired_before and span_is_authorized(document, parameters.end_byte, arrow.start_byte, config):
                 edits.append(JavaEdit(parameters.end_byte, arrow.start_byte, desired_before))
             if after != desired_after and span_is_authorized(document, arrow.end_byte, body.start_byte, config):
@@ -462,12 +487,17 @@ class SwitchLayoutRule(BaseRule):
         return JavaEdit(start, end, replacement)
 
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        if "switch" not in content:
+            return []
         document = parse_java(content)
         comments = list(nodes_of_type(document, *COMMENT_TYPES))
+        switch_blocks = list(nodes_of_type(document, "switch_block"))
+        switch_groups = list(nodes_of_type(document, "switch_block_statement_group"))
+        switch_rules = list(nodes_of_type(document, "switch_rule"))
         size = int(config.get("indent_size", 4))
         maximum = int(config.get("max_length", 120))
         edits = []
-        for block in nodes_of_type(document, "switch_block"):
+        for block in switch_blocks:
             opening = _first_child(block, "{")
             closing = _first_child(block, "}")
             children = [
@@ -489,7 +519,7 @@ class SwitchLayoutRule(BaseRule):
             if edit:
                 edits.append(edit)
 
-        for group in nodes_of_type(document, "switch_block_statement_group"):
+        for group in switch_groups:
             label = next((child for child in group.named_children if child.type == "switch_label"), None)
             colon = _first_child(group, ":")
             statements = [child for child in group.named_children if child is not label]
@@ -505,7 +535,7 @@ class SwitchLayoutRule(BaseRule):
                 if edit:
                     edits.append(edit)
 
-        for rule in nodes_of_type(document, "switch_rule"):
+        for rule in switch_rules:
             label = next((child for child in rule.named_children if child.type == "switch_label"), None)
             arrow = _first_child(rule, "->")
             body = rule.named_children[-1] if rule.named_children else None

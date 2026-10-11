@@ -74,13 +74,24 @@ def _line_violation(rule: BaseRule, content: str, line: int, message: str, fixab
 
 
 def _leaf_nodes(document) -> list:
-    leaves = []
     protected = {"line_comment", "block_comment", "string_literal", "character_literal", "text_block"}
-    for node in walk(document.root):
+    nodes = document.nodes
+    protected_ranges = sorted(
+        (node.start_byte, node.end_byte)
+        for node in nodes
+        if node.type in protected
+    )
+    leaves = []
+    range_index = 0
+    for node in nodes:
         if node.child_count or node.type in protected:
             continue
-        current = node.parent
-        if any(ancestor.type in protected for ancestor in _ancestors(current)):
+        while range_index < len(protected_ranges) and protected_ranges[range_index][1] <= node.start_byte:
+            range_index += 1
+        if (
+            range_index < len(protected_ranges)
+            and protected_ranges[range_index][0] <= node.start_byte < protected_ranges[range_index][1]
+        ):
             continue
         leaves.append(node)
     return leaves
@@ -94,13 +105,9 @@ def _ancestors(node):
 
 def _line_first_nodes(document) -> dict[int, object]:
     first = {}
-    for node in walk(document.root):
-        if node.child_count:
+    for node in document.nodes:
+        if node.child_count and node.type not in {"line_comment", "block_comment"}:
             continue
-        row = node.start_point.row
-        if row not in first or node.start_byte < first[row].start_byte:
-            first[row] = node
-    for node in comment_nodes(document):
         row = node.start_point.row
         if row not in first or node.start_byte < first[row].start_byte:
             first[row] = node
@@ -113,9 +120,13 @@ def _expected_depth(node, row: int) -> int:
     list_depth = 0
     within_list = False
     list_start_rows = []
-    switch_group = False
+    switch_group_depth = 0
+    switch_rule_depth = 0
+    within_switch_expression = False
     current = node.parent
     while current is not None:
+        if current.type == "switch_expression":
+            within_switch_expression = True
         if current.type in CONTAINER_TYPES:
             if current.start_point.row < row < current.end_point.row:
                 depth += 1
@@ -161,10 +172,10 @@ def _expected_depth(node, row: int) -> int:
                 elif current.type in {"binary_expression", "ternary_expression"}:
                     continuations.add("expression")
                 elif current.type in {"assignment_expression", "variable_declarator"}:
-                    if not within_list or any(
+                    if not within_switch_expression and (not within_list or any(
                         start_row > current.start_point.row
                         for start_row in list_start_rows
-                    ):
+                    )):
                         continuations.add("expression")
                 elif current.type in {
                     "argument_list",
@@ -178,10 +189,12 @@ def _expected_depth(node, row: int) -> int:
                 else:
                     continuations.add("type")
         if current.type == "switch_block_statement_group":
-            switch_group = True
+            switch_group_depth += 1
+        elif current.type == "switch_rule":
+            switch_rule_depth += 1
         current = current.parent
-    if switch_group and node.type not in {"case", "default"}:
-        depth += 1
+    depth += max(0, switch_group_depth - int(node.type in {"case", "default"}))
+    depth += max(0, switch_rule_depth - int(node.type in {"case", "default"}))
     depth += len(continuations) + list_depth
     return max(0, depth)
 
@@ -192,7 +205,8 @@ def _wrapped_continuation_depth(node, category: str) -> int:
     continuations = set() if category == "list" else {category}
     list_depth = int(category == "list")
     list_start_rows = [node.start_point.row] if category == "list" else []
-    switch_group = False
+    switch_group_depth = 0
+    switch_rule_depth = 0
     current = node.parent
     while current is not None:
         if current.type in CONTAINER_TYPES:
@@ -218,9 +232,11 @@ def _wrapped_continuation_depth(node, category: str) -> int:
         elif current.type in {"throws", "super_interfaces", "superclass", "interfaces", "permits"}:
             continuations.add("type")
         if current.type == "switch_block_statement_group":
-            switch_group = True
+            switch_group_depth += 1
+        elif current.type == "switch_rule":
+            switch_rule_depth += 1
         current = current.parent
-    return depth + len(continuations) + list_depth + int(switch_group)
+    return depth + len(continuations) + list_depth + switch_group_depth + switch_rule_depth
 
 
 def _spaced_operator(node, text: str) -> bool:
@@ -282,7 +298,7 @@ class JavaIndentRule(BaseRule):
         first = _line_first_nodes(document)
         size = int(rule_config.get("indent_size", 4))
         protected_rows = set()
-        for node in walk(document.root):
+        for node in document.nodes:
             if node.type == "text_block" or (
                 node.type == "string_literal"
                 and node.start_point.row != node.end_point.row
@@ -336,13 +352,12 @@ class JavaSpacingRule(BaseRule):
     def _edits(self, content: str) -> List[JavaEdit]:
         document = parse_java(content)
         leaves = _leaf_nodes(document)
-        comments = comment_nodes(document)
         edits = []
         for left, right in zip(leaves, leaves[1:]):
             if left.end_byte > right.start_byte:
                 continue
             gap = document.source[left.end_byte:right.start_byte].decode()
-            if gap.strip() or "\n" in gap or any(left.end_byte <= c.start_byte < right.start_byte for c in comments):
+            if gap.strip() or "\n" in gap:
                 continue
             left_text = document.text(left)
             right_text = document.text(right)
@@ -398,6 +413,7 @@ class BraceLayoutRule(BaseRule):
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
         document = parse_java(content)
         leaves = _leaf_nodes(document)
+        comments = comment_nodes(document)
         size = int(config.get("indent_size", 4))
         edits = []
         for index, node in enumerate(leaves):
@@ -413,7 +429,7 @@ class BraceLayoutRule(BaseRule):
                     gap = document.source[previous.end_byte:node.start_byte].decode()
                     if not gap.strip() and "\n" in gap and not any(
                         previous.end_byte <= comment.start_byte < node.start_byte
-                        for comment in comment_nodes(document)
+                        for comment in comments
                     ):
                         edits.append(JavaEdit(previous.end_byte, node.start_byte, " "))
                 if following and document.text(following) != "}" and following.start_point.row == node.start_point.row:
@@ -548,7 +564,7 @@ class JavaListLayoutRule(BaseRule):
 
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
         document = parse_java(content)
-        candidates = [node for node in walk(document.root) if node.type in self.node_types]
+        candidates = [node for node in document.nodes if node.type in self.node_types]
         edits = []
         claimed = []
         # Prefer the outer list when both levels can be normalized. If an outer
@@ -989,7 +1005,7 @@ class TypeClauseLayoutRule(BaseRule):
         maximum = int(config.get("max_length", 120))
         size = int(config.get("indent_size", 4))
         edits = []
-        for node in walk(document.root):
+        for node in document.nodes:
             keyword = self.KEYWORDS.get(node.type)
             if not keyword or not node.named_child_count:
                 continue
@@ -1092,7 +1108,7 @@ class OneStatementLineRule(BaseRule):
     def _edits(self, content: str) -> List[JavaEdit]:
         document = parse_java(content)
         edits = []
-        for parent in walk(document.root):
+        for parent in document.nodes:
             statements = [child for child in parent.named_children if child.type in STATEMENT_TYPES]
             for left, right in zip(statements, statements[1:]):
                 if left.end_point.row != right.start_point.row:
