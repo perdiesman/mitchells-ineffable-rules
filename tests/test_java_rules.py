@@ -52,6 +52,7 @@ class TestJavaFoundation(unittest.TestCase):
     def test_generated_source_modes(self):
         source = "// Generated source. DO NOT EDIT.\nclass Sample {}\n"
         self.assertEqual(generated_mode("src/Sample.java", source, {}), "skip")
+        self.assertEqual(generated_mode("src/main/java/sample/generated/Sample.java", "class Sample {}\n", {}), "skip")
         config = {"generated": {"mode": "check"}}
         self.assertEqual(generated_mode("src/Sample.java", source, config), "check")
 

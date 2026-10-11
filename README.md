@@ -209,6 +209,7 @@ languages:
       path_patterns:
         - "**/target/generated-sources/**"
         - "**/build/generated/**"
+        - "**/generated/**"
       header_markers:
         - "do not edit"
         - "generated source"

@@ -27,6 +27,7 @@ CONTAINER_TYPES = {
 }
 CONTINUATION_TYPES = {
     "argument_list",
+    "annotation_argument_list",
     "formal_parameters",
     "record_header",
     "array_initializer",
@@ -106,6 +107,7 @@ def _line_first_nodes(document) -> dict[int, object]:
 def _expected_depth(node, row: int) -> int:
     depth = 0
     continuations = set()
+    list_depth = 0
     switch_group = False
     current = node.parent
     while current is not None:
@@ -119,9 +121,13 @@ def _expected_depth(node, row: int) -> int:
             if current.type in {"method_invocation", "binary_expression", "ternary_expression"}:
                 active = current.start_point.row < row <= current.end_point.row
             else:
+                closes_current = (
+                    node.type in {")", "]", "}"}
+                    and node.end_byte == current.end_byte
+                )
                 active = (
                     current.start_point.row < row <= current.end_point.row
-                    and node.type not in {")", "]", "}"}
+                    and not closes_current
                 )
             if active:
                 if current.type == "method_invocation":
@@ -131,12 +137,13 @@ def _expected_depth(node, row: int) -> int:
                     continuations.add("expression")
                 elif current.type in {
                     "argument_list",
+                    "annotation_argument_list",
                     "formal_parameters",
                     "record_header",
                     "array_initializer",
                     "resource_specification",
                 }:
-                    continuations.add("list")
+                    list_depth += 1
                 else:
                     continuations.add("type")
         if current.type == "switch_block_statement_group":
@@ -144,14 +151,15 @@ def _expected_depth(node, row: int) -> int:
         current = current.parent
     if switch_group and node.type not in {"case", "default"}:
         depth += 1
-    depth += len(continuations)
+    depth += len(continuations) + list_depth
     return max(0, depth)
 
 
 def _wrapped_continuation_depth(node, category: str) -> int:
     """Return the canonical depth for a wrapped construct within *node*."""
     depth = 0
-    continuations = {category}
+    continuations = set() if category == "list" else {category}
+    list_depth = int(category == "list")
     switch_group = False
     current = node.parent
     while current is not None:
@@ -161,18 +169,19 @@ def _wrapped_continuation_depth(node, category: str) -> int:
             continuations.add("expression")
         elif current.type in {
             "argument_list",
+            "annotation_argument_list",
             "formal_parameters",
             "record_header",
             "array_initializer",
             "resource_specification",
         }:
-            continuations.add("list")
+            list_depth += 1
         elif current.type in {"throws", "super_interfaces", "superclass", "interfaces", "permits"}:
             continuations.add("type")
         if current.type == "switch_block_statement_group":
             switch_group = True
         current = current.parent
-    return depth + len(continuations) + int(switch_group)
+    return depth + len(continuations) + list_depth + int(switch_group)
 
 
 def _spaced_operator(node, text: str) -> bool:
@@ -461,7 +470,8 @@ class JavaListLayoutRule(BaseRule):
         depth = _wrapped_continuation_depth(node, "list")
         indent = " " * (depth * size)
         close_indent = " " * (max(0, depth - 1) * size)
-        return "(\n" + ",\n".join(indent + value for value in values) + "\n" + close_indent + ")"
+        replacement = "(\n" + ",\n".join(indent + value for value in values) + "\n" + close_indent + ")"
+        return replacement if replacement != original else None
 
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
         document = parse_java(content)
