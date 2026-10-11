@@ -86,6 +86,7 @@ This document describes all JAVA linting rules supported by Mitchell's Ineffable
 | :--- | :--- | :---: | :---: |
 | [`IR-chain-layout`](rules/expressions/IR-chain-layout.md) | Keep fitting method chains compact; otherwise align each chained call one continuation level in. | Yes | [View Details](rules/expressions/IR-chain-layout.md) |
 | [`IR-expression-layout`](rules/expressions/IR-expression-layout.md) | Keep fitting binary expressions compact; align wrapped operators at one continuation level. | Yes | [View Details](rules/expressions/IR-expression-layout.md) |
+| [`IR-lambda-layout`](rules/expressions/IR-lambda-layout.md) | Keep fitting lambda expressions compact and indent wrapped expression bodies after the arrow. | Yes | [View Details](rules/expressions/IR-lambda-layout.md) |
 | [`IR-redundant-boolean-comparison`](rules/expressions/IR-redundant-boolean-comparison.md) | Avoid explicit comparisons with true or false when the boolean expression is clear. | Sometimes | [View Details](rules/expressions/IR-redundant-boolean-comparison.md) |
 | [`IR-ternary-layout`](rules/expressions/IR-ternary-layout.md) | Keep fitting ternary expressions compact; otherwise align question and colon branches. | Yes | [View Details](rules/expressions/IR-ternary-layout.md) |
 
@@ -96,6 +97,7 @@ This document describes all JAVA linting rules supported by Mitchell's Ineffable
 | [`IR-loop-header-layout`](rules/control-flow/IR-loop-header-layout.md) | Keep fitting for-loop headers compact; otherwise place each logical header part on its own line. | Yes | [View Details](rules/control-flow/IR-loop-header-layout.md) |
 | [`IR-required-braces`](rules/control-flow/IR-required-braces.md) | Use braces for if, else, for, while, and do bodies. | Sometimes | [View Details](rules/control-flow/IR-required-braces.md) |
 | [`IR-switch-fallthrough`](rules/control-flow/IR-switch-fallthrough.md) | Mark intentional fall-through in colon-style switch statement groups. | No | [View Details](rules/control-flow/IR-switch-fallthrough.md) |
+| [`IR-switch-layout`](rules/control-flow/IR-switch-layout.md) | Place switch cases and colon-style case statements on readable, consistently indented lines. | Yes | [View Details](rules/control-flow/IR-switch-layout.md) |
 | [`IR-try-resource-layout`](rules/control-flow/IR-try-resource-layout.md) | Keep fitting try resources compact; otherwise place each resource on its own line. | Yes | [View Details](rules/control-flow/IR-try-resource-layout.md) |
 
 ## Naming

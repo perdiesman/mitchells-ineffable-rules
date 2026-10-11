@@ -54,6 +54,11 @@ def _first_child(node, node_type: str):
     return next((child for child in node.children if child.type == node_type), None)
 
 
+def _line_indent(document, row: int) -> int:
+    line = document.content.splitlines()[row]
+    return len(line) - len(line.lstrip(" "))
+
+
 class TypeParameterLayoutRule(BaseRule):
     rule_id = "IR-type-parameter-layout"
     description = "Keep fitting generic type parameters compact; otherwise place each parameter on its own line."
@@ -340,6 +345,187 @@ class MemberSpacingRule(BaseRule):
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         return [_violation(self, content, edit, "Separate Java members with one blank line.") for edit in self._edits(content, rule_config)]
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        return apply_java_edits(content, self._edits(content, rule_config))
+
+
+class LambdaLayoutRule(BaseRule):
+    rule_id = "IR-lambda-layout"
+    description = "Keep fitting lambda expressions compact and indent wrapped expression bodies after the arrow."
+    category = "expressions"
+    is_fixable = "yes"
+    commit_profile = True
+    default_config = {"max_length": 120, "indent_size": 4, "compact_if_fits": True}
+    config_options = {
+        "max_length": {"default": 120, "description": "Maximum compact lambda length."},
+        "indent_size": {"default": 4, "description": "Expression-body continuation indentation."},
+        "compact_if_fits": {"default": True, "description": "Collapse fitting expression lambdas."},
+    }
+    cases = [
+        RuleCase(
+            "compact expression lambda",
+            "class Sample {\n    Object map(Object value) {\n        return apply(value ->\n            transform(value));\n    }\n    Object apply(Object value) { return value; }\n    Object transform(Object value) { return value; }\n}\n",
+            "fixed",
+            "class Sample {\n    Object map(Object value) {\n        return apply(value -> transform(value));\n    }\n    Object apply(Object value) { return value; }\n    Object transform(Object value) { return value; }\n}\n",
+        ),
+        RuleCase("block lambda", "class Sample { Object value = (Runnable) () -> {}; }\n", "accepted"),
+    ]
+
+    def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        document = parse_java(content)
+        maximum = int(config.get("max_length", 120))
+        size = int(config.get("indent_size", 4))
+        edits = []
+        for node in nodes_of_type(document, "lambda_expression"):
+            parameters = node.child_by_field_name("parameters")
+            body = node.child_by_field_name("body")
+            arrow = next((child for child in node.children if child.type == "->"), None)
+            if not parameters or not body or not arrow:
+                continue
+            if any(
+                parameters.end_byte <= comment.start_byte < body.start_byte
+                for comment in nodes_of_type(document, *COMMENT_TYPES)
+            ):
+                continue
+            parameter_text = document.text(parameters).strip()
+            body_text = document.text(body).strip()
+            prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
+            compact_length = len(prefix) + len(parameter_text) + 4 + len(body_text)
+            if body.type == "block":
+                desired_before = " "
+                desired_after = " "
+            elif (
+                config.get("compact_if_fits", True)
+                and "\n" not in parameter_text
+                and "\n" not in body_text
+                and compact_length <= maximum
+            ):
+                desired_before = " "
+                desired_after = " "
+            else:
+                desired_before = " "
+                desired_after = "\n" + " " * (node.start_point.column + size)
+            before = document.source[parameters.end_byte:arrow.start_byte].decode()
+            after = document.source[arrow.end_byte:body.start_byte].decode()
+            if before != desired_before and span_is_authorized(document, parameters.end_byte, arrow.start_byte, config):
+                edits.append(JavaEdit(parameters.end_byte, arrow.start_byte, desired_before))
+            if after != desired_after and span_is_authorized(document, arrow.end_byte, body.start_byte, config):
+                edits.append(JavaEdit(arrow.end_byte, body.start_byte, desired_after))
+        return edits
+
+    def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
+        return [_violation(self, content, edit, "Use canonical lambda layout.") for edit in self._edits(content, rule_config)]
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        return apply_java_edits(content, self._edits(content, rule_config))
+
+
+class SwitchLayoutRule(BaseRule):
+    rule_id = "IR-switch-layout"
+    description = "Place switch cases and colon-style case statements on readable, consistently indented lines."
+    category = "control-flow"
+    is_fixable = "yes"
+    commit_profile = True
+    default_config = {"max_length": 120, "indent_size": 4}
+    config_options = {
+        "max_length": {"default": 120, "description": "Maximum compact arrow-case length."},
+        "indent_size": {"default": 4, "description": "Case-body indentation."},
+    }
+    cases = [
+        RuleCase(
+            "colon switch groups",
+            "class Sample {\n    int value(int code) {\n        switch (code) { case 1: prepare(); return 1; default: return 0; }\n    }\n    void prepare() {}\n}\n",
+            "fixed",
+            "class Sample {\n    int value(int code) {\n        switch (code) {\n            case 1:\n                prepare();\n                return 1;\n            default:\n                return 0;\n        }\n    }\n    void prepare() {}\n}\n",
+        ),
+        RuleCase(
+            "arrow switch rules",
+            "class Sample {\n    int value(int code) {\n        return switch (code) { case 1 -> 1; default -> 0; };\n    }\n}\n",
+            "fixed",
+            "class Sample {\n    int value(int code) {\n        return switch (code) {\n            case 1 -> 1;\n            default -> 0;\n        };\n    }\n}\n",
+        ),
+    ]
+
+    @staticmethod
+    def _comments_between(comments: Iterable, start: int, end: int) -> bool:
+        return any(start <= comment.start_byte < end for comment in comments)
+
+    def _gap_edit(self, document, comments, start: int, end: int, replacement: str, config: Dict[str, Any]) -> Optional[JavaEdit]:
+        if self._comments_between(comments, start, end):
+            return None
+        original = document.source[start:end].decode()
+        if original == replacement or original.strip():
+            return None
+        if not span_is_authorized(document, start, end, config):
+            return None
+        return JavaEdit(start, end, replacement)
+
+    def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        document = parse_java(content)
+        comments = list(nodes_of_type(document, *COMMENT_TYPES))
+        size = int(config.get("indent_size", 4))
+        maximum = int(config.get("max_length", 120))
+        edits = []
+        for block in nodes_of_type(document, "switch_block"):
+            opening = _first_child(block, "{")
+            closing = _first_child(block, "}")
+            children = [
+                child for child in block.named_children
+                if child.type in {"switch_rule", "switch_block_statement_group"}
+            ]
+            if not opening or not closing or not children:
+                continue
+            base = _line_indent(document, block.parent.start_point.row)
+            case_indent = " " * (base + size)
+            pairs = [(opening.end_byte, children[0].start_byte)]
+            pairs.extend((left.end_byte, right.start_byte) for left, right in zip(children, children[1:]))
+            for start, end in pairs:
+                edit = self._gap_edit(document, comments, start, end, "\n" + case_indent, config)
+                if edit:
+                    edits.append(edit)
+            close_indent = " " * base
+            edit = self._gap_edit(document, comments, children[-1].end_byte, closing.start_byte, "\n" + close_indent, config)
+            if edit:
+                edits.append(edit)
+
+        for group in nodes_of_type(document, "switch_block_statement_group"):
+            label = next((child for child in group.named_children if child.type == "switch_label"), None)
+            colon = _first_child(group, ":")
+            statements = [child for child in group.named_children if child is not label]
+            if not label or not colon or not statements:
+                continue
+            switch_block = group.parent
+            base = _line_indent(document, switch_block.parent.start_point.row)
+            indent = " " * (base + 2 * size)
+            pairs = [(colon.end_byte, statements[0].start_byte)]
+            pairs.extend((left.end_byte, right.start_byte) for left, right in zip(statements, statements[1:]))
+            for start, end in pairs:
+                edit = self._gap_edit(document, comments, start, end, "\n" + indent, config)
+                if edit:
+                    edits.append(edit)
+
+        for rule in nodes_of_type(document, "switch_rule"):
+            label = next((child for child in rule.named_children if child.type == "switch_label"), None)
+            arrow = _first_child(rule, "->")
+            body = rule.named_children[-1] if rule.named_children else None
+            if not label or not arrow or not body:
+                continue
+            before = self._gap_edit(document, comments, label.end_byte, arrow.start_byte, " ", config)
+            if before:
+                edits.append(before)
+            prefix = document.content.splitlines()[label.start_point.row][:label.start_point.column]
+            compact_length = len(prefix) + len(document.text(rule).replace("\n", " "))
+            switch_block = rule.parent
+            base = _line_indent(document, switch_block.parent.start_point.row)
+            after_text = " " if body.type == "block" or compact_length <= maximum else "\n" + " " * (base + 2 * size)
+            after = self._gap_edit(document, comments, arrow.end_byte, body.start_byte, after_text, config)
+            if after:
+                edits.append(after)
+        return edits
+
+    def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
+        return [_violation(self, content, edit, "Use canonical switch layout.") for edit in self._edits(content, rule_config)]
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
         return apply_java_edits(content, self._edits(content, rule_config))
