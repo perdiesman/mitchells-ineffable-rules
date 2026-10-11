@@ -112,6 +112,7 @@ def _expected_depth(node, row: int) -> int:
     continuations = set()
     list_depth = 0
     within_list = False
+    list_start_rows = []
     switch_group = False
     current = node.parent
     while current is not None:
@@ -131,6 +132,7 @@ def _expected_depth(node, row: int) -> int:
                 "resource_specification",
             }:
                 within_list = True
+                list_start_rows.append(current.start_point.row)
             if current.type in {"method_invocation", "binary_expression", "ternary_expression"}:
                 active = current.start_point.row < row <= current.end_point.row
             else:
@@ -157,7 +159,10 @@ def _expected_depth(node, row: int) -> int:
                 elif current.type in {"binary_expression", "ternary_expression"}:
                     continuations.add("expression")
                 elif current.type in {"assignment_expression", "variable_declarator"}:
-                    if not within_list:
+                    if not within_list or any(
+                        start_row > current.start_point.row
+                        for start_row in list_start_rows
+                    ):
                         continuations.add("expression")
                 elif current.type in {
                     "argument_list",
@@ -192,7 +197,7 @@ def _wrapped_continuation_depth(node, category: str) -> int:
         elif current.type in {"binary_expression", "ternary_expression"}:
             continuations.add("expression")
         elif current.type in {"assignment_expression", "variable_declarator"}:
-            if list_depth == 0:
+            if list_depth == 0 or node.start_point.row > current.start_point.row:
                 continuations.add("expression")
         elif current.type in {
             "argument_list",
@@ -495,21 +500,36 @@ class JavaListLayoutRule(BaseRule):
         if not children or self._contains_comment(node):
             return None
         values = [document.text(child).strip() for child in children]
-        if any("\n" in value for value in values):
-            return None
+        has_multiline_value = any("\n" in value for value in values)
         compact = "(" + ", ".join(values) + ")"
         line_prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
         maximum = int(config.get("max_length", 120))
         original = document.text(node)
-        if config.get("compact_if_fits", True) and len(line_prefix) + len(compact) <= maximum:
+        if (
+            not has_multiline_value
+            and config.get("compact_if_fits", True)
+            and len(line_prefix) + len(compact) <= maximum
+        ):
             return compact if original != compact else None
-        if "\n" not in original and len(line_prefix) + len(compact) <= maximum:
+        if not has_multiline_value and "\n" not in original and len(line_prefix) + len(compact) <= maximum:
             return None
         size = int(config.get("indent_size", 4))
         depth = _wrapped_continuation_depth(node, "list")
         indent = " " * (depth * size)
         close_indent = " " * (max(0, depth - 1) * size)
-        replacement = "(\n" + ",\n".join(indent + value for value in values) + "\n" + close_indent + ")"
+        rendered_values = []
+        for child, value in zip(children, values):
+            value_lines = value.splitlines()
+            rendered = [indent + value_lines[0]]
+            for line in value_lines[1:]:
+                if not line.strip():
+                    rendered.append("")
+                    continue
+                leading = len(line) - len(line.lstrip(" "))
+                relative = max(0, leading - child.start_point.column)
+                rendered.append(indent + " " * relative + line.lstrip(" "))
+            rendered_values.append("\n".join(rendered))
+        replacement = "(\n" + ",\n".join(rendered_values) + "\n" + close_indent + ")"
         return replacement if replacement != original else None
 
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
