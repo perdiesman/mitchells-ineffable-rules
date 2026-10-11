@@ -126,6 +126,14 @@ def _expected_depth(node, row: int) -> int:
             else:
                 closes_current = (
                     node.type in {")", "]", "}"}
+                    and current.type in {
+                        "argument_list",
+                        "annotation_argument_list",
+                        "formal_parameters",
+                        "record_header",
+                        "array_initializer",
+                        "resource_specification",
+                    }
                     and node.end_byte == current.end_byte
                 )
                 active = (
