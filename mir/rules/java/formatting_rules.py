@@ -123,16 +123,15 @@ def _expected_depth(node, row: int) -> int:
                 # Closing delimiters align with the owner of the container.
                 pass
         if current.type in CONTINUATION_TYPES:
-            if current.type in {
+            is_list = current.type in {
                 "argument_list",
                 "annotation_argument_list",
                 "formal_parameters",
                 "record_header",
                 "array_initializer",
                 "resource_specification",
-            }:
-                within_list = True
-                list_start_rows.append(current.start_point.row)
+            }
+            closes_current = False
             if current.type in {"method_invocation", "binary_expression", "ternary_expression"}:
                 active = current.start_point.row < row <= current.end_point.row
             else:
@@ -152,6 +151,9 @@ def _expected_depth(node, row: int) -> int:
                     current.start_point.row < row <= current.end_point.row
                     and not closes_current
                 )
+            if is_list and (active or closes_current):
+                within_list = True
+                list_start_rows.append(current.start_point.row)
             if active:
                 if current.type == "method_invocation":
                     if node.type == ".":
@@ -189,6 +191,7 @@ def _wrapped_continuation_depth(node, category: str) -> int:
     depth = 0
     continuations = set() if category == "list" else {category}
     list_depth = int(category == "list")
+    list_start_rows = [node.start_point.row] if category == "list" else []
     switch_group = False
     current = node.parent
     while current is not None:
@@ -197,7 +200,10 @@ def _wrapped_continuation_depth(node, category: str) -> int:
         elif current.type in {"binary_expression", "ternary_expression"}:
             continuations.add("expression")
         elif current.type in {"assignment_expression", "variable_declarator"}:
-            if list_depth == 0 or node.start_point.row > current.start_point.row:
+            if list_depth == 0 or any(
+                start_row > current.start_point.row
+                for start_row in list_start_rows
+            ):
                 continuations.add("expression")
         elif current.type in {
             "argument_list",
@@ -208,6 +214,7 @@ def _wrapped_continuation_depth(node, category: str) -> int:
             "resource_specification",
         }:
             list_depth += 1
+            list_start_rows.append(current.start_point.row)
         elif current.type in {"throws", "super_interfaces", "superclass", "interfaces", "permits"}:
             continuations.add("type")
         if current.type == "switch_block_statement_group":
@@ -493,7 +500,14 @@ class JavaListLayoutRule(BaseRule):
 
     @staticmethod
     def _contains_comment(node) -> bool:
-        return any(child.type in {"line_comment", "block_comment"} for child in walk(node))
+        return any(
+            child.type in {"line_comment", "block_comment", "text_block"}
+            or (
+                child.type == "string_literal"
+                and child.start_point.row != child.end_point.row
+            )
+            for child in walk(node)
+        )
 
     def _replacement(self, document, node, config: Dict[str, Any]) -> Optional[str]:
         children = list(node.named_children)
