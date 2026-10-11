@@ -854,17 +854,9 @@ class ExpressionLayoutRule(BaseRule):
             prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
             suffix_length = len(_terminal_suffix(document, node))
             original = document.text(node)
-            single_line_overflow = (
-                node.start_point.row == node.end_point.row
-                and len(document.content.splitlines()[node.start_point.row]) > maximum
-            )
-            if (
-                config.get("compact_if_fits", True)
-                and len(prefix) + len(compact) + suffix_length <= maximum
-                and not single_line_overflow
-            ):
+            if config.get("compact_if_fits", True) and len(prefix) + len(compact) + suffix_length <= maximum:
                 replacement = compact
-            elif len(prefix) + len(compact) + suffix_length > maximum or single_line_overflow:
+            elif len(prefix) + len(compact) + suffix_length > maximum:
                 indent = " " * (_wrapped_continuation_depth(node, "expression") * size)
                 replacement = values[0] + "".join(
                     f"\n{indent}{op} {value}" for op, value in zip(operators, values[1:])
@@ -1060,6 +1052,47 @@ class TernaryLayoutRule(BaseRule):
             return None
         return f"{condition_text} ? {consequence_text} : {alternative_text}"
 
+    @staticmethod
+    def _wrapped_condition(document, condition, size: int, maximum: int) -> str:
+        """Wrap an overflowing binary nested inside a ternary condition."""
+        raw = document.text(condition)
+        edits = []
+        claimed = []
+        expression_rule = ExpressionLayoutRule()
+        candidates = [
+            node
+            for node in nodes_of_type(document, "binary_expression")
+            if condition.start_byte <= node.start_byte and node.end_byte <= condition.end_byte
+        ]
+        for node in sorted(candidates, key=lambda item: item.end_byte - item.start_byte):
+            if node.start_point.row != node.end_point.row:
+                continue
+            if len(document.content.splitlines()[node.start_point.row]) <= maximum:
+                continue
+            if node.parent and node.parent.type == "binary_expression":
+                continue
+            if any(not (node.end_byte <= start or node.start_byte >= end) for start, end in claimed):
+                continue
+            if any(child.type in {"line_comment", "block_comment", "text_block"} for child in walk(node)):
+                continue
+            values, operators = expression_rule._flatten(document, node)
+            if len(values) < 2 or len(operators) != len(values) - 1:
+                continue
+            indent = " " * (_wrapped_continuation_depth(node, "expression") * size)
+            replacement = values[0] + "".join(
+                f"\n{indent}{operator} {value}"
+                for operator, value in zip(operators, values[1:])
+            )
+            edits.append(
+                JavaEdit(
+                    node.start_byte - condition.start_byte,
+                    node.end_byte - condition.start_byte,
+                    replacement,
+                )
+            )
+            claimed.append((node.start_byte, node.end_byte))
+        return apply_java_edits(raw, edits).strip()
+
     def _multiline_ternary(
         self,
         document,
@@ -1073,7 +1106,7 @@ class TernaryLayoutRule(BaseRule):
         alternative = node.child_by_field_name("alternative")
         if not condition or not consequence or not alternative:
             return None
-        raw_condition = document.text(condition).strip()
+        raw_condition = self._wrapped_condition(document, condition, size, maximum)
         condition_text = self._compact_node(document, condition)
         consequence_text = self._compact_node(document, consequence)
         if condition_text is None or consequence_text is None:
