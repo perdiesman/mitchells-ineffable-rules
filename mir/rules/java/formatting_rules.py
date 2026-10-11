@@ -32,6 +32,7 @@ CONTINUATION_TYPES = {
     "formal_parameters",
     "record_header",
     "array_initializer",
+    "element_value_array_initializer",
     "resource_specification",
     "throws",
     "super_interfaces",
@@ -104,6 +105,13 @@ def _ancestors(node):
         node = node.parent
 
 
+def _terminal_suffix(document, node) -> str:
+    line = document.content.splitlines()[node.end_point.row]
+    suffix = line[node.end_point.column:].rstrip()
+    compact = "".join(suffix.split())
+    return suffix if compact and all(character in ")]},;{" for character in compact) else ""
+
+
 def _line_first_nodes(document) -> dict[int, object]:
     first = {}
     for node in document.nodes:
@@ -143,6 +151,7 @@ def _expected_depth(node, row: int) -> int:
                 "formal_parameters",
                 "record_header",
                 "array_initializer",
+                "element_value_array_initializer",
                 "resource_specification",
             }
             closes_current = False
@@ -157,6 +166,7 @@ def _expected_depth(node, row: int) -> int:
                         "formal_parameters",
                         "record_header",
                         "array_initializer",
+                        "element_value_array_initializer",
                         "resource_specification",
                     }
                     and node.end_byte == current.end_byte
@@ -190,6 +200,7 @@ def _expected_depth(node, row: int) -> int:
                     "formal_parameters",
                     "record_header",
                     "array_initializer",
+                    "element_value_array_initializer",
                     "resource_specification",
                 }:
                     list_depth += 1
@@ -240,6 +251,7 @@ def _wrapped_continuation_depth(node, category: str) -> int:
             "formal_parameters",
             "record_header",
             "array_initializer",
+            "element_value_array_initializer",
             "resource_specification",
         }:
             list_depth += 1
@@ -549,9 +561,7 @@ class JavaListLayoutRule(BaseRule):
         )
 
     def _line_suffix(self, document, node) -> str:
-        line = document.content.splitlines()[node.end_point.row]
-        suffix = line[node.end_point.column:].rstrip()
-        return suffix if suffix and all(character in ")]},;" for character in suffix) else ""
+        return _terminal_suffix(document, node)
 
     def _replacement(self, document, node, config: Dict[str, Any]) -> Optional[str]:
         children = list(node.named_children)
@@ -694,6 +704,23 @@ class ChainLayoutRule(BaseRule):
             "class Sample {\n    void run() {\n        service.prepare().execute();\n    }\n}\n",
         ),
         RuleCase("short chain", "class Sample { void run() { service.prepare().execute(); } }\n", "accepted"),
+        RuleCase(
+            "chain beginning with invocation",
+            "class Sample {\n"
+            "    String read() {\n"
+            "        return loadExtraordinarilyDescriptiveResponse(firstArgument, secondArgument, thirdArgument, fourthArgument).result().body().asText();\n"
+            "    }\n"
+            "}\n",
+            "fixed",
+            "class Sample {\n"
+            "    String read() {\n"
+            "        return loadExtraordinarilyDescriptiveResponse(firstArgument, secondArgument, thirdArgument, fourthArgument)\n"
+            "            .result()\n"
+            "            .body()\n"
+            "            .asText();\n"
+            "    }\n"
+            "}\n",
+        ),
     ]
 
     def _parts(self, document, node) -> Optional[tuple[str, list[str]]]:
@@ -703,8 +730,10 @@ class ChainLayoutRule(BaseRule):
             name = current.child_by_field_name("name")
             arguments = current.child_by_field_name("arguments")
             object_node = current.child_by_field_name("object")
-            if name is None or arguments is None or object_node is None:
+            if name is None or arguments is None:
                 return None
+            if object_node is None:
+                break
             segments.append("." + document.text(name) + document.text(arguments))
             current = object_node
         if current is None:
@@ -733,13 +762,7 @@ class ChainLayoutRule(BaseRule):
             base, segments = parts
             compact = base + "".join(segments)
             prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
-            end_line = document.content.splitlines()[node.end_point.row]
-            suffix = end_line[node.end_point.column:].rstrip()
-            suffix_length = (
-                len(suffix)
-                if suffix and all(character in ")]},;" for character in suffix)
-                else 0
-            )
+            suffix_length = len(_terminal_suffix(document, node))
             compact_length = len(prefix) + len(compact) + suffix_length
             original = document.text(node)
             multiline_binary_parent = any(
@@ -829,10 +852,11 @@ class ExpressionLayoutRule(BaseRule):
                 continue
             compact = values[0] + "".join(f" {op} {value}" for op, value in zip(operators, values[1:]))
             prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
+            suffix_length = len(_terminal_suffix(document, node))
             original = document.text(node)
-            if config.get("compact_if_fits", True) and len(prefix) + len(compact) <= maximum:
+            if config.get("compact_if_fits", True) and len(prefix) + len(compact) + suffix_length <= maximum:
                 replacement = compact
-            elif len(prefix) + len(compact) > maximum:
+            elif len(prefix) + len(compact) + suffix_length > maximum:
                 indent = " " * (_wrapped_continuation_depth(node, "expression") * size)
                 replacement = values[0] + "".join(
                     f"\n{indent}{op} {value}" for op, value in zip(operators, values[1:])
@@ -1051,13 +1075,7 @@ class TernaryLayoutRule(BaseRule):
             if compact is None:
                 continue
             prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
-            end_line = document.content.splitlines()[node.end_point.row]
-            suffix = end_line[node.end_point.column:].rstrip()
-            suffix_length = (
-                len(suffix)
-                if suffix and all(character in ")]},;" for character in suffix)
-                else 0
-            )
+            suffix_length = len(_terminal_suffix(document, node))
             if (
                 config.get("compact_if_fits", True)
                 and len(prefix) + len(compact) + suffix_length <= maximum
@@ -1109,6 +1127,18 @@ class ArrayInitializerLayoutRule(BaseRule):
             "class Sample { int[] values = {1, 2}; }\n",
         ),
         RuleCase("compact values", "class Sample { int[] values = {1, 2}; }\n", "accepted"),
+        RuleCase(
+            "annotation value array",
+            "@Labels({\"FirstExtraordinarilyDescriptiveLabel\", \"SecondExtraordinarilyDescriptiveLabel\", \"ThirdExtraordinarilyDescriptiveLabel\"})\n"
+            "class Sample {}\n",
+            "fixed",
+            "@Labels({\n"
+            "        \"FirstExtraordinarilyDescriptiveLabel\",\n"
+            "        \"SecondExtraordinarilyDescriptiveLabel\",\n"
+            "        \"ThirdExtraordinarilyDescriptiveLabel\"\n"
+            "    })\n"
+            "class Sample {}\n",
+        ),
     ]
 
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
@@ -1117,7 +1147,7 @@ class ArrayInitializerLayoutRule(BaseRule):
         size = int(config.get("indent_size", 4))
         edits = []
         claimed = []
-        candidates = list(nodes_of_type(document, "array_initializer"))
+        candidates = list(nodes_of_type(document, "array_initializer", "element_value_array_initializer"))
         for node in sorted(candidates, key=lambda item: item.end_byte - item.start_byte):
             if any(not (node.end_byte <= start or node.start_byte >= end) for start, end in claimed):
                 continue
