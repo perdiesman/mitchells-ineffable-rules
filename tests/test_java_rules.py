@@ -10,6 +10,7 @@ from mir.engine.config import Config
 from mir.engine.disabler import get_disabled_rules_map
 from mir.engine.runner import process_document
 from mir.engine.selection import expand_selection
+from mir.engine.rules_loader import load_rules_for_language
 from mir.rules.java.java_utils import generated_mode, parse_java, protected_java_signature
 
 
@@ -123,6 +124,40 @@ class TestJavaFoundation(unittest.TestCase):
         config.fix = True
         result = process_document(config, source, "Sample.java", "java")
         self.assertIn("void run()\n    {", result.content)
+
+    def test_semantic_fix_is_opt_in_and_excluded_from_commit(self):
+        source = (
+            "class Sample {\n"
+            "    boolean ready(boolean enabled) {\n"
+            "        return enabled == true;\n"
+            "    }\n"
+            "}\n"
+        )
+        commit = Config()
+        commit.fix = True
+        commit.profile = "commit"
+        self.assertIn("enabled == true", process_document(commit, source, "Sample.java", "java").content)
+
+        normal = Config()
+        normal.fix = True
+        self.assertIn("enabled == true", process_document(normal, source, "Sample.java", "java").content)
+
+        opted_in = Config()
+        opted_in.fix = True
+        opted_in.rule_configs = {"java:IR-redundant-boolean-comparison": {"semantic_fix": True}}
+        result = process_document(opted_in, source, "Sample.java", "java")
+        self.assertIn("return enabled;", result.content)
+
+    def test_java_rule_examples_are_generic(self):
+        forbidden = ("gov.ornl", "eaglei", "aerie", "planetsense")
+        for rule in load_rules_for_language("java"):
+            snippets = [case.source for case in rule.cases]
+            snippets.extend(case.fixed for case in rule.cases if case.fixed)
+            snippets.extend(example.get("violating", "") for example in rule.examples)
+            snippets.extend(example.get("correct", "") for example in rule.examples)
+            combined = "\n".join(snippets).lower()
+            for value in forbidden:
+                self.assertNotIn(value, combined, f"{rule.rule_id} contains compatibility-specific example text")
 
 
 if __name__ == "__main__":
