@@ -111,6 +111,7 @@ def _expected_depth(node, row: int) -> int:
     depth = 0
     continuations = set()
     list_depth = 0
+    within_list = False
     switch_group = False
     current = node.parent
     while current is not None:
@@ -121,6 +122,15 @@ def _expected_depth(node, row: int) -> int:
                 # Closing delimiters align with the owner of the container.
                 pass
         if current.type in CONTINUATION_TYPES:
+            if current.type in {
+                "argument_list",
+                "annotation_argument_list",
+                "formal_parameters",
+                "record_header",
+                "array_initializer",
+                "resource_specification",
+            }:
+                within_list = True
             if current.type in {"method_invocation", "binary_expression", "ternary_expression"}:
                 active = current.start_point.row < row <= current.end_point.row
             else:
@@ -144,13 +154,11 @@ def _expected_depth(node, row: int) -> int:
                 if current.type == "method_invocation":
                     if node.type == ".":
                         continuations.add("chain")
-                elif current.type in {
-                    "binary_expression",
-                    "ternary_expression",
-                    "assignment_expression",
-                    "variable_declarator",
-                }:
+                elif current.type in {"binary_expression", "ternary_expression"}:
                     continuations.add("expression")
+                elif current.type in {"assignment_expression", "variable_declarator"}:
+                    if not within_list:
+                        continuations.add("expression")
                 elif current.type in {
                     "argument_list",
                     "annotation_argument_list",
@@ -181,13 +189,11 @@ def _wrapped_continuation_depth(node, category: str) -> int:
     while current is not None:
         if current.type in CONTAINER_TYPES:
             depth += 1
-        elif current.type in {
-            "binary_expression",
-            "ternary_expression",
-            "assignment_expression",
-            "variable_declarator",
-        }:
+        elif current.type in {"binary_expression", "ternary_expression"}:
             continuations.add("expression")
+        elif current.type in {"assignment_expression", "variable_declarator"}:
+            if list_depth == 0:
+                continuations.add("expression")
         elif current.type in {
             "argument_list",
             "annotation_argument_list",
