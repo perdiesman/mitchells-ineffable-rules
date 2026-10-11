@@ -85,6 +85,7 @@ This document describes all JAVA linting rules supported by Mitchell's Ineffable
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
+| [`IR-assignment-layout`](rules/expressions/IR-assignment-layout.md) | Keep fitting assignments compact; otherwise place the assigned value one continuation level after the operator. | Yes | [View Details](rules/expressions/IR-assignment-layout.md) |
 | [`IR-chain-layout`](rules/expressions/IR-chain-layout.md) | Keep fitting method chains compact; otherwise align each chained call one continuation level in. | Yes | [View Details](rules/expressions/IR-chain-layout.md) |
 | [`IR-expression-layout`](rules/expressions/IR-expression-layout.md) | Keep fitting binary expressions compact; align wrapped operators at one continuation level. | Yes | [View Details](rules/expressions/IR-expression-layout.md) |
 | [`IR-lambda-layout`](rules/expressions/IR-lambda-layout.md) | Keep fitting lambda expressions compact and indent wrapped expression bodies after the arrow. | Yes | [View Details](rules/expressions/IR-lambda-layout.md) |

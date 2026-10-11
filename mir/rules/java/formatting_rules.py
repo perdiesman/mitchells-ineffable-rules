@@ -175,7 +175,7 @@ def _expected_depth(node, row: int) -> int:
                     if current.type == "ternary_expression":
                         ternary_depth += 1
                 elif current.type in {"assignment_expression", "variable_declarator"}:
-                    if not within_switch_expression and (not within_list or any(
+                    if "chain" not in continuations and not within_switch_expression and (not within_list or any(
                         start_row > current.start_point.row
                         for start_row in list_start_rows
                     )):
@@ -221,10 +221,10 @@ def _wrapped_continuation_depth(node, category: str) -> int:
             if current.type == "ternary_expression":
                 ternary_depth += 1
         elif current.type in {"assignment_expression", "variable_declarator"}:
-            if list_depth == 0 or any(
+            if category != "chain" and (list_depth == 0 or any(
                 start_row > current.start_point.row
                 for start_row in list_start_rows
-            ):
+            )):
                 continuations.add("expression")
         elif current.type in {
             "argument_list",
@@ -540,7 +540,9 @@ class JavaListLayoutRule(BaseRule):
         )
 
     def _line_suffix(self, document, node) -> str:
-        return ""
+        line = document.content.splitlines()[node.end_point.row]
+        suffix = line[node.end_point.column:].rstrip()
+        return suffix if suffix and all(character in ")]},;" for character in suffix) else ""
 
     def _replacement(self, document, node, config: Dict[str, Any]) -> Optional[str]:
         children = list(node.named_children)
@@ -722,10 +724,18 @@ class ChainLayoutRule(BaseRule):
             base, segments = parts
             compact = base + "".join(segments)
             prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
+            end_line = document.content.splitlines()[node.end_point.row]
+            suffix = end_line[node.end_point.column:].rstrip()
+            suffix_length = (
+                len(suffix)
+                if suffix and all(character in ")]},;" for character in suffix)
+                else 0
+            )
+            compact_length = len(prefix) + len(compact) + suffix_length
             original = document.text(node)
-            if config.get("compact_if_fits", True) and len(prefix) + len(compact) <= maximum:
+            if config.get("compact_if_fits", True) and compact_length <= maximum:
                 replacement = compact
-            elif len(prefix) + len(compact) > maximum:
+            elif compact_length > maximum:
                 indent = " " * (_wrapped_continuation_depth(node, "chain") * size)
                 replacement = base + "\n" + "\n".join(indent + segment for segment in segments)
             else:
@@ -821,6 +831,89 @@ class ExpressionLayoutRule(BaseRule):
         document = parse_java(content)
         return [
             _line_violation(self, content, document.source[:edit.start].count(b"\n") + 1, "Use canonical expression layout.")
+            for edit in self._edits(content, rule_config)
+        ]
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        return apply_java_edits(content, self._edits(content, rule_config))
+
+
+class AssignmentLayoutRule(BaseRule):
+    rule_id = "IR-assignment-layout"
+    description = "Keep fitting assignments compact; otherwise place the assigned value one continuation level after the operator."
+    category = "expressions"
+    is_fixable = "yes"
+    commit_profile = True
+    default_config = {"max_length": 120, "indent_size": 4}
+    config_options = {
+        "max_length": {"default": 120, "description": "Maximum compact assignment line length."},
+        "indent_size": {"default": 4, "description": "Assigned-value continuation indentation."},
+    }
+    cases = [
+        RuleCase(
+            "long initializer",
+            "class Sample {\n"
+            "    List<ExtraordinarilyDescriptiveResult> descriptiveResults = (List<ExtraordinarilyDescriptiveResult>) cache.getIfPresent(cacheKey);\n"
+            "}\n",
+            "fixed",
+            "class Sample {\n"
+            "    List<ExtraordinarilyDescriptiveResult> descriptiveResults =\n"
+            "        (List<ExtraordinarilyDescriptiveResult>) cache.getIfPresent(cacheKey);\n"
+            "}\n",
+        ),
+        RuleCase(
+            "compact assignment",
+            "class Sample { int count = 1; }\n",
+            "accepted",
+        ),
+    ]
+
+    @staticmethod
+    def _operator(node):
+        named = node.child_by_field_name("operator")
+        if named is not None:
+            return named
+        return next(
+            (child for child in node.children if child.type.endswith("=")),
+            None,
+        )
+
+    def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        if "=" not in content:
+            return []
+        document = parse_java(content)
+        lines = document.content.splitlines()
+        maximum = int(config.get("max_length", 120))
+        size = int(config.get("indent_size", 4))
+        comments = list(nodes_of_type(document, "line_comment", "block_comment"))
+        edits = []
+        for node in nodes_of_type(document, "variable_declarator", "assignment_expression"):
+            value = node.child_by_field_name("value") or node.child_by_field_name("right")
+            operator = self._operator(node)
+            if value is None or operator is None or operator.end_point.row != value.start_point.row:
+                continue
+            row = value.start_point.row
+            if len(lines[row]) <= maximum or any(
+                comment.start_point.row <= row <= comment.end_point.row for comment in comments
+            ):
+                continue
+            gap = document.source[operator.end_byte:value.start_byte].decode()
+            if gap.strip():
+                continue
+            indent = " " * (_wrapped_continuation_depth(node, "expression") * size)
+            if span_is_authorized(document, operator.end_byte, value.start_byte, config):
+                edits.append(JavaEdit(operator.end_byte, value.start_byte, "\n" + indent))
+        return edits
+
+    def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
+        document = parse_java(content)
+        return [
+            _line_violation(
+                self,
+                content,
+                document.source[:edit.start].count(b"\n") + 1,
+                "Wrap the assigned value after the operator.",
+            )
             for edit in self._edits(content, rule_config)
         ]
 
