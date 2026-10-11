@@ -442,18 +442,22 @@ def process_document(
                     template_dialect,
                     config.language_configs.get(lang, {}),
                 )
-                rule_config["rules_fixed"] = result.rules_fixed
-                try:
-                    fixed = run_rule_fix_recursively(rule, current, path, rule_config, lang)
-                except Exception as error:
-                    result.diagnostics.append(f"Error fixing rule {rule.rule_id} on {path}: {error}")
-                    continue
                 has_disable_directive = (
                     "IR-" in current or "@formatter" in current.lower()
                 )
                 if has_disable_directive and disabled_content != current:
                     disabled_by_rule = get_disabled_rules_map(current, path)
                     disabled_content = current
+                rule_config["_disabled_lines"] = (
+                    disabled_by_rule.get(rule.rule_id, set())
+                    | disabled_by_rule.get("IR-all", set())
+                )
+                rule_config["rules_fixed"] = result.rules_fixed
+                try:
+                    fixed = run_rule_fix_recursively(rule, current, path, rule_config, lang)
+                except Exception as error:
+                    result.diagnostics.append(f"Error fixing rule {rule.rule_id} on {path}: {error}")
+                    continue
                 protected_lines = (
                     disabled_by_rule.get(rule.rule_id, set())
                     | disabled_by_rule.get("IR-all", set())

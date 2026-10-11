@@ -73,6 +73,57 @@ class TestJavaFoundation(unittest.TestCase):
         self.assertEqual(result.content, source)
         self.assertEqual(result.errors, 0)
 
+    def test_commit_profile_formats_generic_java(self):
+        source = (
+            "package sample.app;\n"
+            "import sample.shared.Value;\n"
+            "import java.util.List;\n"
+            "class Sample\n"
+            "{\n"
+            "  void run(int first,int second)\n"
+            "  {\n"
+            "    if(first==second){ prepare(); execute(); }\n"
+            "  }\n"
+            "}\n"
+        )
+        expected = (
+            "package sample.app;\n\n"
+            "import java.util.List;\n\n"
+            "import sample.shared.Value;\n\n"
+            "class Sample {\n"
+            "    void run(int first, int second) {\n"
+            "        if (first == second) {\n"
+            "            prepare();\n"
+            "            execute();\n"
+            "        }\n"
+            "    }\n"
+            "}\n"
+        )
+        config = Config()
+        config.fix = True
+        config.profile = "commit"
+        result = process_document(config, source, "Sample.java", "java")
+        self.assertEqual(result.content, expected)
+        self.assertEqual(result.errors, 0)
+        second = process_document(config, result.content, "Sample.java", "java")
+        self.assertEqual(second.content, expected)
+
+    def test_block_suppression_prevents_partial_brace_edit(self):
+        source = (
+            "class Sample {\n"
+            "    // IR-start-brace-layout\n"
+            "    void run()\n"
+            "    {\n"
+            "        execute();\n"
+            "    }\n"
+            "    // IR-end-brace-layout\n"
+            "}\n"
+        )
+        config = Config()
+        config.fix = True
+        result = process_document(config, source, "Sample.java", "java")
+        self.assertIn("void run()\n    {", result.content)
+
 
 if __name__ == "__main__":
     unittest.main()

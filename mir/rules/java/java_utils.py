@@ -132,10 +132,18 @@ def apply_java_edits(content: str, edits: Sequence[JavaEdit]) -> str:
 
 def edit_is_authorized(node: Node, rule_config: dict) -> bool:
     allowed = set(rule_config.get("_lines", set()))
-    if not allowed:
-        return True
     node_lines = set(range(node.start_point.row + 1, node.end_point.row + 2))
-    return node_lines.issubset(allowed)
+    disabled = set(rule_config.get("_disabled_lines", set()))
+    return (not allowed or node_lines.issubset(allowed)) and not node_lines.intersection(disabled)
+
+
+def span_is_authorized(document: JavaDocument, start: int, end: int, rule_config: dict) -> bool:
+    start_line = document.source[:start].count(b"\n") + 1
+    end_line = document.source[:end].count(b"\n") + 1
+    lines = set(range(start_line, end_line + 1))
+    allowed = set(rule_config.get("_lines", set()))
+    disabled = set(rule_config.get("_disabled_lines", set()))
+    return (not allowed or lines.issubset(allowed)) and not lines.intersection(disabled)
 
 
 def nontrivia_signature(content: str) -> tuple[tuple[str, str], ...]:
