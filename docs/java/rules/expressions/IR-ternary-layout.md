@@ -50,3 +50,27 @@ class Sample { int value(boolean ready) { return ready ? first() : second(); } i
 class Sample { int value(boolean ready) { return ready ? 1 : 2; } }
 
 ```
+
+##### nested ternary branches — Fixed
+```java
+class Sample {
+    Result choose(State state) {
+        return (state == State.FIRST) ? Result.FIRST : (state == State.SECOND) ? Result.SECOND : Result.EXTRAORDINARILY_LONG_FALLBACK_RESULT;
+    }
+}
+
+```
+
+Expected fixed output:
+```java
+class Sample {
+    Result choose(State state) {
+        return (state == State.FIRST)
+            ? Result.FIRST
+            : (state == State.SECOND)
+                ? Result.SECOND
+                : Result.EXTRAORDINARILY_LONG_FALLBACK_RESULT;
+    }
+}
+
+```

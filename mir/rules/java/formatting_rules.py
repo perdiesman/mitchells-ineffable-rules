@@ -122,6 +122,7 @@ def _expected_depth(node, row: int) -> int:
     list_start_rows = []
     switch_group_depth = 0
     switch_rule_depth = 0
+    ternary_depth = 0
     within_switch_expression = False
     current = node.parent
     while current is not None:
@@ -171,6 +172,8 @@ def _expected_depth(node, row: int) -> int:
                         continuations.add("chain")
                 elif current.type in {"binary_expression", "ternary_expression"}:
                     continuations.add("expression")
+                    if current.type == "ternary_expression":
+                        ternary_depth += 1
                 elif current.type in {"assignment_expression", "variable_declarator"}:
                     if not within_switch_expression and (not within_list or any(
                         start_row > current.start_point.row
@@ -195,6 +198,7 @@ def _expected_depth(node, row: int) -> int:
         current = current.parent
     depth += max(0, switch_group_depth - int(node.type in {"case", "default"}))
     depth += max(0, switch_rule_depth - int(node.type in {"case", "default"}))
+    depth += max(0, ternary_depth - 1)
     depth += len(continuations) + list_depth
     return max(0, depth)
 
@@ -207,12 +211,15 @@ def _wrapped_continuation_depth(node, category: str) -> int:
     list_start_rows = [node.start_point.row] if category == "list" else []
     switch_group_depth = 0
     switch_rule_depth = 0
+    ternary_depth = int(node.type == "ternary_expression")
     current = node.parent
     while current is not None:
         if current.type in CONTAINER_TYPES:
             depth += 1
         elif current.type in {"binary_expression", "ternary_expression"}:
             continuations.add("expression")
+            if current.type == "ternary_expression":
+                ternary_depth += 1
         elif current.type in {"assignment_expression", "variable_declarator"}:
             if list_depth == 0 or any(
                 start_row > current.start_point.row
@@ -236,7 +243,14 @@ def _wrapped_continuation_depth(node, category: str) -> int:
         elif current.type == "switch_rule":
             switch_rule_depth += 1
         current = current.parent
-    return depth + len(continuations) + list_depth + switch_group_depth + switch_rule_depth
+    return (
+        depth
+        + len(continuations)
+        + list_depth
+        + switch_group_depth
+        + switch_rule_depth
+        + max(0, ternary_depth - 1)
+    )
 
 
 def _spaced_operator(node, text: str) -> bool:
@@ -838,7 +852,77 @@ class TernaryLayoutRule(BaseRule):
             "class Sample { int value(boolean ready) { return ready ? 1 : 2; } }\n",
             "accepted",
         ),
+        RuleCase(
+            "nested ternary branches",
+            "class Sample {\n"
+            "    Result choose(State state) {\n"
+            "        return (state == State.FIRST) ? Result.FIRST : (state == State.SECOND) ? Result.SECOND : Result.EXTRAORDINARILY_LONG_FALLBACK_RESULT;\n"
+            "    }\n"
+            "}\n",
+            "fixed",
+            "class Sample {\n"
+            "    Result choose(State state) {\n"
+            "        return (state == State.FIRST)\n"
+            "            ? Result.FIRST\n"
+            "            : (state == State.SECOND)\n"
+            "                ? Result.SECOND\n"
+            "                : Result.EXTRAORDINARILY_LONG_FALLBACK_RESULT;\n"
+            "    }\n"
+            "}\n",
+        ),
     ]
+
+    @staticmethod
+    def _compact_node(document, node) -> Optional[str]:
+        text = document.text(node).strip()
+        if "\n" not in text:
+            return text
+        protected = {"line_comment", "block_comment", "string_literal", "character_literal", "text_block"}
+        if any(child.type in protected for child in walk(node)):
+            return None
+        return " ".join(text.split())
+
+    def _compact_ternary(self, document, node) -> Optional[str]:
+        condition = node.child_by_field_name("condition")
+        consequence = node.child_by_field_name("consequence")
+        alternative = node.child_by_field_name("alternative")
+        if not condition or not consequence or not alternative:
+            return None
+        condition_text = self._compact_node(document, condition)
+        consequence_text = self._compact_node(document, consequence)
+        alternative_text = (
+            self._compact_ternary(document, alternative)
+            if alternative.type == "ternary_expression"
+            else self._compact_node(document, alternative)
+        )
+        if None in {condition_text, consequence_text, alternative_text}:
+            return None
+        return f"{condition_text} ? {consequence_text} : {alternative_text}"
+
+    def _multiline_ternary(self, document, node, operator_column: int, size: int) -> Optional[list[str]]:
+        condition = node.child_by_field_name("condition")
+        consequence = node.child_by_field_name("consequence")
+        alternative = node.child_by_field_name("alternative")
+        if not condition or not consequence or not alternative:
+            return None
+        condition_text = self._compact_node(document, condition)
+        consequence_text = self._compact_node(document, consequence)
+        if condition_text is None or consequence_text is None:
+            return None
+        indent = " " * operator_column
+        lines = [condition_text, f"{indent}? {consequence_text}"]
+        if alternative.type == "ternary_expression":
+            nested = self._multiline_ternary(document, alternative, operator_column + size, size)
+            if nested is None:
+                return None
+            lines.append(f"{indent}: {nested[0]}")
+            lines.extend(nested[1:])
+        else:
+            alternative_text = self._compact_node(document, alternative)
+            if alternative_text is None:
+                return None
+            lines.append(f"{indent}: {alternative_text}")
+        return lines
 
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
         document = parse_java(content)
@@ -850,23 +934,21 @@ class TernaryLayoutRule(BaseRule):
                 continue
             if any(child.type in {"line_comment", "block_comment", "text_block"} for child in walk(node)):
                 continue
-            condition = node.child_by_field_name("condition")
-            consequence = node.child_by_field_name("consequence")
-            alternative = node.child_by_field_name("alternative")
-            if not condition or not consequence or not alternative:
+            compact = self._compact_ternary(document, node)
+            if compact is None:
                 continue
-            values = [document.text(item).strip() for item in (condition, consequence, alternative)]
-            if any("\n" in value for value in values):
-                continue
-            compact = f"{values[0]} ? {values[1]} : {values[2]}"
             prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
             if config.get("compact_if_fits", True) and len(prefix) + len(compact) <= maximum:
                 replacement = compact
-            elif len(prefix) + len(compact) > maximum:
-                indent = " " * (_wrapped_continuation_depth(node, "expression") * size)
-                replacement = f"{values[0]}\n{indent}? {values[1]}\n{indent}: {values[2]}"
             else:
-                continue
+                operator_column = _wrapped_continuation_depth(node, "expression") * size
+                rendered = self._multiline_ternary(document, node, operator_column, size)
+                if rendered is None or any(
+                    len(prefix) + len(line) > maximum if index == 0 else len(line) > maximum
+                    for index, line in enumerate(rendered)
+                ):
+                    continue
+                replacement = "\n".join(rendered)
             if replacement != document.text(node) and edit_is_authorized(node, config):
                 edits.append(JavaEdit(node.start_byte, node.end_byte, replacement))
         return edits
