@@ -68,6 +68,14 @@ class TestJavaFoundation(unittest.TestCase):
             protected_java_signature(source),
         )
 
+    def test_trailing_space_after_literal_is_not_treated_as_literal_content(self):
+        source = 'class Sample {\n    String value = "text";   \n}\n'
+        config = Config()
+        config.fix = True
+        config.profile = "commit"
+        result = process_document(config, source, "Sample.java", "java")
+        self.assertEqual(result.content, 'class Sample {\n    String value = "text";\n}\n')
+
     def test_generated_source_is_skipped_by_runner(self):
         source = "// Generated source. DO NOT EDIT.\nclass Sample {   \n}\n"
         config = Config()

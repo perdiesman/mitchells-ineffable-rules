@@ -26,7 +26,10 @@ def _protected_rows(content: str) -> set[int]:
     document = parse_java(content)
     rows = set()
     for node in walk(document.root):
-        if node.type in {"string_literal", "character_literal", "text_block", "line_comment", "block_comment"}:
+        if node.type in {"line_comment", "block_comment", "text_block"} or (
+            node.type in {"string_literal", "character_literal"}
+            and node.start_point.row != node.end_point.row
+        ):
             rows.update(range(node.start_point.row, node.end_point.row + 1))
     return rows
 
