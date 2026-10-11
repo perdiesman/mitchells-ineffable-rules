@@ -721,6 +721,21 @@ class ChainLayoutRule(BaseRule):
             "    }\n"
             "}\n",
         ),
+        RuleCase(
+            "single long chained call",
+            "class Sample {\n"
+            "    Result read() {\n"
+            "        return loadExtraordinarilyDescriptiveResponse(firstArgument, secondArgument, thirdArgument, fourthArgument).convert(Result.class);\n"
+            "    }\n"
+            "}\n",
+            "fixed",
+            "class Sample {\n"
+            "    Result read() {\n"
+            "        return loadExtraordinarilyDescriptiveResponse(firstArgument, secondArgument, thirdArgument, fourthArgument)\n"
+            "            .convert(Result.class);\n"
+            "    }\n"
+            "}\n",
+        ),
     ]
 
     def _parts(self, document, node) -> Optional[tuple[str, list[str]]]:
@@ -755,7 +770,7 @@ class ChainLayoutRule(BaseRule):
             if parent and parent.type == "method_invocation" and parent.child_by_field_name("object") == node:
                 continue
             parts = self._parts(document, node)
-            if not parts or len(parts[1]) < 2 or any(
+            if not parts or not parts[1] or any(
                 child.type in {"line_comment", "block_comment", "text_block"} for child in walk(node)
             ):
                 continue

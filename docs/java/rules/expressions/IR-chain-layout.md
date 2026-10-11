@@ -81,3 +81,24 @@ class Sample {
 }
 
 ```
+
+##### single long chained call — Fixed
+```java
+class Sample {
+    Result read() {
+        return loadExtraordinarilyDescriptiveResponse(firstArgument, secondArgument, thirdArgument, fourthArgument).convert(Result.class);
+    }
+}
+
+```
+
+Expected fixed output:
+```java
+class Sample {
+    Result read() {
+        return loadExtraordinarilyDescriptiveResponse(firstArgument, secondArgument, thirdArgument, fourthArgument)
+            .convert(Result.class);
+    }
+}
+
+```
