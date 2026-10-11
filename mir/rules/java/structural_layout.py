@@ -1,0 +1,345 @@
+"""Additional syntax-aware Java structure layout rules."""
+
+from __future__ import annotations
+
+from typing import Any, Dict, Iterable, List, Optional
+
+from mir.engine.rule_interface import BaseRule, RuleCase, Violation
+from mir.rules.java.java_utils import (
+    JavaEdit,
+    apply_java_edits,
+    edit_is_authorized,
+    nodes_of_type,
+    parse_java,
+    span_is_authorized,
+    walk,
+)
+
+
+COMMENT_TYPES = {"line_comment", "block_comment"}
+TYPE_BODY_TYPES = {
+    "class_body",
+    "interface_body",
+    "enum_body",
+    "annotation_type_body",
+}
+BEHAVIOR_MEMBER_TYPES = {
+    "constructor_declaration",
+    "method_declaration",
+    "static_initializer",
+    "constructor_body",
+    "class_declaration",
+    "interface_declaration",
+    "enum_declaration",
+    "record_declaration",
+    "annotation_type_declaration",
+}
+
+
+def _violation(rule: BaseRule, content: str, edit: JavaEdit, message: str) -> Violation:
+    line = content.count("\n", 0, edit.start) + 1
+    lines = content.splitlines()
+    return Violation(rule.rule_id, line, message, [lines[line - 1]] if line <= len(lines) else [], True)
+
+
+def _has_comment(node) -> bool:
+    return any(child.type in COMMENT_TYPES for child in walk(node))
+
+
+def _indent_for(node, size: int, extra: int = 0) -> str:
+    return " " * (node.start_point.column + extra * size)
+
+
+def _first_child(node, node_type: str):
+    return next((child for child in node.children if child.type == node_type), None)
+
+
+class TypeParameterLayoutRule(BaseRule):
+    rule_id = "IR-type-parameter-layout"
+    description = "Keep fitting generic type parameters compact; otherwise place each parameter on its own line."
+    category = "classes/interfaces"
+    is_fixable = "yes"
+    commit_profile = True
+    default_config = {"max_length": 120, "indent_size": 4, "compact_if_fits": True}
+    config_options = {
+        "max_length": {"default": 120, "description": "Maximum compact declaration length."},
+        "indent_size": {"default": 4, "description": "Continuation indentation."},
+        "compact_if_fits": {"default": True, "description": "Collapse fitting parameter lists."},
+    }
+    cases = [
+        RuleCase(
+            "expanded generic parameters",
+            "class Sample<\n    First,\n    Second\n> {}\n",
+            "fixed",
+            "class Sample<First, Second> {}\n",
+        ),
+        RuleCase(
+            "long generic parameters",
+            "class Sample<FirstParameterWithLongName, SecondParameterWithLongName> {}\n",
+            "accepted",
+        ),
+    ]
+
+    def _replacement(self, document, node, config: Dict[str, Any]) -> Optional[str]:
+        if _has_comment(node):
+            return None
+        values = [document.text(child).strip() for child in node.named_children]
+        if not values or any("\n" in value for value in values):
+            return None
+        compact = "<" + ", ".join(values) + ">"
+        prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
+        maximum = int(config.get("max_length", 120))
+        if config.get("compact_if_fits", True) and len(prefix) + len(compact) <= maximum:
+            return compact if compact != document.text(node) else None
+        if len(prefix) + len(compact) <= maximum:
+            return None
+        size = int(config.get("indent_size", 4))
+        indent = _indent_for(node, size, 1)
+        close_indent = _indent_for(node, size)
+        replacement = "<\n" + ",\n".join(indent + value for value in values) + "\n" + close_indent + ">"
+        return replacement if replacement != document.text(node) else None
+
+    def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        document = parse_java(content)
+        edits = []
+        for node in nodes_of_type(document, "type_parameters"):
+            replacement = self._replacement(document, node, config)
+            if replacement is not None and edit_is_authorized(node, config):
+                edits.append(JavaEdit(node.start_byte, node.end_byte, replacement))
+        return edits
+
+    def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
+        return [_violation(self, content, edit, "Use canonical generic parameter layout.") for edit in self._edits(content, rule_config)]
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        return apply_java_edits(content, self._edits(content, rule_config))
+
+
+class LoopHeaderLayoutRule(BaseRule):
+    rule_id = "IR-loop-header-layout"
+    description = "Keep fitting for-loop headers compact; otherwise place each logical header part on its own line."
+    category = "control-flow"
+    is_fixable = "yes"
+    commit_profile = True
+    default_config = {"max_length": 120, "indent_size": 4, "compact_if_fits": True}
+    config_options = {
+        "max_length": {"default": 120, "description": "Maximum compact header length."},
+        "indent_size": {"default": 4, "description": "Header continuation indentation."},
+        "compact_if_fits": {"default": True, "description": "Collapse fitting loop headers."},
+    }
+    cases = [
+        RuleCase(
+            "expanded classic loop",
+            "class Sample {\n    void run() {\n        for (\n            int index = 0;\n            index < count;\n            index++\n        ) {}\n    }\n}\n",
+            "fixed",
+            "class Sample {\n    void run() {\n        for (int index = 0; index < count; index++) {}\n    }\n}\n",
+        ),
+        RuleCase(
+            "expanded enhanced loop",
+            "class Sample {\n    void run() {\n        for (\n            String value :\n            values\n        ) {}\n    }\n}\n",
+            "fixed",
+            "class Sample {\n    void run() {\n        for (String value : values) {}\n    }\n}\n",
+        ),
+    ]
+
+    @staticmethod
+    def _bounds(node):
+        opening = _first_child(node, "(")
+        closing = _first_child(node, ")")
+        return opening, closing
+
+    def _parts(self, document, node) -> Optional[tuple[list[str], list[str]]]:
+        if node.type == "for_statement":
+            fields = [node.child_by_field_name(name) for name in ("init", "condition", "update")]
+            if any(field is None for field in fields):
+                return None
+            values = [document.text(field).strip().removesuffix(";") for field in fields]
+            return values, [";", ";", ""]
+        type_node = node.child_by_field_name("type")
+        name = node.child_by_field_name("name")
+        value = node.child_by_field_name("value")
+        if not type_node or not name or not value:
+            return None
+        declaration = document.text(type_node).strip() + " " + document.text(name).strip() + " :"
+        return [declaration, document.text(value).strip()], ["", ""]
+
+    def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        document = parse_java(content)
+        maximum = int(config.get("max_length", 120))
+        size = int(config.get("indent_size", 4))
+        edits = []
+        for node in nodes_of_type(document, "for_statement", "enhanced_for_statement"):
+            opening, closing = self._bounds(node)
+            parts = self._parts(document, node)
+            if not opening or not closing or not parts or _has_comment(node):
+                continue
+            values, suffixes = parts
+            if any("\n" in value for value in values):
+                continue
+            if node.type == "for_statement":
+                compact = "(" + "; ".join(values) + ")"
+            else:
+                compact = "(" + values[0] + " " + values[1] + ")"
+            prefix = document.content.splitlines()[opening.start_point.row][:opening.start_point.column]
+            original = document.source[opening.start_byte:closing.end_byte].decode()
+            if config.get("compact_if_fits", True) and len(prefix) + len(compact) <= maximum:
+                replacement = compact
+            elif len(prefix) + len(compact) > maximum:
+                indent = " " * (opening.start_point.column + size)
+                close_indent = " " * opening.start_point.column
+                rendered = [indent + value + suffix for value, suffix in zip(values, suffixes)]
+                replacement = "(\n" + "\n".join(rendered) + "\n" + close_indent + ")"
+            else:
+                continue
+            if replacement != original and span_is_authorized(document, opening.start_byte, closing.end_byte, config):
+                edits.append(JavaEdit(opening.start_byte, closing.end_byte, replacement))
+        return edits
+
+    def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
+        return [_violation(self, content, edit, "Use canonical for-loop header layout.") for edit in self._edits(content, rule_config)]
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        return apply_java_edits(content, self._edits(content, rule_config))
+
+
+class EnumLayoutRule(BaseRule):
+    rule_id = "IR-enum-layout"
+    description = "Keep fitting enum constants together; otherwise place each constant on its own line."
+    category = "classes/interfaces"
+    is_fixable = "yes"
+    commit_profile = True
+    default_config = {"max_length": 120, "indent_size": 4, "compact_if_fits": True}
+    config_options = {
+        "max_length": {"default": 120, "description": "Maximum compact constant line length."},
+        "indent_size": {"default": 4, "description": "Enum-body indentation."},
+        "compact_if_fits": {"default": True, "description": "Keep fitting constants on one line."},
+    }
+    cases = [
+        RuleCase(
+            "compact constants",
+            "enum Status {\n    READY,\n    RUNNING,\n    DONE\n}\n",
+            "fixed",
+            "enum Status {\n    READY, RUNNING, DONE\n}\n",
+        ),
+        RuleCase("fitting constants", "enum Status {\n    READY, RUNNING, DONE\n}\n", "accepted"),
+    ]
+
+    def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        document = parse_java(content)
+        maximum = int(config.get("max_length", 120))
+        size = int(config.get("indent_size", 4))
+        edits = []
+        for body in nodes_of_type(document, "enum_body"):
+            constants = [child for child in body.named_children if child.type == "enum_constant"]
+            if not constants or any(_has_comment(constant) for constant in constants):
+                continue
+            values = [document.text(constant).strip() for constant in constants]
+            if any("\n" in value for value in values):
+                continue
+            first, last = constants[0], constants[-1]
+            compact = ", ".join(values)
+            prefix_length = first.start_point.column
+            if config.get("compact_if_fits", True) and prefix_length + len(compact) <= maximum:
+                replacement = compact
+            elif prefix_length + len(compact) > maximum:
+                indent = " " * (body.start_point.column + size)
+                replacement = values[0] + ",\n" + ",\n".join(indent + value for value in values[1:])
+            else:
+                continue
+            original = document.source[first.start_byte:last.end_byte].decode()
+            if replacement != original and span_is_authorized(document, first.start_byte, last.end_byte, config):
+                edits.append(JavaEdit(first.start_byte, last.end_byte, replacement))
+        return edits
+
+    def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
+        return [_violation(self, content, edit, "Use canonical enum constant layout.") for edit in self._edits(content, rule_config)]
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        return apply_java_edits(content, self._edits(content, rule_config))
+
+
+class EmptyBodyLayoutRule(BaseRule):
+    rule_id = "IR-empty-body-layout"
+    description = "Write empty Java declaration and executable bodies as compact braces."
+    category = "whitespace/layout"
+    is_fixable = "yes"
+    commit_profile = True
+    cases = [
+        RuleCase(
+            "empty method body",
+            "class Sample {\n    void reset() {\n    }\n}\n",
+            "fixed",
+            "class Sample {\n    void reset() {}\n}\n",
+        ),
+        RuleCase("commented body", "class Sample {\n    void reset() {\n        // Deliberately empty.\n    }\n}\n", "accepted"),
+    ]
+    BODY_TYPES = TYPE_BODY_TYPES | {"block", "constructor_body"}
+
+    def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        document = parse_java(content)
+        edits = []
+        for node in walk(document.root):
+            if node.type not in self.BODY_TYPES or node.named_child_count or _has_comment(node):
+                continue
+            if document.text(node) == "{}":
+                continue
+            if edit_is_authorized(node, config):
+                edits.append(JavaEdit(node.start_byte, node.end_byte, "{}"))
+        return edits
+
+    def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
+        return [_violation(self, content, edit, "Compact the empty body.") for edit in self._edits(content, rule_config)]
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        return apply_java_edits(content, self._edits(content, rule_config))
+
+
+class MemberSpacingRule(BaseRule):
+    rule_id = "IR-member-spacing"
+    description = "Group adjacent fields and separate constructors, methods, initializers, and nested types with one blank line."
+    category = "classes/interfaces"
+    is_fixable = "yes"
+    commit_profile = True
+    cases = [
+        RuleCase(
+            "separate behavioral members",
+            "class Sample {\n    int first;\n    int second;\n    Sample() {}\n    void run() {}\n}\n",
+            "fixed",
+            "class Sample {\n    int first;\n    int second;\n\n    Sample() {}\n\n    void run() {}\n}\n",
+        ),
+        RuleCase("group fields", "class Sample {\n    int first;\n    int second;\n}\n", "accepted"),
+    ]
+
+    @staticmethod
+    def _members(body) -> list:
+        return [child for child in body.named_children if child.type not in COMMENT_TYPES]
+
+    def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        document = parse_java(content)
+        edits = []
+        for body in (node for node in walk(document.root) if node.type in TYPE_BODY_TYPES):
+            members = self._members(body)
+            for left, right in zip(members, members[1:]):
+                if left.type == "enum_constant" or right.type == "enum_constant":
+                    continue
+                if left.type == "field_declaration" and right.type == "field_declaration":
+                    continue
+                if left.type not in BEHAVIOR_MEMBER_TYPES and right.type not in BEHAVIOR_MEMBER_TYPES:
+                    continue
+                gap = document.source[left.end_byte:right.start_byte].decode()
+                if gap.strip() or any(
+                    left.end_byte <= comment.start_byte < right.start_byte
+                    for comment in nodes_of_type(document, *COMMENT_TYPES)
+                ):
+                    continue
+                indent = " " * right.start_point.column
+                replacement = "\n\n" + indent
+                if gap != replacement and span_is_authorized(document, left.end_byte, right.start_byte, config):
+                    edits.append(JavaEdit(left.end_byte, right.start_byte, replacement))
+        return edits
+
+    def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
+        return [_violation(self, content, edit, "Separate Java members with one blank line.") for edit in self._edits(content, rule_config)]
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        return apply_java_edits(content, self._edits(content, rule_config))

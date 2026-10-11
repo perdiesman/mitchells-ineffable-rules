@@ -50,6 +50,7 @@ This document describes all JAVA linting rules supported by Mitchell's Ineffable
 | :--- | :--- | :---: | :---: |
 | [`IR-blank-lines`](rules/whitespace/layout/IR-blank-lines.md) | Do not start a Java file with a blank line or use consecutive blank lines. | Yes | [View Details](rules/whitespace/layout/IR-blank-lines.md) |
 | [`IR-brace-layout`](rules/whitespace/layout/IR-brace-layout.md) | Use K&R brace layout, multiline nonempty blocks, and joined else/catch/finally clauses. | Yes | [View Details](rules/whitespace/layout/IR-brace-layout.md) |
+| [`IR-empty-body-layout`](rules/whitespace/layout/IR-empty-body-layout.md) | Write empty Java declaration and executable bodies as compact braces. | Yes | [View Details](rules/whitespace/layout/IR-empty-body-layout.md) |
 | [`IR-indent`](rules/whitespace/layout/IR-indent.md) | Indent Java blocks and continuations with configurable four-space levels. | Yes | [View Details](rules/whitespace/layout/IR-indent.md) |
 | [`IR-one-statement-line`](rules/whitespace/layout/IR-one-statement-line.md) | Place each Java statement on its own line. | Yes | [View Details](rules/whitespace/layout/IR-one-statement-line.md) |
 | [`IR-spacing`](rules/whitespace/layout/IR-spacing.md) | Use canonical spaces around Java operators, separators, and control parentheses. | Yes | [View Details](rules/whitespace/layout/IR-spacing.md) |
@@ -59,7 +60,9 @@ This document describes all JAVA linting rules supported by Mitchell's Ineffable
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
-| *No rules active* | *Future classes/interfaces rules will be listed here* | - | - |
+| [`IR-enum-layout`](rules/classes/interfaces/IR-enum-layout.md) | Keep fitting enum constants together; otherwise place each constant on its own line. | Yes | [View Details](rules/classes/interfaces/IR-enum-layout.md) |
+| [`IR-member-spacing`](rules/classes/interfaces/IR-member-spacing.md) | Group adjacent fields and separate constructors, methods, initializers, and nested types with one blank line. | Yes | [View Details](rules/classes/interfaces/IR-member-spacing.md) |
+| [`IR-type-parameter-layout`](rules/classes/interfaces/IR-type-parameter-layout.md) | Keep fitting generic type parameters compact; otherwise place each parameter on its own line. | Yes | [View Details](rules/classes/interfaces/IR-type-parameter-layout.md) |
 
 ## Method Declarations
 
@@ -90,6 +93,7 @@ This document describes all JAVA linting rules supported by Mitchell's Ineffable
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
+| [`IR-loop-header-layout`](rules/control-flow/IR-loop-header-layout.md) | Keep fitting for-loop headers compact; otherwise place each logical header part on its own line. | Yes | [View Details](rules/control-flow/IR-loop-header-layout.md) |
 | [`IR-required-braces`](rules/control-flow/IR-required-braces.md) | Use braces for if, else, for, while, and do bodies. | Sometimes | [View Details](rules/control-flow/IR-required-braces.md) |
 | [`IR-switch-fallthrough`](rules/control-flow/IR-switch-fallthrough.md) | Mark intentional fall-through in colon-style switch statement groups. | No | [View Details](rules/control-flow/IR-switch-fallthrough.md) |
 | [`IR-try-resource-layout`](rules/control-flow/IR-try-resource-layout.md) | Keep fitting try resources compact; otherwise place each resource on its own line. | Yes | [View Details](rules/control-flow/IR-try-resource-layout.md) |
