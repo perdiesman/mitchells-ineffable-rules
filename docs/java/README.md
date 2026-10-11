@@ -114,6 +114,8 @@ This document describes all JAVA linting rules supported by Mitchell's Ineffable
 
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
+| [`IR-disabled-test-reason`](rules/documentation/IR-disabled-test-reason.md) | Give disabled JUnit tests a nonempty reason. | No | [View Details](rules/documentation/IR-disabled-test-reason.md) |
+| [`IR-javadoc-completeness`](rules/documentation/IR-javadoc-completeness.md) | Keep existing public API Javadoc tags synchronized with method parameters, returns, and throws clauses. | No | [View Details](rules/documentation/IR-javadoc-completeness.md) |
 | [`IR-javadoc-placement`](rules/documentation/IR-javadoc-placement.md) | Place Javadoc before declaration annotations. | No | [View Details](rules/documentation/IR-javadoc-placement.md) |
 | [`IR-javadoc-tags`](rules/documentation/IR-javadoc-tags.md) | Use canonical Javadoc block-tag order and nonempty descriptions. | No | [View Details](rules/documentation/IR-javadoc-tags.md) |
 | [`IR-public-api-javadoc`](rules/documentation/IR-public-api-javadoc.md) | Document public and protected top-level types and members. | No | [View Details](rules/documentation/IR-public-api-javadoc.md) |
@@ -123,5 +125,10 @@ This document describes all JAVA linting rules supported by Mitchell's Ineffable
 | Rule Name | Short Description | Fixable | Details |
 | :--- | :--- | :---: | :---: |
 | [`IR-assignment-in-condition`](rules/correctness/IR-assignment-in-condition.md) | Avoid assignments inside control-flow conditions. | No | [View Details](rules/correctness/IR-assignment-in-condition.md) |
+| [`IR-console-output`](rules/correctness/IR-console-output.md) | Use project logging instead of console output or printStackTrace. | No | [View Details](rules/correctness/IR-console-output.md) |
 | [`IR-empty-catch`](rules/correctness/IR-empty-catch.md) | Explain or handle intentionally ignored exceptions. | No | [View Details](rules/correctness/IR-empty-catch.md) |
 | [`IR-empty-statement`](rules/correctness/IR-empty-statement.md) | Do not use an accidental empty statement as a control-flow body. | No | [View Details](rules/correctness/IR-empty-statement.md) |
+| [`IR-equals-hash-code`](rules/correctness/IR-equals-hash-code.md) | Declare equals and hashCode together in concrete Java classes. | No | [View Details](rules/correctness/IR-equals-hash-code.md) |
+| [`IR-finally-control-flow`](rules/correctness/IR-finally-control-flow.md) | Do not abruptly return, throw, break, or continue from a finally block. | No | [View Details](rules/correctness/IR-finally-control-flow.md) |
+| [`IR-forbidden-api`](rules/correctness/IR-forbidden-api.md) | Report explicitly configured Java imports, qualified references, and invocations. | No | [View Details](rules/correctness/IR-forbidden-api.md) |
+| [`IR-interrupted-exception`](rules/correctness/IR-interrupted-exception.md) | Propagate InterruptedException or visibly restore the thread interruption flag. | No | [View Details](rules/correctness/IR-interrupted-exception.md) |
