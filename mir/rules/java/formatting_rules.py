@@ -29,6 +29,8 @@ CONTINUATION_TYPES = {
     "argument_list",
     "formal_parameters",
     "record_header",
+    "array_initializer",
+    "resource_specification",
     "throws",
     "super_interfaces",
     "superclass",
@@ -127,7 +129,13 @@ def _expected_depth(node, row: int) -> int:
                         continuations.add("chain")
                 elif current.type in {"binary_expression", "ternary_expression"}:
                     continuations.add("expression")
-                elif current.type in {"argument_list", "formal_parameters", "record_header"}:
+                elif current.type in {
+                    "argument_list",
+                    "formal_parameters",
+                    "record_header",
+                    "array_initializer",
+                    "resource_specification",
+                }:
                     continuations.add("list")
                 else:
                     continuations.add("type")
@@ -151,7 +159,13 @@ def _wrapped_continuation_depth(node, category: str) -> int:
             depth += 1
         elif current.type in {"binary_expression", "ternary_expression"}:
             continuations.add("expression")
-        elif current.type in {"argument_list", "formal_parameters", "record_header"}:
+        elif current.type in {
+            "argument_list",
+            "formal_parameters",
+            "record_header",
+            "array_initializer",
+            "resource_specification",
+        }:
             continuations.add("list")
         elif current.type in {"throws", "super_interfaces", "superclass", "interfaces", "permits"}:
             continuations.add("type")
@@ -350,7 +364,12 @@ class BraceLayoutRule(BaseRule):
                         document.content.splitlines()[node.start_point.row][:node.start_point.column].lstrip(" ")
                     )
                     edits.append(JavaEdit(node.end_byte, following.start_byte, "\n" + " " * (base + size)))
-            elif text == "}" and index:
+            elif (
+                text == "}"
+                and index
+                and node.parent
+                and node.parent.type in CONTAINER_TYPES
+            ):
                 previous = leaves[index - 1]
                 if previous.start_point.row == node.start_point.row and document.text(previous) != "{":
                     gap = document.source[previous.end_byte:node.start_byte].decode()
@@ -438,10 +457,10 @@ class JavaListLayoutRule(BaseRule):
             return compact if original != compact else None
         if "\n" not in original and len(line_prefix) + len(compact) <= maximum:
             return None
-        base = len(line_prefix) - len(line_prefix.lstrip(" "))
         size = int(config.get("indent_size", 4))
-        indent = " " * (base + size)
-        close_indent = " " * base
+        depth = _wrapped_continuation_depth(node, "list")
+        indent = " " * (depth * size)
+        close_indent = " " * (max(0, depth - 1) * size)
         return "(\n" + ",\n".join(indent + value for value in values) + "\n" + close_indent + ")"
 
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
@@ -449,8 +468,14 @@ class JavaListLayoutRule(BaseRule):
         candidates = [node for node in walk(document.root) if node.type in self.node_types]
         edits = []
         claimed = []
-        # Prefer inner lists so nested calls do not receive overlapping edits.
-        for node in sorted(candidates, key=lambda item: item.end_byte - item.start_byte):
+        # Prefer the outer list when both levels can be normalized. If an outer
+        # list owns multiline content it yields no replacement, allowing its
+        # inner lists to be considered independently in the same pass.
+        for node in sorted(
+            candidates,
+            key=lambda item: item.end_byte - item.start_byte,
+            reverse=True,
+        ):
             if any(not (node.end_byte <= start or node.start_byte >= end) for start, end in claimed):
                 continue
             replacement = self._replacement(document, node, config)
@@ -644,6 +669,320 @@ class ExpressionLayoutRule(BaseRule):
         document = parse_java(content)
         return [
             _line_violation(self, content, document.source[:edit.start].count(b"\n") + 1, "Use canonical expression layout.")
+            for edit in self._edits(content, rule_config)
+        ]
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        return apply_java_edits(content, self._edits(content, rule_config))
+
+
+class TernaryLayoutRule(BaseRule):
+    rule_id = "IR-ternary-layout"
+    description = "Keep fitting ternary expressions compact; otherwise align question and colon branches."
+    category = "expressions"
+    is_fixable = "yes"
+    commit_profile = True
+    default_config = {"max_length": 120, "indent_size": 4, "compact_if_fits": True}
+    config_options = {
+        "max_length": {"default": 120, "description": "Maximum compact expression line length."},
+        "indent_size": {"default": 4, "description": "Ternary continuation indentation."},
+        "compact_if_fits": {"default": True, "description": "Collapse fitting ternary expressions."},
+    }
+    cases = [
+        RuleCase(
+            "compact ternary",
+            "class Sample { int value(boolean ready) { return ready\n        ? first()\n        : second(); } int first() { return 1; } int second() { return 2; } }\n",
+            "fixed",
+            "class Sample { int value(boolean ready) { return ready ? first() : second(); } int first() { return 1; } int second() { return 2; } }\n",
+        ),
+        RuleCase(
+            "compact branch",
+            "class Sample { int value(boolean ready) { return ready ? 1 : 2; } }\n",
+            "accepted",
+        ),
+    ]
+
+    def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        document = parse_java(content)
+        maximum = int(config.get("max_length", 120))
+        size = int(config.get("indent_size", 4))
+        edits = []
+        for node in nodes_of_type(document, "ternary_expression"):
+            if any(ancestor.type == "ternary_expression" for ancestor in _ancestors(node.parent)):
+                continue
+            if any(child.type in {"line_comment", "block_comment", "text_block"} for child in walk(node)):
+                continue
+            condition = node.child_by_field_name("condition")
+            consequence = node.child_by_field_name("consequence")
+            alternative = node.child_by_field_name("alternative")
+            if not condition or not consequence or not alternative:
+                continue
+            values = [document.text(item).strip() for item in (condition, consequence, alternative)]
+            if any("\n" in value for value in values):
+                continue
+            compact = f"{values[0]} ? {values[1]} : {values[2]}"
+            prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
+            if config.get("compact_if_fits", True) and len(prefix) + len(compact) <= maximum:
+                replacement = compact
+            elif len(prefix) + len(compact) > maximum:
+                indent = " " * (_wrapped_continuation_depth(node, "expression") * size)
+                replacement = f"{values[0]}\n{indent}? {values[1]}\n{indent}: {values[2]}"
+            else:
+                continue
+            if replacement != document.text(node) and edit_is_authorized(node, config):
+                edits.append(JavaEdit(node.start_byte, node.end_byte, replacement))
+        return edits
+
+    def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
+        document = parse_java(content)
+        return [
+            _line_violation(self, content, document.source[:edit.start].count(b"\n") + 1, "Use canonical ternary layout.")
+            for edit in self._edits(content, rule_config)
+        ]
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        return apply_java_edits(content, self._edits(content, rule_config))
+
+
+class ArrayInitializerLayoutRule(BaseRule):
+    rule_id = "IR-array-initializer-layout"
+    description = "Keep fitting array initializers compact; otherwise place each value on its own line."
+    category = "variables"
+    is_fixable = "yes"
+    commit_profile = True
+    default_config = {"max_length": 120, "indent_size": 4, "compact_if_fits": True}
+    config_options = {
+        "max_length": {"default": 120, "description": "Maximum compact initializer line length."},
+        "indent_size": {"default": 4, "description": "Initializer continuation indentation."},
+        "compact_if_fits": {"default": True, "description": "Collapse fitting initializers."},
+    }
+    cases = [
+        RuleCase(
+            "compact initializer",
+            "class Sample { int[] values = {\n    1,\n    2\n}; }\n",
+            "fixed",
+            "class Sample { int[] values = {1, 2}; }\n",
+        ),
+        RuleCase("compact values", "class Sample { int[] values = {1, 2}; }\n", "accepted"),
+    ]
+
+    def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        document = parse_java(content)
+        maximum = int(config.get("max_length", 120))
+        size = int(config.get("indent_size", 4))
+        edits = []
+        claimed = []
+        candidates = list(nodes_of_type(document, "array_initializer"))
+        for node in sorted(candidates, key=lambda item: item.end_byte - item.start_byte):
+            if any(not (node.end_byte <= start or node.start_byte >= end) for start, end in claimed):
+                continue
+            if any(child.type in {"line_comment", "block_comment"} for child in walk(node)):
+                continue
+            values = [document.text(child).strip() for child in node.named_children]
+            if not values or any("\n" in value for value in values):
+                continue
+            compact = "{" + ", ".join(values) + "}"
+            prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
+            if config.get("compact_if_fits", True) and len(prefix) + len(compact) <= maximum:
+                replacement = compact
+            elif len(prefix) + len(compact) > maximum:
+                depth = _wrapped_continuation_depth(node, "list")
+                indent = " " * (depth * size)
+                close_indent = " " * (max(0, depth - 1) * size)
+                replacement = "{\n" + ",\n".join(indent + value for value in values) + "\n" + close_indent + "}"
+            else:
+                continue
+            if replacement != document.text(node) and edit_is_authorized(node, config):
+                edits.append(JavaEdit(node.start_byte, node.end_byte, replacement))
+                claimed.append((node.start_byte, node.end_byte))
+        return edits
+
+    def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
+        document = parse_java(content)
+        return [
+            _line_violation(self, content, document.source[:edit.start].count(b"\n") + 1, "Use canonical array initializer layout.")
+            for edit in self._edits(content, rule_config)
+        ]
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        return apply_java_edits(content, self._edits(content, rule_config))
+
+
+class TryResourceLayoutRule(BaseRule):
+    rule_id = "IR-try-resource-layout"
+    description = "Keep fitting try resources compact; otherwise place each resource on its own line."
+    category = "control-flow"
+    is_fixable = "yes"
+    commit_profile = True
+    default_config = {"max_length": 120, "indent_size": 4, "compact_if_fits": True}
+    config_options = {
+        "max_length": {"default": 120, "description": "Maximum compact resource line length."},
+        "indent_size": {"default": 4, "description": "Resource continuation indentation."},
+        "compact_if_fits": {"default": True, "description": "Collapse fitting resource lists."},
+    }
+    cases = [
+        RuleCase(
+            "compact resources",
+            "class Sample { void run() throws Exception { try (\n    var first = open();\n    var second = open()\n) {} } Object open() { return null; } }\n",
+            "fixed",
+            "class Sample { void run() throws Exception { try (var first = open(); var second = open()) {} } Object open() { return null; } }\n",
+        ),
+        RuleCase(
+            "single resource",
+            "class Sample { void run() throws Exception { try (var value = open()) {} } Object open() { return null; } }\n",
+            "accepted",
+        ),
+    ]
+
+    def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        document = parse_java(content)
+        maximum = int(config.get("max_length", 120))
+        size = int(config.get("indent_size", 4))
+        edits = []
+        for node in nodes_of_type(document, "resource_specification"):
+            if any(child.type in {"line_comment", "block_comment"} for child in walk(node)):
+                continue
+            values = [document.text(child).strip() for child in node.named_children]
+            if not values or any("\n" in value for value in values):
+                continue
+            compact = "(" + "; ".join(values) + ")"
+            prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
+            if config.get("compact_if_fits", True) and len(prefix) + len(compact) <= maximum:
+                replacement = compact
+            elif len(prefix) + len(compact) > maximum:
+                depth = _wrapped_continuation_depth(node, "list")
+                indent = " " * (depth * size)
+                close_indent = " " * (max(0, depth - 1) * size)
+                replacement = "(\n" + ";\n".join(indent + value for value in values) + "\n" + close_indent + ")"
+            else:
+                continue
+            if replacement != document.text(node) and edit_is_authorized(node, config):
+                edits.append(JavaEdit(node.start_byte, node.end_byte, replacement))
+        return edits
+
+    def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
+        document = parse_java(content)
+        return [
+            _line_violation(self, content, document.source[:edit.start].count(b"\n") + 1, "Use canonical try-resource layout.")
+            for edit in self._edits(content, rule_config)
+        ]
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        return apply_java_edits(content, self._edits(content, rule_config))
+
+
+class TypeClauseLayoutRule(BaseRule):
+    rule_id = "IR-type-clause-layout"
+    description = "Keep fitting implements, permits, and throws clauses compact; otherwise list one type per line."
+    category = "source-structure"
+    is_fixable = "yes"
+    commit_profile = True
+    default_config = {"max_length": 120, "indent_size": 4, "compact_if_fits": True}
+    config_options = {
+        "max_length": {"default": 120, "description": "Maximum compact clause line length."},
+        "indent_size": {"default": 4, "description": "Type-clause continuation indentation."},
+        "compact_if_fits": {"default": True, "description": "Collapse fitting type clauses."},
+    }
+    cases = [
+        RuleCase(
+            "compact throws",
+            "class Sample { void run() throws\n    FirstProblem,\n    SecondProblem {} }\n",
+            "fixed",
+            "class Sample { void run() throws FirstProblem, SecondProblem {} }\n",
+        ),
+        RuleCase("compact implements", "class Sample implements First, Second {}\n", "accepted"),
+    ]
+    KEYWORDS = {"super_interfaces": "implements", "permits": "permits", "throws": "throws"}
+
+    @staticmethod
+    def _values(document, node) -> list[str]:
+        children = list(node.named_children)
+        if len(children) == 1 and children[0].type == "type_list":
+            children = list(children[0].named_children)
+        return [document.text(child).strip() for child in children]
+
+    def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        document = parse_java(content)
+        maximum = int(config.get("max_length", 120))
+        size = int(config.get("indent_size", 4))
+        edits = []
+        for node in walk(document.root):
+            keyword = self.KEYWORDS.get(node.type)
+            if not keyword or not node.named_child_count:
+                continue
+            if any(child.type in {"line_comment", "block_comment"} for child in walk(node)):
+                continue
+            values = self._values(document, node)
+            if not values or any("\n" in value for value in values):
+                continue
+            compact = keyword + " " + ", ".join(values)
+            prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
+            if config.get("compact_if_fits", True) and len(prefix) + len(compact) <= maximum:
+                replacement = compact
+            elif len(prefix) + len(compact) > maximum and len(values) > 1:
+                indent = " " * (_wrapped_continuation_depth(node, "type") * size)
+                replacement = keyword + "\n" + ",\n".join(indent + value for value in values)
+            else:
+                continue
+            if replacement != document.text(node) and edit_is_authorized(node, config):
+                edits.append(JavaEdit(node.start_byte, node.end_byte, replacement))
+        return edits
+
+    def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
+        document = parse_java(content)
+        return [
+            _line_violation(self, content, document.source[:edit.start].count(b"\n") + 1, "Use canonical type-clause layout.")
+            for edit in self._edits(content, rule_config)
+        ]
+
+    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+        return apply_java_edits(content, self._edits(content, rule_config))
+
+
+class AnnotationLayoutRule(BaseRule):
+    rule_id = "IR-annotation-layout"
+    description = "Place declaration annotations on separate lines before modifiers and declarations."
+    category = "source-structure"
+    is_fixable = "yes"
+    commit_profile = True
+    cases = [
+        RuleCase(
+            "declaration annotations",
+            "@Deprecated @SuppressWarnings(\"unused\") public class Sample {}\n",
+            "fixed",
+            "@Deprecated\n@SuppressWarnings(\"unused\")\npublic class Sample {}\n",
+        ),
+        RuleCase("separate annotation", "@Deprecated\nclass Sample {}\n", "accepted"),
+    ]
+    DECLARATIONS = {
+        "class_declaration", "interface_declaration", "enum_declaration", "record_declaration",
+        "annotation_type_declaration", "method_declaration", "constructor_declaration", "field_declaration",
+    }
+
+    def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
+        document = parse_java(content)
+        edits = []
+        for modifiers in nodes_of_type(document, "modifiers"):
+            if not modifiers.parent or modifiers.parent.type not in self.DECLARATIONS:
+                continue
+            children = list(modifiers.children)
+            for index, child in enumerate(children):
+                if child.type not in {"annotation", "marker_annotation"} or index + 1 >= len(children):
+                    continue
+                following = children[index + 1]
+                gap = document.source[child.end_byte:following.start_byte].decode()
+                if "\n" in gap or gap.strip():
+                    continue
+                line = document.content.splitlines()[child.start_point.row]
+                indent = line[: len(line) - len(line.lstrip(" "))]
+                if span_is_authorized(document, child.end_byte, following.start_byte, config):
+                    edits.append(JavaEdit(child.end_byte, following.start_byte, "\n" + indent))
+        return edits
+
+    def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
+        document = parse_java(content)
+        return [
+            _line_violation(self, content, document.source[:edit.start].count(b"\n") + 1, "Place declaration annotations on separate lines.")
             for edit in self._edits(content, rule_config)
         ]
 
