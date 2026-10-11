@@ -23,6 +23,7 @@ CONTAINER_TYPES = {
     "enum_body",
     "annotation_type_body",
     "block",
+    "constructor_body",
     "switch_block",
 }
 CONTINUATION_TYPES = {
@@ -40,6 +41,8 @@ CONTINUATION_TYPES = {
     "method_invocation",
     "binary_expression",
     "ternary_expression",
+    "assignment_expression",
+    "variable_declarator",
 }
 STATEMENT_TYPES = {
     "expression_statement",
@@ -133,7 +136,12 @@ def _expected_depth(node, row: int) -> int:
                 if current.type == "method_invocation":
                     if node.type == ".":
                         continuations.add("chain")
-                elif current.type in {"binary_expression", "ternary_expression"}:
+                elif current.type in {
+                    "binary_expression",
+                    "ternary_expression",
+                    "assignment_expression",
+                    "variable_declarator",
+                }:
                     continuations.add("expression")
                 elif current.type in {
                     "argument_list",
@@ -165,7 +173,12 @@ def _wrapped_continuation_depth(node, category: str) -> int:
     while current is not None:
         if current.type in CONTAINER_TYPES:
             depth += 1
-        elif current.type in {"binary_expression", "ternary_expression"}:
+        elif current.type in {
+            "binary_expression",
+            "ternary_expression",
+            "assignment_expression",
+            "variable_declarator",
+        }:
             continuations.add("expression")
         elif current.type in {
             "argument_list",
@@ -223,6 +236,18 @@ class JavaIndentRule(BaseRule):
             "class Sample {\n    void execute() {\n        publish(\n          first,\n          second\n        );\n    }\n}\n",
             "fixed",
             "class Sample {\n    void execute() {\n        publish(\n            first,\n            second\n        );\n    }\n}\n",
+        ),
+        RuleCase(
+            "constructor body",
+            "class Sample {\n    Sample(\n        int value\n    ) {\n    this.value = value;\n    }\n    int value;\n}\n",
+            "fixed",
+            "class Sample {\n    Sample(\n        int value\n    ) {\n        this.value = value;\n    }\n    int value;\n}\n",
+        ),
+        RuleCase(
+            "assignment continuation",
+            "class Sample {\n    void execute() {\n        String value =\n        createValue();\n    }\n    String createValue() { return \"value\"; }\n}\n",
+            "fixed",
+            "class Sample {\n    void execute() {\n        String value =\n            createValue();\n    }\n    String createValue() { return \"value\"; }\n}\n",
         ),
     ]
 
