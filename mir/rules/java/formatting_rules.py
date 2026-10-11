@@ -34,6 +34,9 @@ CONTINUATION_TYPES = {
     "superclass",
     "interfaces",
     "permits",
+    "method_invocation",
+    "binary_expression",
+    "ternary_expression",
 }
 STATEMENT_TYPES = {
     "expression_statement",
@@ -65,10 +68,22 @@ def _line_violation(rule: BaseRule, content: str, line: int, message: str, fixab
 
 
 def _leaf_nodes(document) -> list:
-    return [
-        node for node in walk(document.root)
-        if not node.child_count and node.type not in {"line_comment", "block_comment"}
-    ]
+    leaves = []
+    protected = {"line_comment", "block_comment", "string_literal", "character_literal", "text_block"}
+    for node in walk(document.root):
+        if node.child_count or node.type in protected:
+            continue
+        current = node.parent
+        if any(ancestor.type in protected for ancestor in _ancestors(current)):
+            continue
+        leaves.append(node)
+    return leaves
+
+
+def _ancestors(node):
+    while node is not None:
+        yield node
+        node = node.parent
 
 
 def _line_first_nodes(document) -> dict[int, object]:
@@ -88,7 +103,7 @@ def _line_first_nodes(document) -> dict[int, object]:
 
 def _expected_depth(node, row: int) -> int:
     depth = 0
-    continuation = False
+    continuations = set()
     switch_group = False
     current = node.parent
     while current is not None:
@@ -98,16 +113,68 @@ def _expected_depth(node, row: int) -> int:
             elif current.start_point.row < row == current.end_point.row:
                 # Closing delimiters align with the owner of the container.
                 pass
-        if current.type in CONTINUATION_TYPES and current.start_point.row < row < current.end_point.row:
-            continuation = True
+        if current.type in CONTINUATION_TYPES:
+            if current.type in {"method_invocation", "binary_expression", "ternary_expression"}:
+                active = current.start_point.row < row <= current.end_point.row
+            else:
+                active = (
+                    current.start_point.row < row <= current.end_point.row
+                    and node.type not in {")", "]", "}"}
+                )
+            if active:
+                if current.type == "method_invocation":
+                    if node.type == ".":
+                        continuations.add("chain")
+                elif current.type in {"binary_expression", "ternary_expression"}:
+                    continuations.add("expression")
+                elif current.type in {"argument_list", "formal_parameters", "record_header"}:
+                    continuations.add("list")
+                else:
+                    continuations.add("type")
         if current.type == "switch_block_statement_group":
             switch_group = True
         current = current.parent
     if switch_group and node.type not in {"case", "default"}:
         depth += 1
-    if continuation:
-        depth += 1
+    depth += len(continuations)
     return max(0, depth)
+
+
+def _wrapped_continuation_depth(node, category: str) -> int:
+    """Return the canonical depth for a wrapped construct within *node*."""
+    depth = 0
+    continuations = {category}
+    switch_group = False
+    current = node.parent
+    while current is not None:
+        if current.type in CONTAINER_TYPES:
+            depth += 1
+        elif current.type in {"binary_expression", "ternary_expression"}:
+            continuations.add("expression")
+        elif current.type in {"argument_list", "formal_parameters", "record_header"}:
+            continuations.add("list")
+        elif current.type in {"throws", "super_interfaces", "superclass", "interfaces", "permits"}:
+            continuations.add("type")
+        if current.type == "switch_block_statement_group":
+            switch_group = True
+        current = current.parent
+    return depth + len(continuations) + int(switch_group)
+
+
+def _spaced_operator(node, text: str) -> bool:
+    if text not in BINARY_OPERATORS or node.parent is None:
+        return False
+    if node.parent.type in {
+        "binary_expression",
+        "assignment_expression",
+        "ternary_expression",
+        "lambda_expression",
+        "enhanced_for_statement",
+        "catch_type",
+        "type_bound",
+    }:
+        return True
+    return False
 
 
 class JavaIndentRule(BaseRule):
@@ -141,8 +208,12 @@ class JavaIndentRule(BaseRule):
         first = _line_first_nodes(document)
         size = int(rule_config.get("indent_size", 4))
         protected_rows = set()
-        for node in nodes_of_type(document, "text_block"):
-            protected_rows.update(range(node.start_point.row + 1, node.end_point.row))
+        for node in walk(document.root):
+            if node.type == "text_block" or (
+                node.type == "string_literal"
+                and node.start_point.row != node.end_point.row
+            ):
+                protected_rows.update(range(node.start_point.row, node.end_point.row + 1))
         lines = content.splitlines(keepends=True)
         for row, node in first.items():
             if row in protected_rows or row >= len(lines):
@@ -197,7 +268,7 @@ class JavaSpacingRule(BaseRule):
             if left.end_byte > right.start_byte:
                 continue
             gap = document.source[left.end_byte:right.start_byte].decode()
-            if "\n" in gap or any(left.end_byte <= c.start_byte < right.start_byte for c in comments):
+            if gap.strip() or "\n" in gap or any(left.end_byte <= c.start_byte < right.start_byte for c in comments):
                 continue
             left_text = document.text(left)
             right_text = document.text(right)
@@ -208,10 +279,13 @@ class JavaSpacingRule(BaseRule):
                 desired = ""
             elif left_text == ",":
                 desired = " "
-            elif left_text in BINARY_OPERATORS or right_text in BINARY_OPERATORS:
-                if left_text not in {"!", "~", "++", "--"} and right_text not in {"++", "--"}:
-                    desired = " "
-            elif right_text == "{" and right.parent and right.parent.type not in {"array_initializer", "annotation_argument_list"}:
+            elif _spaced_operator(left, left_text) or _spaced_operator(right, right_text):
+                desired = " "
+            elif right_text == "{" and right.parent and right.parent.type not in {
+                "array_initializer",
+                "element_value_array_initializer",
+                "annotation_argument_list",
+            }:
                 desired = " "
             if desired is not None and gap != desired:
                 edits.append(JavaEdit(left.end_byte, right.start_byte, desired))
@@ -257,14 +331,21 @@ class BraceLayoutRule(BaseRule):
             if text == "{" and node.parent and node.parent.type in CONTAINER_TYPES:
                 previous = leaves[index - 1] if index else None
                 following = leaves[index + 1] if index + 1 < len(leaves) else None
-                if previous and previous.end_byte <= node.start_byte:
+                if (
+                    previous
+                    and document.text(previous) != "{"
+                    and previous.end_byte <= node.start_byte
+                ):
                     gap = document.source[previous.end_byte:node.start_byte].decode()
-                    if "\n" in gap and not any(
+                    if not gap.strip() and "\n" in gap and not any(
                         previous.end_byte <= comment.start_byte < node.start_byte
                         for comment in comment_nodes(document)
                     ):
                         edits.append(JavaEdit(previous.end_byte, node.start_byte, " "))
                 if following and document.text(following) != "}" and following.start_point.row == node.start_point.row:
+                    gap = document.source[node.end_byte:following.start_byte].decode()
+                    if gap.strip():
+                        continue
                     base = node.start_point.column - len(
                         document.content.splitlines()[node.start_point.row][:node.start_point.column].lstrip(" ")
                     )
@@ -272,6 +353,9 @@ class BraceLayoutRule(BaseRule):
             elif text == "}" and index:
                 previous = leaves[index - 1]
                 if previous.start_point.row == node.start_point.row and document.text(previous) != "{":
+                    gap = document.source[previous.end_byte:node.start_byte].decode()
+                    if gap.strip():
+                        continue
                     line = document.content.splitlines()[node.start_point.row]
                     base = len(line) - len(line.lstrip(" "))
                     edits.append(JavaEdit(previous.end_byte, node.start_byte, "\n" + " " * base))
@@ -445,7 +529,11 @@ class ChainLayoutRule(BaseRule):
         edits = []
         maximum = int(config.get("max_length", 120))
         size = int(config.get("indent_size", 4))
-        for node in nodes_of_type(document, "method_invocation"):
+        claimed = []
+        candidates = list(nodes_of_type(document, "method_invocation"))
+        for node in sorted(candidates, key=lambda item: item.end_byte - item.start_byte):
+            if any(not (node.end_byte <= start or node.start_byte >= end) for start, end in claimed):
+                continue
             parent = node.parent
             if parent and parent.type == "method_invocation" and parent.child_by_field_name("object") == node:
                 continue
@@ -461,13 +549,13 @@ class ChainLayoutRule(BaseRule):
             if config.get("compact_if_fits", True) and len(prefix) + len(compact) <= maximum:
                 replacement = compact
             elif len(prefix) + len(compact) > maximum:
-                base_indent = len(prefix) - len(prefix.lstrip(" "))
-                indent = " " * (base_indent + size)
+                indent = " " * (_wrapped_continuation_depth(node, "chain") * size)
                 replacement = base + "\n" + "\n".join(indent + segment for segment in segments)
             else:
                 continue
             if replacement != original and edit_is_authorized(node, config):
                 edits.append(JavaEdit(node.start_byte, node.end_byte, replacement))
+                claimed.append((node.start_byte, node.end_byte))
         return edits
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
@@ -523,7 +611,11 @@ class ExpressionLayoutRule(BaseRule):
         maximum = int(config.get("max_length", 120))
         size = int(config.get("indent_size", 4))
         edits = []
-        for node in nodes_of_type(document, "binary_expression"):
+        claimed = []
+        candidates = list(nodes_of_type(document, "binary_expression"))
+        for node in sorted(candidates, key=lambda item: item.end_byte - item.start_byte):
+            if any(not (node.end_byte <= start or node.start_byte >= end) for start, end in claimed):
+                continue
             if node.parent and node.parent.type == "binary_expression":
                 continue
             if any(child.type in {"line_comment", "block_comment", "text_block"} for child in walk(node)):
@@ -537,8 +629,7 @@ class ExpressionLayoutRule(BaseRule):
             if config.get("compact_if_fits", True) and len(prefix) + len(compact) <= maximum:
                 replacement = compact
             elif len(prefix) + len(compact) > maximum:
-                base_indent = len(prefix) - len(prefix.lstrip(" "))
-                indent = " " * (base_indent + size)
+                indent = " " * (_wrapped_continuation_depth(node, "expression") * size)
                 replacement = values[0] + "".join(
                     f"\n{indent}{op} {value}" for op, value in zip(operators, values[1:])
                 )
@@ -546,6 +637,7 @@ class ExpressionLayoutRule(BaseRule):
                 continue
             if replacement != original and edit_is_authorized(node, config):
                 edits.append(JavaEdit(node.start_byte, node.end_byte, replacement))
+                claimed.append((node.start_byte, node.end_byte))
         return edits
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
