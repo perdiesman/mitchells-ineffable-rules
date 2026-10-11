@@ -204,14 +204,15 @@ def resolve_rule_config(
     detected_base_indent: Optional[str] = None,
     lines: Optional[Set[int]] = None,
     template_dialect: Optional[str] = None,
+    language_config: Optional[dict] = None,
 ) -> dict:
     rule_config: dict = {}
     global_config = config.rule_configs.get(rule_id, {})
-    language_config = config.rule_configs.get(f"{lang}:{rule_id}", {})
+    language_rule_config = config.rule_configs.get(f"{lang}:{rule_id}", {})
     if isinstance(global_config, dict):
         rule_config.update(global_config)
-    if isinstance(language_config, dict):
-        rule_config.update(language_config)
+    if isinstance(language_rule_config, dict):
+        rule_config.update(language_rule_config)
     rule_config.update(
         {
             "_all_configs": config.rule_configs,
@@ -220,6 +221,7 @@ def resolve_rule_config(
             "_rules_to_enable": config.rules_to_enable,
             "_disable_all": config.disable_all,
             "_profile": config.profile,
+            "_language_config": language_config or {},
         }
     )
     if lines:
@@ -345,6 +347,7 @@ def _collect(
             base_indent,
             set(selection.allowed),
             template_dialect,
+            config.language_configs.get(lang, {}),
         )
         if not _rule_enabled(config, rule, lang, rule_config):
             continue
@@ -367,6 +370,7 @@ def _collect(
                 base_indent,
                 set(selection.allowed),
                 template_dialect,
+                config.language_configs.get(lang, {}),
             )
             severity = violation_rule.get_config_value(violation_config, "severity", "error")
             if config.no_warnings and severity == "warning":
@@ -389,11 +393,20 @@ def process_document(
 ) -> DocumentResult:
     selection = selection or expand_selection(content, lang, config.lines)
     result = DocumentResult(path, content, content)
+    generated_java_mode = "format"
+    if lang == "java":
+        from mir.rules.java.java_utils import generated_mode
+
+        generated_java_mode = generated_mode(
+            path, content, config.language_configs.get("java", {})
+        )
+        if generated_java_mode == "skip":
+            return result
     active_selection = selection
     initial, diagnostics = _collect(config, content, path, lang, active_selection)
     result.diagnostics.extend(diagnostics)
 
-    if config.fix or config.dry_run:
+    if (config.fix or config.dry_run) and generated_java_mode != "check":
         current = content
         seen = {current}
         violations = initial
@@ -427,6 +440,7 @@ def process_document(
                     detect_base_indent(current),
                     set(active_selection.allowed),
                     template_dialect,
+                    config.language_configs.get(lang, {}),
                 )
                 rule_config["rules_fixed"] = result.rules_fixed
                 try:
@@ -475,6 +489,30 @@ def process_document(
                                 "Trellis directive semantics changed"
                             )
                             continue
+                if config.profile == "commit" and lang == "java" and fixed != current:
+                    from mir.rules.java.java_utils import (
+                        error_nodes,
+                        parse_java,
+                        protected_java_multiset_signature,
+                        protected_java_signature,
+                    )
+
+                    before_signature = (
+                        protected_java_multiset_signature(current)
+                        if rule.commit_semantic_rewrite
+                        else protected_java_signature(current)
+                    )
+                    after_signature = (
+                        protected_java_multiset_signature(fixed)
+                        if rule.commit_semantic_rewrite
+                        else protected_java_signature(fixed)
+                    )
+                    if before_signature != after_signature or error_nodes(parse_java(fixed)):
+                        result.diagnostics.append(
+                            f"Unsafe fix rejected for {rule.rule_id} on {path}: "
+                            "protected Java syntax changed"
+                        )
+                        continue
                 if fixed != current:
                     result.rules_fixed.add(rule.rule_id)
                     if active_selection.restricted:
@@ -534,6 +572,10 @@ def process_document(
         from mir.rules.sql.sql_utils import _tokenize_sql_impl
 
         _tokenize_sql_impl.cache_clear()
+    elif lang == "java":
+        from mir.rules.java.java_utils import clear_java_cache
+
+        clear_java_cache()
     return result
 
 

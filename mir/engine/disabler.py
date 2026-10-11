@@ -27,6 +27,9 @@ def extract_comments_and_code_lines(content: str, lang: str) -> Tuple[List[str],
       - line_comments: Dict[int, List[str]] mapping 1-indexed line number to a list of comment strings found on that line.
       - comment_only_lines: Set[int] of 1-indexed line numbers that contain ONLY comments and whitespace.
     """
+    if lang == "java":
+        return _extract_java_comments_and_code_lines(content)
+
     lines = content.splitlines()
     line_comments: Dict[int, List[str]] = {}
     comment_only_lines: Set[int] = set()
@@ -203,6 +206,30 @@ def extract_comments_and_code_lines(content: str, lang: str) -> Tuple[List[str],
             comment_only_lines.add(l)
             
     return lines, line_comments, comment_only_lines
+
+
+def _extract_java_comments_and_code_lines(content: str) -> Tuple[List[str], Dict[int, List[str]], Set[int]]:
+    """Use Java syntax nodes so comment-looking text in literals stays opaque."""
+    from mir.rules.java.java_utils import comment_nodes, parse_java, walk
+
+    lines = content.splitlines()
+    document = parse_java(content)
+    line_comments: Dict[int, List[str]] = {}
+    comment_lines: Set[int] = set()
+    for node in comment_nodes(document):
+        text = document.text(node)
+        for line in range(node.start_point.row + 1, node.end_point.row + 2):
+            line_comments.setdefault(line, []).append(text)
+            comment_lines.add(line)
+
+    code_lines: Set[int] = set()
+    for node in walk(document.root):
+        if node.child_count or node.type in {"line_comment", "block_comment"}:
+            continue
+        for line in range(node.start_point.row + 1, node.end_point.row + 2):
+            code_lines.add(line)
+    comment_only = {line for line in comment_lines if line not in code_lines}
+    return lines, line_comments, comment_only
 
 
 def get_disabled_rules_map(content: str, file_path: str) -> Dict[str, Set[int]]:

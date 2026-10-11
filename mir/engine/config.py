@@ -16,6 +16,7 @@ class Config:
         self.verbose: bool = False
         self.paths: List[str] = []
         self.rule_configs: Dict[str, Any] = {}
+        self.language_configs: Dict[str, Dict[str, Any]] = {}
         self.config_file_path: Optional[str] = None
         self.include_dirs: List[str] = []
         self.rule_mode: str = "extend"
@@ -190,6 +191,14 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     config.rule_configs = file_config.get("rules", {})
     if not isinstance(config.rule_configs, dict):
         config.rule_configs = {}
+
+    language_configs = file_config.get("languages", {})
+    if isinstance(language_configs, dict):
+        config.language_configs = {
+            str(language).lower(): value
+            for language, value in language_configs.items()
+            if isinstance(value, dict)
+        }
         
     # -- content and lang --
     config.content = parsed_args.content

@@ -85,12 +85,53 @@ def _expand_xml(content: str, changed: set[int]) -> set[int]:
     return expanded
 
 
+def _expand_java(content: str, changed: set[int]) -> set[int]:
+    from mir.rules.java.java_utils import named_ancestor, node_for_line, parse_java
+
+    document = parse_java(content)
+    owner_types = {
+        "import_declaration",
+        "method_declaration",
+        "constructor_declaration",
+        "compact_constructor_declaration",
+        "field_declaration",
+        "class_declaration",
+        "interface_declaration",
+        "enum_declaration",
+        "record_declaration",
+        "annotation_type_declaration",
+        "module_declaration",
+    }
+    expanded = set(changed)
+    imports = [child for child in document.root.named_children if child.type == "import_declaration"]
+    import_lines = set()
+    for node in imports:
+        import_lines.update(document.lines_for(node))
+    if changed.intersection(import_lines):
+        for node in imports:
+            expanded.update(document.lines_for(node))
+
+    for line in changed:
+        node = node_for_line(document, line)
+        if node is None:
+            continue
+        owner = named_ancestor(node, owner_types)
+        if owner is not None:
+            expanded.update(document.lines_for(owner))
+    return expanded
+
+
 def expand_selection(content: str, language: str, lines: Iterable[int]) -> LineSelection:
     changed = {line for line in lines if line > 0}
     if not changed:
         return LineSelection.all()
     try:
-        allowed = _expand_xml(content, changed) if language == "xml" else _expand_sql(content, changed)
+        if language == "xml":
+            allowed = _expand_xml(content, changed)
+        elif language == "java":
+            allowed = _expand_java(content, changed)
+        else:
+            allowed = _expand_sql(content, changed)
     except Exception:
         allowed = changed
     return LineSelection(frozenset(changed), frozenset(allowed))

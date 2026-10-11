@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
@@ -23,6 +24,15 @@ class TestConfig(unittest.TestCase):
         self.assertFalse(config.dry_run)
         self.assertFalse(config.verbose)
         self.assertEqual(config.paths, ["."])
+        self.assertEqual(config.language_configs, {})
+
+    def test_language_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, ".ir-config.yaml")
+            with open(path, "w", encoding="utf-8") as stream:
+                stream.write("languages:\n  java:\n    generated:\n      mode: check\n")
+            config = load_config(["--config", path])
+            self.assertEqual(config.language_configs["java"]["generated"]["mode"], "check")
 
     def test_cli_overrides(self):
         config = load_config(["--fix", "--verbose", "file1.sql", "file2.sql"])
