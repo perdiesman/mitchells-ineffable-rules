@@ -98,10 +98,28 @@ class OneTopLevelTypeRule(BaseRule):
             child for child in document.root.named_children
             if child.type in {"class_declaration", "interface_declaration", "enum_declaration", "record_declaration", "annotation_type_declaration"}
         ]
-        return [
+        violations = [
             _violation(self, content, node, "Move the additional top-level type to its own file.")
             for node in types[1:]
         ]
+        if types and file_path not in {"<stdin>", ""}:
+            path = Path(file_path)
+            if (
+                path.suffix == ".java"
+                and not path.stem.startswith("test_")
+                and path.stem not in {"package-info", "module-info"}
+            ):
+                name = types[0].child_by_field_name("name")
+                if name is not None and document.text(name) != path.stem:
+                    violations.append(
+                        _violation(
+                            self,
+                            content,
+                            name,
+                            f"Rename the file to {document.text(name)}.java or rename its top-level type.",
+                        )
+                    )
+        return violations
 
 
 class OneVariableDeclarationRule(BaseRule):

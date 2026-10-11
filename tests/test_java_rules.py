@@ -12,6 +12,7 @@ from mir.engine.runner import process_document
 from mir.engine.selection import expand_selection
 from mir.engine.rules_loader import load_rules_for_language
 from mir.rules.java.java_utils import generated_mode, parse_java, protected_java_signature
+from mir.rules.java.advisory_rules import OneTopLevelTypeRule
 
 
 class TestJavaFoundation(unittest.TestCase):
@@ -158,6 +159,12 @@ class TestJavaFoundation(unittest.TestCase):
             combined = "\n".join(snippets).lower()
             for value in forbidden:
                 self.assertNotIn(value, combined, f"{rule.rule_id} contains compatibility-specific example text")
+
+    def test_top_level_type_matches_real_java_filename(self):
+        rule = OneTopLevelTypeRule()
+        source = "class Sample {}\n"
+        self.assertEqual(rule.check(source, "Sample.java", {}), [])
+        self.assertEqual(len(rule.check(source, "Different.java", {})), 1)
 
 
 if __name__ == "__main__":

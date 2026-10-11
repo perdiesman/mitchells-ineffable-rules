@@ -174,7 +174,10 @@ class JavaLineLengthRule(BaseRule):
     description = "Java code should not exceed the configured line length; package, import, and text-block payload lines are exempt."
     category = "general"
     is_fixable = "no"
-    commit_profile = True
+    # Structural wrapping rules run in the commit profile. Until every Java
+    # construct has an automatic wrapper, a report-only width check must not
+    # block commits after the formatter has done all work it safely can.
+    commit_profile = False
     default_config = {"max_length": 120}
     config_options = {
         "max_length": {"default": 120, "description": "Maximum Java code line length."}
