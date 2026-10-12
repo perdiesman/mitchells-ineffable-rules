@@ -2162,6 +2162,61 @@ def post_choose_clause_source_edits(
     return edits
 
 
+def post_dynamic_where_sibling_source_edits(
+    content: str,
+    source_range: tuple[int, int],
+) -> List[tuple[int, int, str]]:
+    """Re-anchor a physical WHERE condition after a dynamic sibling."""
+    start, end = source_range
+    fragment = content[start:end]
+    lines = fragment.splitlines(keepends=True)
+    offsets = []
+    offset = start
+    for line in lines:
+        offsets.append(offset)
+        offset += len(line)
+
+    edits = []
+    close_pattern = re.compile(
+        r"^([ \t]*)</(?:if|when|otherwise)>[ \t]*$",
+        re.IGNORECASE,
+    )
+    for index, raw_line in enumerate(lines):
+        close_match = close_pattern.match(raw_line.rstrip("\r\n"))
+        if close_match is None:
+            continue
+        close_width = len(close_match.group(1))
+        candidate_index = index + 1
+        while candidate_index < len(lines) and not lines[candidate_index].strip():
+            candidate_index += 1
+        if candidate_index >= len(lines):
+            continue
+        candidate = lines[candidate_index].rstrip("\r\n")
+        body = candidate.lstrip(" \t")
+        if not body or body.startswith("<"):
+            continue
+
+        where_indent = None
+        for previous_index in range(index - 1, -1, -1):
+            previous = lines[previous_index].rstrip("\r\n")
+            previous_body = previous.lstrip(" \t")
+            previous_width = len(previous) - len(previous_body)
+            if (
+                previous_width < close_width
+                and re.match(r"^WHERE\b", previous_body, re.IGNORECASE)
+            ):
+                where_indent = previous[:previous_width]
+                break
+        if where_indent is None:
+            continue
+        current_width = len(candidate) - len(body)
+        expected = where_indent + "    "
+        if current_width > len(expected) + 8:
+            line_start = offsets[candidate_index]
+            edits.append((line_start, line_start + current_width, expected))
+    return edits
+
+
 def join_case_source_edits(
     content: str,
     source_range: tuple[int, int],
@@ -2400,6 +2455,22 @@ def dynamic_body_indent_source_edits(
             source_start < range_start < range_end < source_end
         ):
             continue
+        first_line_start = content.find("\n", range_start, range_end)
+        range_is_extreme = False
+        probe = first_line_start
+        while probe != -1 and probe + 1 < range_end:
+            probe_start = probe + 1
+            probe_end = content.find("\n", probe_start, range_end)
+            if probe_end == -1:
+                probe_end = range_end
+            probe_line = content[probe_start:probe_end]
+            if probe_line.strip():
+                probe_width = len(probe_line) - len(probe_line.lstrip(" \t"))
+                range_is_extreme = probe_width > expected_width + 16
+                break
+            if probe_end >= range_end:
+                break
+            probe = probe_end
         cursor = content.find("\n", range_start, range_end)
         while cursor != -1 and cursor + 1 < range_end:
             line_start = cursor + 1
@@ -2415,6 +2486,17 @@ def dynamic_body_indent_source_edits(
                 "UNION", "INTERSECT", "EXCEPT", "UPDATE", "INSERT",
                 "DELETE", "VALUES", "SET", "RETURNING",
             }
+            inside_nested_dynamic = any(
+                nested_start > range_start
+                and nested_end < range_end
+                and nested_start < line_start < nested_end
+                for nested_start, nested_end, _ in dynamic_ranges
+            )
+            excessive_indent = (
+                range_is_extreme
+                and not inside_nested_dynamic
+                and indent_width > expected_width + 16
+            )
             closes_dynamic_inline = bool(
                 range_end <= line_end and re.search(
                     r"</(?:if|foreach|when|otherwise|trim|where|set)>\s*$",
@@ -2424,16 +2506,21 @@ def dynamic_body_indent_source_edits(
             )
             if (
                 body
-                and not body.startswith("<")
                 and (
-                    indent_width < expected_width
+                    excessive_indent
                     or (
-                        closes_dynamic_inline
-                        and indent_width != expected_width
-                    )
-                    or (
-                        indent_width == expected_width
-                        and protects_direct_clause
+                        not body.startswith("<")
+                        and (
+                            indent_width < expected_width
+                            or (
+                                closes_dynamic_inline
+                                and indent_width != expected_width
+                            )
+                            or (
+                                indent_width == expected_width
+                                and protects_direct_clause
+                            )
+                        )
                     )
                 )
             ):
@@ -4514,6 +4601,12 @@ class XmlMybatisSqlRule(BaseRule):
                     content,
                     (el["start_offset"], el["end_offset"]),
                 )
+                post_choose_edits.extend(
+                    post_dynamic_where_sibling_source_edits(
+                        content,
+                        (el["start_offset"], el["end_offset"]),
+                    )
+                )
                 join_case_edits = join_case_source_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
@@ -5562,6 +5655,12 @@ class XmlMybatisSqlRule(BaseRule):
                 post_choose_edits = post_choose_clause_source_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
+                )
+                post_choose_edits.extend(
+                    post_dynamic_where_sibling_source_edits(
+                        content,
+                        (el["start_offset"], el["end_offset"]),
+                    )
                 )
                 join_case_edits = join_case_source_edits(
                     content,

@@ -3871,6 +3871,67 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_rebases_final_dynamic_update_without_semicolon(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <update id="disableItems">\n'
+            '        UPDATE sample_item SET enabled = false;\n'
+            '        UPDATE sample_item item SET enabled = true,\n'
+            '                                updated_at = now()\n'
+            '                            WHERE\n'
+            '                                <if test="roles != null">\n'
+            '                                        EXISTS(\n'
+            '                                            SELECT role_id\n'
+            '                                            FROM sample_role role\n'
+            '                                            WHERE role.item_id = item.item_id\n'
+            '                                        )\n'
+            '                                    OR\n'
+            '                                </if>\n'
+            '                                                    expires_at &gt; now()\n'
+            '                                OR item_name IN\n'
+            '                                    <foreach collection="names" item="name" open="(" close=")" separator=",">\n'
+            '                                        #{name}\n'
+            '                                    </foreach>\n'
+            '    </update>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <update id="disableItems">\n'
+            '        UPDATE sample_item SET enabled = false;\n'
+            '        UPDATE sample_item item\n'
+            '        SET\n'
+            '            enabled = true,\n'
+            '            updated_at = now()\n'
+            '        WHERE\n'
+            '            <if test="roles != null">\n'
+            '                EXISTS(\n'
+            '                    SELECT role_id\n'
+            '                    FROM sample_role role\n'
+            '                    WHERE role.item_id = item.item_id\n'
+            '                )\n'
+            '                OR\n'
+            '            </if>\n'
+            '            expires_at &gt; now()\n'
+            '            OR item_name IN\n'
+            '                <foreach collection="names" item="name" open="(" close=")" separator=",">\n'
+            '                    #{name}\n'
+            '                </foreach>\n'
+            '    </update>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_does_not_merge_optional_range_bounds(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
