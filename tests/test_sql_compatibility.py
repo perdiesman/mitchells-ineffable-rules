@@ -383,6 +383,21 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
         self.assertEqual(rule.check(source, "generic.sql", {}), [])
 
+    def test_plpgsql_of_can_be_a_relation_alias(self):
+        source = "SELECT of.item_id FROM outage_fact of WHERE of.active;"
+        rule = PlpgsqlKeywordCaseRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
+    def test_plpgsql_trigger_update_of_is_uppercased(self):
+        source = "CREATE TRIGGER sample_trigger BEFORE UPDATE of status ON sample_item;"
+        expected = "CREATE TRIGGER sample_trigger BEFORE UPDATE OF status ON sample_item;"
+        rule = PlpgsqlKeywordCaseRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(expected, "generic.sql", {}), [])
+
     def test_full_outer_join_keeps_outer_keyword(self):
         source = "SELECT * FROM first_item FULL OUTER JOIN second_item USING (item_id);"
         rule = RedundantKeywordsRule()

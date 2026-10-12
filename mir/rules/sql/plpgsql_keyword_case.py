@@ -48,6 +48,20 @@ class PlpgsqlKeywordCaseRule(BaseRule):
                     previous_active = t
                     continue
                 upper_val = val.upper()
+                # ``OF`` is also a perfectly valid unquoted relation alias.
+                # PL/pgSQL only needs it cased as part of trigger syntax such
+                # as ``UPDATE OF column_name``; treating every occurrence as
+                # procedural syntax corrupts ordinary queries (for example,
+                # ``FROM outage_fact of`` and ``of.item_id``).
+                if (
+                    upper_val == "OF"
+                    and (
+                        previous_active is None
+                        or previous_active["value"].upper() != "UPDATE"
+                    )
+                ):
+                    previous_active = t
+                    continue
                 if (
                     upper_val in PLPGSQL_MESSAGE_LEVELS
                     and (
