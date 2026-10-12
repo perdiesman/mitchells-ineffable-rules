@@ -2205,6 +2205,39 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+        unresolved = [
+            violation
+            for violation, _, _ in first.violations
+            if violation.rule_id == "IR-unresolved-alias"
+        ]
+        self.assertFalse(unresolved)
+
+    def test_xml_mybatis_validates_reusable_predicate_in_include_host(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="itemFilters">\n'
+            '        item.enabled\n'
+            '        <if test="ownerId != null">AND item.owner_id = #{ownerId}</if>\n'
+            '    </sql>\n'
+            '    <select id="items">\n'
+            '        SELECT item.item_id\n'
+            '        FROM sample_item item\n'
+            '        WHERE <include refid="itemFilters" />\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+
+        result = process_document(config, xml_content, "generic.xml", "xml")
+
+        unresolved = [
+            violation
+            for violation, _, _ in result.violations
+            if violation.rule_id == "IR-unresolved-alias"
+        ]
+        self.assertFalse(unresolved)
+
     def test_xml_mybatis_anchors_on_conflict_after_nested_subquery(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

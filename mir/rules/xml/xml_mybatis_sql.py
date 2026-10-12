@@ -200,6 +200,19 @@ def reusable_select_list_ids(
     return projection_ids
 
 
+def included_sql_fragment_ids(elements: List[dict]) -> set[str]:
+    """Return full and local ids referenced by MyBatis include elements."""
+    fragment_ids = set()
+    for element in elements:
+        if element.get("tag") != "include":
+            continue
+        refid = element.get("attrs", {}).get("refid")
+        if refid:
+            fragment_ids.add(refid)
+            fragment_ids.add(refid.split(".")[-1])
+    return fragment_ids
+
+
 def is_reusable_column_list(
     element: dict, projection_ids: set[str] | None = None
 ) -> bool:
@@ -4223,6 +4236,7 @@ class XmlMybatisSqlRule(BaseRule):
         projection_fragment_ids = reusable_select_list_ids(
             tokens, elements, content
         )
+        included_fragment_ids = included_sql_fragment_ids(elements)
         foreach_ranges = [
             (element["start_offset"], element["end_offset"])
             for element in elements
@@ -4890,6 +4904,14 @@ class XmlMybatisSqlRule(BaseRule):
                     })
 
                 excluded_guest_rule_ids = set()
+                if (
+                    el["tag"] == "sql"
+                    and el["attrs"].get("id") in included_fragment_ids
+                ):
+                    # A reusable fragment may inherit relations from its
+                    # include site. Its aliases are validated in every
+                    # expanded host, where the actual scope is available.
+                    excluded_guest_rule_ids.add("IR-unresolved-alias")
                 # Exact source-mapped WHERE checks above own physical XML
                 # layout. Guest WHERE findings can point through a dynamic tag
                 # or reusable fragment to whitespace that the host fixer must
@@ -5175,6 +5197,7 @@ class XmlMybatisSqlRule(BaseRule):
         projection_fragment_ids = reusable_select_list_ids(
             tokens, elements, content
         )
+        included_fragment_ids = included_sql_fragment_ids(elements)
         foreach_ranges = [
             (element["start_offset"], element["end_offset"])
             for element in elements
@@ -5851,6 +5874,11 @@ class XmlMybatisSqlRule(BaseRule):
                 # same logical newline at both sides of a source-map boundary,
                 # producing doubled blank lines in otherwise static SQL.
                 excluded_guest_rule_ids.add("IR-where-multi")
+                if (
+                    el["tag"] == "sql"
+                    and el["attrs"].get("id") in included_fragment_ids
+                ):
+                    excluded_guest_rule_ids.add("IR-unresolved-alias")
                 if has_dynamic_window_choose(
                     content,
                     (el["start_offset"], el["end_offset"]),
