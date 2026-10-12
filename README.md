@@ -203,6 +203,8 @@ The structural layout rules cover declarations, annotated and ordinary parameter
 
 Changed Java lines passed through `--lines` or `--staged` expand to the enclosing declaration or member before fixes run. String literals, character literals, text blocks, and comments are part of the commit safety signature. Text-block payload indentation is preserved because changing it can change the runtime string value. Generated sources are skipped by default using common generated paths, header markers, and `@Generated`; projects can select `check` or `format` instead:
 
+The commit formatter can therefore leave an over-limit line when shortening it would require splitting a literal token, reflowing comment text, or editing generated code. The normal `IR-line-length` check still reports those lines for deliberate review; it is report-only and excluded from the commit profile so a safe formatting pass does not block the commit on content it is not authorized to rewrite.
+
 ```yaml
 languages:
   java:
@@ -351,6 +353,6 @@ For instructions on building distribution archives, TestPyPI validation, and pub
 
 *This package has been developed with **Antigravity** and **OpenAI Codex**.*
 
-*Total Cumulative Development Time: ~62.5 hours*
+*Total Cumulative Development Time: ~63.0 hours*
 
-*Last Developer Session: 2026-10-11T08:22:22Z*
+*Last Developer Session: 2026-10-12T12:37:00Z*
