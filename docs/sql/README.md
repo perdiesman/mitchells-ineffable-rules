@@ -55,7 +55,7 @@ This document describes all SQL linting rules supported by Mitchell's Ineffable 
 | [`IR-expression-split`](rules/queries/IR-expression-split.md) | Long lines should split on function/expression parentheses, and optionally on additive/logical operators if still too long. | Yes | [View Details](rules/queries/IR-expression-split.md) |
 | [`IR-from-multi`](rules/queries/IR-from-multi.md) | Multi-table or JOINed FROM entries should be formatted with one entry per line, indented at 4 spaces. | Yes | [View Details](rules/queries/IR-from-multi.md) |
 | [`IR-from-paren-layout`](rules/queries/IR-from-paren-layout.md) | Parenthesized column alias lists in FROM/JOIN clauses should format entries one per line if the line exceeds max length. | Yes | [View Details](rules/queries/IR-from-paren-layout.md) |
-| [`IR-from-single`](rules/queries/IR-from-single.md) | Single FROM entry should be on the same line as the FROM keyword. | Yes | [View Details](rules/queries/IR-from-single.md) |
+| [`IR-from-single`](rules/queries/IR-from-single.md) | Single FROM entries should be on the same line as FROM; DELETE, FROM, and its target should share one line. | Yes | [View Details](rules/queries/IR-from-single.md) |
 | [`IR-having-without-group-by`](rules/queries/IR-having-without-group-by.md) | Detect HAVING clauses used without a corresponding GROUP BY clause. | No | [View Details](rules/queries/IR-having-without-group-by.md) |
 | [`IR-in-exists`](rules/queries/IR-in-exists.md) | EXISTS is preferred over IN with a subquery. | No | [View Details](rules/queries/IR-in-exists.md) |
 | [`IR-insert-columns`](rules/queries/IR-insert-columns.md) | Ensure INSERT statements explicitly list target columns. | No | [View Details](rules/queries/IR-insert-columns.md) |

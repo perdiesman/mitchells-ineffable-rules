@@ -536,27 +536,6 @@ class XmlIndentRule(BaseRule):
                         })
                     cursor = line_end + 1
         for element in elements:
-            if element["tag"] != "delete":
-                continue
-            body_start = tokens[element["open_end_idx"]]["end"]
-            body_end = tokens[element["end_idx"]]["start"]
-            body = content[body_start:body_end]
-            delete_from = re.search(
-                r"(?mi)^([ \t]*)DELETE([ \t]+)FROM\b", body
-            )
-            if delete_from is None:
-                continue
-            indent = delete_from.group(1)
-            gap_start = body_start + delete_from.start(2)
-            gap_end = body_start + delete_from.end(2)
-            violations.append({
-                "line": content.count("\n", 0, gap_start) + 1,
-                "start_offset": gap_start,
-                "end_offset": gap_end,
-                "replacement": "\n" + indent,
-                "message": "MyBatis delete statements should place FROM on the next line.",
-            })
-        for element in elements:
             if element["tag"] not in {"select", "sql"}:
                 continue
             body_start = tokens[element["open_end_idx"]]["end"]

@@ -999,8 +999,7 @@ class TestRunnerIntegration(unittest.TestCase):
         expected = (
             '<mapper namespace="GenericMapper">\n'
             '    <delete id="remove">\n'
-            '        DELETE\n'
-            '        FROM sample_item\n'
+            '        DELETE FROM sample_item\n'
             '    </delete>\n'
             '</mapper>'
         )
@@ -3832,7 +3831,7 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
-    def test_xml_mybatis_delete_statement_places_from_on_next_line(self):
+    def test_xml_mybatis_delete_statement_keeps_delete_from_together(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
             '    <delete id="cleanup">\n'
@@ -3841,7 +3840,7 @@ class TestRunnerIntegration(unittest.TestCase):
             '    </delete>\n'
             '</mapper>'
         )
-        expected = xml_content.replace("DELETE FROM", "DELETE\n        FROM")
+        expected = xml_content
         config = Config()
         config.profile = "commit"
         config.fix = True

@@ -6,7 +6,10 @@ class FromSingleRule(BaseRule):
     commit_profile = True
     embedded_safe = True
     rule_id = "IR-from-single"
-    description = "Single FROM entry should be on the same line as the FROM keyword."
+    description = (
+        "Single FROM entries should be on the same line as FROM; DELETE, FROM, "
+        "and its target should share one line."
+    )
     category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
@@ -18,6 +21,10 @@ class FromSingleRule(BaseRule):
         {
             "violating": "SELECT id\nFROM\n    users;",
             "correct": "SELECT id\nFROM users;"
+        },
+        {
+            "violating": "DELETE\nFROM users\nWHERE user_id = :user_id;",
+            "correct": "DELETE FROM users\nWHERE user_id = :user_id;",
         }
     ]
     additional_validations = [
@@ -36,20 +43,24 @@ class FromSingleRule(BaseRule):
         for i, tok in enumerate(tokens):
             if tok["type"] == "KEYWORD" and tok["value"].upper() == "FROM":
                 outer_depth = depths[i]
-                previous_active = next(
+                previous_active_index = next(
                     (
-                        tokens[index]
+                        index
                         for index in range(i - 1, -1, -1)
                         if tokens[index]["type"] not in ("WHITESPACE", "COMMENT")
                     ),
                     None,
                 )
-                if (
+                previous_active = (
+                    tokens[previous_active_index]
+                    if previous_active_index is not None
+                    else None
+                )
+                is_delete_from = bool(
                     previous_active
                     and previous_active["type"] == "KEYWORD"
                     and previous_active["value"].upper() == "DELETE"
-                ):
-                    continue
+                )
                 
                 # Find end of FROM clause
                 clause_end = n
@@ -96,7 +107,29 @@ class FromSingleRule(BaseRule):
                         
                 if first_table_tok and not has_join and not has_comma and not has_subquery:
                     # Single table entry! Verify line numbers
-                    if first_table_tok["line"] != tok["line"]:
+                    if is_delete_from:
+                        intervening_tokens = tokens[
+                            previous_active_index + 1:
+                            i + 1 + len(whitespace_before_table)
+                        ]
+                        current_gap = content[
+                            previous_active["end"]:first_table_tok["start"]
+                        ]
+                        if (
+                            not any(
+                                item["type"] == "COMMENT"
+                                for item in intervening_tokens
+                            )
+                            and current_gap != " FROM "
+                        ):
+                            violations.append({
+                                "from_tok": tok,
+                                "table_tok": first_table_tok,
+                                "ws_start": previous_active["end"],
+                                "ws_end": first_table_tok["start"],
+                                "replacement": " FROM ",
+                            })
+                    elif first_table_tok["line"] != tok["line"]:
                         violations.append({
                             "from_tok": tok,
                             "table_tok": first_table_tok,

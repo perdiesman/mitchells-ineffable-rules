@@ -5,6 +5,7 @@ from mir.rules.sql.union_layout import UnionLayoutRule
 from mir.rules.sql.alias_as import AliasAsRule
 from mir.rules.sql.as_spacing import ASSpacingRule
 from mir.rules.sql.function_case import FunctionCaseRule
+from mir.rules.sql.from_single import FromSingleRule
 from mir.rules.sql.from_multi import FromMultiRule
 from mir.rules.sql.expression_split import ExpressionSplitRule
 from mir.rules.sql.clause_alignment import ClauseAlignmentRule
@@ -39,6 +40,24 @@ from mir.rules.sql.window_layout import WindowLayoutRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_delete_target_stays_with_delete_from(self):
+        source = "DELETE\nFROM\n    sample_item\nWHERE item_id = :item_id;"
+        expected = "DELETE FROM sample_item\nWHERE item_id = :item_id;"
+        rule = FromSingleRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+
+    def test_delete_comment_prevents_unsafe_compaction(self):
+        source = "DELETE -- retain this explanation\nFROM sample_item;"
+        rule = FromSingleRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
     def test_insert_select_aligns_with_the_insert_statement(self):
         source = (
             "    INSERT INTO sample_item_history (item_id, owner_id)\n"
