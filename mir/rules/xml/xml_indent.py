@@ -704,16 +704,33 @@ class XmlIndentRule(BaseRule):
             line_start = content.rfind("\n", 0, token["start"]) + 1
             prefix = content[line_start:token["start"]]
             sql_prefix = prefix.rstrip(" \t")
-            if not sql_prefix or sql_prefix.split()[-1].upper() != "SELECT":
+            same_line_select = bool(
+                sql_prefix
+                and sql_prefix.split()[-1].upper() == "SELECT"
+            )
+            previous_line_select = False
+            select_indent = ""
+            if same_line_select:
+                select_indent = prefix[
+                    : len(prefix) - len(prefix.lstrip(" \t"))
+                ]
+            elif not prefix.strip() and token["line"] > 1:
+                previous_line = lines[token["line"] - 2]
+                previous_line_select = previous_line.strip().upper() == "SELECT"
+                if previous_line_select:
+                    select_indent = previous_line[
+                        : len(previous_line) - len(previous_line.lstrip(" \t"))
+                    ]
+            if not same_line_select and not previous_line_select:
                 continue
-            select_indent = prefix[: len(prefix) - len(prefix.lstrip(" \t"))]
-            violations.append({
-                "line": token["line"],
-                "start_offset": line_start + len(sql_prefix),
-                "end_offset": token["start"],
-                "replacement": "\n" + select_indent + " " * indent_size,
-                "message": "MyBatis SELECT includes should use column-list indentation.",
-            })
+            if same_line_select:
+                violations.append({
+                    "line": token["line"],
+                    "start_offset": line_start + len(sql_prefix),
+                    "end_offset": token["start"],
+                    "replacement": "\n" + select_indent + " " * indent_size,
+                    "message": "MyBatis SELECT includes should use column-list indentation.",
+                })
             tag_end = next(
                 (
                     item
@@ -725,26 +742,46 @@ class XmlIndentRule(BaseRule):
             if tag_end is None:
                 continue
             next_line_start = content.find("\n", tag_end["end"])
-            if next_line_start == -1:
-                continue
-            next_line_start += 1
-            next_line_end = content.find("\n", next_line_start)
-            if next_line_end == -1:
-                next_line_end = len(content)
-            next_line = content[next_line_start:next_line_end]
-            next_text = next_line.lstrip(" \t")
-            if not next_text or next_text.split(None, 1)[0].upper() == "FROM":
-                continue
             expected_indent = select_indent + " " * indent_size
-            actual_indent = next_line[: len(next_line) - len(next_text)]
-            if actual_indent != expected_indent:
-                violations.append({
-                    "line": token["line"] + 1,
-                    "start_offset": next_line_start,
-                    "end_offset": next_line_start + len(actual_indent),
-                    "replacement": expected_indent,
-                    "message": "Columns after a MyBatis SELECT include should stay aligned.",
-                })
+            while next_line_start != -1:
+                next_line_start += 1
+                next_line_end = content.find("\n", next_line_start)
+                if next_line_end == -1:
+                    next_line_end = len(content)
+                next_line = content[next_line_start:next_line_end]
+                next_text = next_line.lstrip(" \t")
+                if next_text:
+                    first_words = " ".join(next_text.upper().split()[:2])
+                    is_projection_include = bool(re.match(
+                        r"^<include\b[^>]*/>\s*,?\s*$",
+                        next_text,
+                        re.IGNORECASE,
+                    ))
+                    if next_text.startswith("<") and not is_projection_include:
+                        break
+                    if re.match(
+                        r"^(?:FROM|INTO|WHERE|GROUP BY|ORDER BY|HAVING|"
+                        r"LIMIT|OFFSET|UNION|INTERSECT|EXCEPT|RETURNING)\b",
+                        first_words,
+                    ):
+                        break
+                    actual_indent = next_line[
+                        : len(next_line) - len(next_text)
+                    ]
+                    if (
+                        len(actual_indent) <= len(select_indent)
+                        and not is_projection_include
+                    ):
+                        violations.append({
+                            "line": content.count("\n", 0, next_line_start) + 1,
+                            "start_offset": next_line_start,
+                            "end_offset": next_line_start + len(actual_indent),
+                            "replacement": expected_indent,
+                            "message": "Columns after a MyBatis SELECT include should stay aligned.",
+                        })
+                if next_line_end >= len(content):
+                    break
+                next_line_start = next_line_end
         for token in tokens:
             if (
                 token["type"] != "TAG_OPEN_START"

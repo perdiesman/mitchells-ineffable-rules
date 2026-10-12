@@ -3446,6 +3446,38 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_physical_columns_align_after_select_include(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            <include refid="Base_Column_List" />,\n'
+            '        sample_item.description,\n'
+            '            <include refid="Audit_Column_List" />,\n'
+            '\n'
+            '        sample_item.status\n'
+            '        FROM sample_item;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '        sample_item.description,',
+            '            sample_item.description,',
+        ).replace(
+            '        sample_item.status',
+            '            sample_item.status',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_long_join_predicate_wraps_after_operator(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
