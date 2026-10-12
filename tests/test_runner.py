@@ -3852,6 +3852,33 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_delete_inside_foreach_keeps_delete_from_together(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <delete id="removeItems">\n'
+            '        <foreach collection="items" item="item">\n'
+            '            DELETE\n'
+            '            FROM sample_item\n'
+            '            WHERE item_id = #{item.id};\n'
+            '        </foreach>\n'
+            '    </delete>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            "            DELETE\n            FROM sample_item",
+            "            DELETE FROM sample_item",
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_multicondition_where_accounts_for_from_line(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

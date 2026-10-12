@@ -2887,6 +2887,57 @@ def dynamic_null_coalesce_source_edits(
     return edits, rule.fix(sql_text, "embedded.sql", {})
 
 
+def delete_from_source_edits(
+    sql_text: str,
+    mapping: List[int],
+    content: str,
+    source_range: tuple[int, int],
+    tag_ranges: List[tuple[int, int]],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Map ``DELETE FROM target`` compaction inside dynamic XML blocks."""
+    from mir.rules.sql.from_single import FromSingleRule
+
+    disabled = rule_config.get("_rules_to_disable", set())
+    enabled = rule_config.get("_rules_to_enable", set())
+    if "IR-from-single" in disabled or (
+        rule_config.get("_disable_all", False)
+        and "IR-from-single" not in enabled
+        and "sql:IR-from-single" not in enabled
+    ):
+        return []
+
+    source_start, source_end = source_range
+    edits = []
+    for finding in FromSingleRule()._find_violations(sql_text, rule_config):
+        if finding["replacement"] != " FROM ":
+            continue
+        guest_start = finding["ws_start"]
+        guest_end = finding["ws_end"]
+        if not (0 <= guest_start < guest_end <= len(mapping)):
+            continue
+        if any(
+            mapping[index] - mapping[index - 1] != 1
+            for index in range(guest_start + 1, guest_end)
+        ):
+            continue
+        edit_start = mapping[guest_start]
+        edit_end = mapping[guest_end - 1] + 1
+        if not (
+            source_start <= edit_start < edit_end <= source_end
+            and content[edit_start:edit_end]
+            == sql_text[guest_start:guest_end]
+        ):
+            continue
+        if any(
+            max(edit_start, tag_start) < min(edit_end, tag_end)
+            for tag_start, tag_end in tag_ranges
+        ):
+            continue
+        edits.append((edit_start, edit_end, finding["replacement"]))
+    return list(dict.fromkeys(edits))
+
+
 def dynamic_paren_single_source_edits(
     sql_text: str,
     mapping: List[int],
@@ -5556,6 +5607,14 @@ class XmlMybatisSqlRule(BaseRule):
                     (el["start_offset"], el["end_offset"]),
                     inner_config,
                 )
+                delete_from_edits = delete_from_source_edits(
+                    sql_text,
+                    mapping,
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    tag_ranges,
+                    inner_config,
+                )
                 layout_edits = (
                     post_choose_edits
                     + join_case_edits
@@ -5568,6 +5627,7 @@ class XmlMybatisSqlRule(BaseRule):
                     + keyword_case_edits
                     + function_case_edits
                     + datatype_case_edits
+                    + delete_from_edits
                     + layout_edits
                 )
                 join_config = dict(inner_config)
@@ -5849,6 +5909,7 @@ class XmlMybatisSqlRule(BaseRule):
                     + long_case_edits
                     + dynamic_case_edits
                     + expression_compaction_edits
+                    + delete_from_edits
                 ] + [
                     (start, end)
                     for start, end, replacement in (
@@ -5896,6 +5957,7 @@ class XmlMybatisSqlRule(BaseRule):
                         + dynamic_case_edits
                         + expression_compaction_edits
                         + include_relation_edits
+                        + delete_from_edits
                     )
                 ) | set(
                     edit
@@ -5929,6 +5991,7 @@ class XmlMybatisSqlRule(BaseRule):
                     + long_case_edits
                     + dynamic_case_edits
                     + expression_compaction_edits
+                    + delete_from_edits
                 )
                 layout_edits = [
                     (start, end, replacement)
@@ -5989,6 +6052,9 @@ class XmlMybatisSqlRule(BaseRule):
                 if datatype_case_edits:
                     excluded_guest_rule_ids.add("IR-datatype-case")
                     applied_rules.add("IR-datatype-case")
+                if delete_from_edits:
+                    excluded_guest_rule_ids.add("IR-from-single")
+                    applied_rules.add("IR-from-single")
                 if owns_runtime_where(el):
                     # MyBatis <where> owns prefix insertion/removal across
                     # mutually exclusive dynamic branches. Concatenating all
@@ -6107,6 +6173,7 @@ class XmlMybatisSqlRule(BaseRule):
                     keyword_case_edits
                     + function_case_edits
                     + datatype_case_edits
+                    + delete_from_edits
                 ) | {
                     edit
                     for edit in layout_edits
