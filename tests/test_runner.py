@@ -2478,6 +2478,54 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(second.violations)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_indents_nested_case_in_reusable_column_list(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="Basic_Column_List">\n'
+            '        CASE\n'
+            '            WHEN preference_group_id = 1 THEN group_name\n'
+            '            ELSE\n'
+            '        CASE\n'
+            '            WHEN preference_group_id = 2 THEN option_name\n'
+            '            ELSE\n'
+            '        CASE\n'
+            '            WHEN preference_group_id = 3\n'
+            "                THEN style_name || ':' || style_variant\n"
+            '            ELSE null\n'
+            '        END\n'
+            '        END\n'
+            '        END AS display_name\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="Basic_Column_List">\n'
+            '        CASE\n'
+            '            WHEN preference_group_id = 1 THEN group_name\n'
+            '            ELSE CASE\n'
+            '                WHEN preference_group_id = 2 THEN option_name\n'
+            '                ELSE CASE\n'
+            "                    WHEN preference_group_id = 3 THEN style_name || ':' || style_variant\n"
+            '                    ELSE null\n'
+            '                END\n'
+            '            END\n'
+            '        END AS display_name\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_trim_owned_where_is_clean(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

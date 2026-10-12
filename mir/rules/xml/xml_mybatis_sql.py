@@ -3609,6 +3609,7 @@ def physical_case_indent_source_edits(
     line_start = content.rfind("\n", 0, start) + 1
     edits = []
     case_indents: List[str] = []
+    pending_else_line_end = None
     while line_start < end:
         line_end = content.find("\n", line_start, end)
         if line_end == -1:
@@ -3619,8 +3620,23 @@ def physical_case_indent_source_edits(
         upper = body.upper()
         if "<" in body:
             case_indents.clear()
+            pending_else_line_end = None
         elif upper == "CASE":
-            case_indents.append(indent)
+            if (
+                case_indents
+                and pending_else_line_end is not None
+                and pending_else_line_end + 1 == line_start
+            ):
+                nested_base = case_indents[-1] + "    "
+                edits.append((
+                    pending_else_line_end,
+                    line_start + len(indent),
+                    " ",
+                ))
+                case_indents.append(nested_base)
+            else:
+                case_indents.append(indent)
+            pending_else_line_end = None
         elif case_indents:
             base = case_indents[-1]
             expected = None
@@ -3649,6 +3665,16 @@ def physical_case_indent_source_edits(
             elif upper.startswith("ELSE"):
                 expected = base + "    "
                 tokens = tokenize_sql(body)
+                case_count = sum(
+                    token["type"] == "KEYWORD"
+                    and token["value"].upper() == "CASE"
+                    for token in tokens
+                )
+                end_count = sum(
+                    token["type"] == "KEYWORD"
+                    and token["value"].upper() == "END"
+                    for token in tokens
+                )
                 end_index = next(
                     (
                         index
@@ -3675,11 +3701,22 @@ def physical_case_indent_source_edits(
                         "\n" + base,
                     ))
                     case_indents.pop()
+                elif case_count > end_count:
+                    # A nested CASE belongs to the ELSE branch. Retain that
+                    # relationship on later passes after a standalone
+                    # ``ELSE``/``CASE`` pair has been compacted.
+                    case_indents.append(expected)
+                pending_else_line_end = line_end if upper == "ELSE" else None
             elif upper.startswith("END"):
                 expected = base
                 case_indents.pop()
+                pending_else_line_end = None
+            elif body:
+                pending_else_line_end = None
             if expected is not None and indent != expected:
                 edits.append((line_start, line_start + len(indent), expected))
+        elif body:
+            pending_else_line_end = None
         if line_end >= end:
             break
         line_start = line_end + 1

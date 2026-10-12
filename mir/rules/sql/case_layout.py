@@ -19,7 +19,8 @@ class CaseLayoutRule(BaseRule):
     description = (
         "CASE statements should be formatted with WHEN/THEN on separate lines "
         "unless the block is simple (exactly one WHEN condition and an optional ELSE clause) "
-        "and fits on a single line within length constraints."
+        "and fits on a single line within length constraints. Nested CASE results stay "
+        "attached to ELSE and indent as child blocks."
     )
     category = "queries"
     is_fixable = "yes"
@@ -39,6 +40,15 @@ class CaseLayoutRule(BaseRule):
         "SELECT CASE WHEN x = 1 THEN 'a' ELSE 'b' END FROM users;",
         "SELECT \n    CASE\n        WHEN x = 1 THEN 'a'\n        WHEN x = 2 THEN 'b'\n        ELSE 'c'\n    END;",
         "SELECT CASE WHEN x IS NULL THEN NULL ELSE CASE WHEN y = 1 THEN true ELSE false END END FROM users;",
+        (
+            "SELECT CASE\n"
+            "    WHEN group_id = 1 THEN group_name\n"
+            "    ELSE CASE\n"
+            "        WHEN group_id = 2 THEN option_name\n"
+            "        ELSE CASE WHEN group_id = 3 THEN style_name ELSE null END\n"
+            "    END\n"
+            "END AS display_name FROM sample_item;"
+        ),
     ]
 
     def _find_case_blocks(self, tokens: List[dict]) -> List[dict]:
@@ -289,6 +299,7 @@ class CaseLayoutRule(BaseRule):
                     break
                     
             prefix_body = line_prefix.strip()
+            follows_else_branch = prefix_body.upper() == "ELSE"
             is_additive_continuation = prefix_body in {"+", "-", "*", "/", "||"}
             follows_inline_operator = bool(
                 re.search(r"(?:\+|-|\*|/|\|\|)\s*$", prefix_body)
@@ -306,7 +317,9 @@ class CaseLayoutRule(BaseRule):
                     - len(delimiter_prefix.lstrip(" \t"))
                 ]
                 is_inline = True
-            if is_inline and not follows_inline_operator:
+            if follows_else_branch:
+                case_indent = select_indent
+            elif is_inline and not follows_inline_operator:
                 case_indent = select_indent + "    "
             else:
                 case_indent = select_indent
@@ -330,7 +343,11 @@ class CaseLayoutRule(BaseRule):
             needs_fix = False
             rebuilt_parts = []
             
-            if is_inline and not follows_inline_operator:
+            if (
+                is_inline
+                and not follows_inline_operator
+                and not follows_else_branch
+            ):
                 rebuilt_parts.append("\n" + case_indent + "CASE")
                 needs_fix = True
             else:
