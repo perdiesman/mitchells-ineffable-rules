@@ -141,6 +141,65 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
         self.assertFalse(rule.check(source, "generic.sql", {}))
 
+    def test_multiline_function_layout_formats_row_constructors(self):
+        source = (
+            "WHERE\n"
+            "    (item_id, owner_id,\n"
+            "  coalesce(item_version, 0)) IS DISTINCT FROM (source_id,\n"
+            " source_owner_id, coalesce(source_version, 0))"
+        )
+        expected = (
+            "WHERE\n"
+            "    (\n"
+            "        item_id,\n"
+            "        owner_id,\n"
+            "        coalesce(item_version, 0)\n"
+            "    ) IS DISTINCT FROM (\n"
+            "        source_id,\n"
+            "        source_owner_id,\n"
+            "        coalesce(source_version, 0)\n"
+            "    )"
+        )
+        rule = MultilineFunctionLayoutRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertFalse(rule.check(fixed, "generic.sql", {}))
+
+    def test_parenthesized_conditions_format_nested_where_arms(self):
+        from mir.rules.sql.paren_multi import ParenMultiRule
+
+        source = (
+            "SELECT item_id\n"
+            "FROM sample_item\n"
+            "WHERE scope_id = :scope_id\n"
+            "    AND (\n"
+            "        (extraordinarily_long_current_item_classification = 'CURRENT_ITEM_CLASSIFICATION' "
+            "AND extraordinarily_long_archive_item_classification = 'ARCHIVED_ITEM_CLASSIFICATION')\n"
+            "        OR fallback_enabled\n"
+            "    )"
+        )
+        expected = (
+            "SELECT item_id\n"
+            "FROM sample_item\n"
+            "WHERE scope_id = :scope_id\n"
+            "    AND (\n"
+            "        (\n"
+            "            extraordinarily_long_current_item_classification = 'CURRENT_ITEM_CLASSIFICATION'\n"
+            "            AND extraordinarily_long_archive_item_classification = 'ARCHIVED_ITEM_CLASSIFICATION'\n"
+            "        )\n"
+            "        OR fallback_enabled\n"
+            "    )"
+        )
+        rule = ParenMultiRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+
     def test_line_length_wraps_create_table_constraint_details(self):
         source = (
             "CREATE TABLE sample_group (\n"

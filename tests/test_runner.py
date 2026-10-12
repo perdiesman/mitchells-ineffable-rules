@@ -2170,6 +2170,84 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_indent_infers_projection_fragment_from_include_use(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="itemFields">\n'
+            '        item.item_id, item.owner_id, item.item_name, item.updated_at,\n'
+            '        (\n'
+            '            SELECT count(*)\n'
+            '            FROM sample_account acct\n'
+            '            WHERE acct.item_id = item.item_id\n'
+            '        ) AS owner_count\n'
+            '    </sql>\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            <include refid="itemFields" />\n'
+            '        FROM sample_item item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '        item.item_id, item.owner_id, item.item_name, item.updated_at,',
+            '        item.item_id,\n'
+            '        item.owner_id,\n'
+            '        item.item_name,\n'
+            '        item.updated_at,',
+        )
+        config = Config()
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_anchors_on_conflict_after_nested_subquery(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="saveMissingItems">\n'
+            '        INSERT INTO sample_item (item_id)\n'
+            '            SELECT source.item_id\n'
+            '            FROM sample_source source\n'
+            '            WHERE NOT EXISTS (\n'
+            '                SELECT 1\n'
+            '                FROM sample_item item\n'
+            '                WHERE item.item_id = source.item_id\n'
+            '            )\n'
+            '                    ON CONFLICT (item_id) DO NOTHING\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="saveMissingItems">\n'
+            '        INSERT INTO sample_item (item_id)\n'
+            '            SELECT source.item_id\n'
+            '            FROM sample_source source\n'
+            '            WHERE\n'
+            '                NOT EXISTS (\n'
+            '                    SELECT 1\n'
+            '                    FROM sample_item item\n'
+            '                    WHERE item.item_id = source.item_id\n'
+            '                )\n'
+            '        ON CONFLICT (item_id) DO NOTHING\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
     def test_xml_mybatis_indents_static_where_after_subquery_include(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

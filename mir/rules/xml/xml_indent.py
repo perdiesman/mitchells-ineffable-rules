@@ -250,8 +250,10 @@ class XmlIndentRule(BaseRule):
     commit_profile = True
     rule_id = "IR-xml-indent"
     description = (
-        "Enforce correct tag nesting indentation in XML files and keep a SQL "
-        "statement terminator attached to its preceding foreach closing tag."
+        "Enforce correct tag nesting indentation in XML files, format reusable "
+        "MyBatis projection fragments according to their SELECT include sites, "
+        "and keep a SQL statement terminator attached to its preceding foreach "
+        "closing tag."
     )
     category = "general"
     is_fixable = "yes"
@@ -291,6 +293,10 @@ class XmlIndentRule(BaseRule):
         from mir.rules.xml.xml_mybatis_sql import parse_xml_elements, get_all_elements_recursively
 
         elements = get_all_elements_recursively(parse_xml_elements(tokens))
+        from mir.rules.xml.xml_mybatis_sql import reusable_select_list_ids
+        projection_fragment_ids = reusable_select_list_ids(
+            tokens, elements, content
+        )
         query_ranges = [
             (el["start_offset"], el["end_offset"])
             for el in elements
@@ -349,8 +355,11 @@ class XmlIndentRule(BaseRule):
         for element in elements:
             if element["tag"] != "sql":
                 continue
-            fragment_id = element.get("attrs", {}).get("id", "").lower()
-            if "column" not in fragment_id or "list" not in fragment_id:
+            fragment_id = element.get("attrs", {}).get("id", "")
+            if fragment_id not in projection_fragment_ids and not (
+                "column" in fragment_id.lower()
+                and "list" in fragment_id.lower()
+            ):
                 continue
             body_start = tokens[element["open_end_idx"]]["end"]
             body_end = tokens[element["end_idx"] - 1]["start"]
@@ -369,7 +378,14 @@ class XmlIndentRule(BaseRule):
                     parts.append(body_text[part_start:sql_token["start"]])
                     part_start = sql_token["end"]
             parts.append(body_text[part_start:])
-            normalized_parts = [" ".join(part.split()) for part in parts]
+            normalized_parts = [
+                (
+                    part.strip()
+                    if "\n" in part or "\r" in part
+                    else " ".join(part.split())
+                )
+                for part in parts
+            ]
             if len(normalized_parts) < 2 or any(not part for part in normalized_parts):
                 continue
             tag_line_start = content.rfind("\n", 0, element["start_offset"]) + 1

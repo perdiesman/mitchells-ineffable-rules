@@ -132,13 +132,82 @@ def owns_runtime_where(element: dict) -> bool:
     return False
 
 
-def is_reusable_column_list(element: dict) -> bool:
-    """Return whether a SQL fragment defines columns without a SELECT owner."""
-    return (
-        element.get("tag") == "sql"
+def reusable_select_list_ids(
+    tokens: List[dict], elements: List[dict], content: str
+) -> set[str]:
+    """Infer reusable projection fragments from their include sites.
+
+    Fragment names are conventions, not syntax. A fragment included after a
+    SELECT and before its matching FROM is a projection list regardless of its
+    id. The fragment remains formatted at its own local XML indentation.
+    """
+    from mir.rules.sql.sql_utils import get_token_depths, tokenize_sql
+
+    projection_ids = {
+        element.get("attrs", {}).get("id", "")
+        for element in elements
+        if element.get("tag") == "sql"
         and element.get("attrs", {}).get("id", "").lower().endswith(
             "column_list"
         )
+    }
+    target_tags = {"select", "insert", "update", "delete", "sql"}
+    for host in elements:
+        if host.get("tag") not in target_tags:
+            continue
+        body_start = tokens[host["open_end_idx"]]["end"]
+        for include in get_all_elements_recursively(host.get("children", [])):
+            if include.get("tag") != "include":
+                continue
+            refid = include.get("attrs", {}).get("refid")
+            if not refid:
+                continue
+            prefix = content[body_start:include["start_offset"]]
+            prefix = re.sub(r"<!--.*?-->", " ", prefix, flags=re.DOTALL)
+            prefix = re.sub(r"<[^>]+>", " ", prefix)
+            sql_tokens = tokenize_sql(prefix)
+            depths = get_token_depths(sql_tokens)
+            select_candidates = [
+                index
+                for index, token in enumerate(sql_tokens)
+                if token["type"] == "KEYWORD"
+                and token["value"].upper() == "SELECT"
+            ]
+            if not select_candidates:
+                continue
+            select_index = select_candidates[-1]
+            select_depth = depths[select_index]
+            owns_projection = True
+            for index in range(select_index + 1, len(sql_tokens)):
+                token = sql_tokens[index]
+                if depths[index] != select_depth or token["type"] != "KEYWORD":
+                    continue
+                if token["value"].upper() == "FROM":
+                    previous_words = [
+                        sql_tokens[candidate]["value"].upper()
+                        for candidate in range(max(select_index, index - 5), index)
+                        if sql_tokens[candidate]["type"]
+                        not in {"WHITESPACE", "COMMENT"}
+                    ]
+                    if previous_words[-2:] != ["IS", "DISTINCT"] and (
+                        previous_words[-3:] != ["IS", "NOT", "DISTINCT"]
+                    ):
+                        owns_projection = False
+                        break
+            if owns_projection:
+                projection_ids.add(refid)
+                projection_ids.add(refid.split(".")[-1])
+    return projection_ids
+
+
+def is_reusable_column_list(
+    element: dict, projection_ids: set[str] | None = None
+) -> bool:
+    """Return whether a SQL fragment defines columns without a SELECT owner."""
+    fragment_id = element.get("attrs", {}).get("id", "")
+    return element.get("tag") == "sql" and (
+        fragment_id.lower().endswith("column_list")
+        or fragment_id in (projection_ids or set())
     )
 
 
@@ -1033,7 +1102,7 @@ def top_level_clause_source_edits(
     clause_keywords = {
         "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "HAVING", "LIMIT",
         "OFFSET", "UNION", "INTERSECT", "EXCEPT", "UPDATE", "INSERT",
-        "DELETE", "VALUES", "SET", "RETURNING", "WITH",
+        "DELETE", "VALUES", "SET", "RETURNING", "WITH", "ON",
     }
     statement_depth = next(
         (
@@ -1050,10 +1119,24 @@ def top_level_clause_source_edits(
     source_start, source_end = source_range
     edits = []
     for index, token in enumerate(tokens):
+        word = token["value"].upper()
+        is_conflict_clause = False
+        if word == "ON":
+            next_index = index + 1
+            while next_index < len(tokens) and tokens[next_index]["type"] in {
+                "WHITESPACE", "COMMENT"
+            }:
+                next_index += 1
+            is_conflict_clause = bool(
+                next_index < len(tokens)
+                and tokens[next_index]["type"] == "KEYWORD"
+                and tokens[next_index]["value"].upper() == "CONFLICT"
+            )
         if (
             depths[index] != statement_depth
             or token["type"] != "KEYWORD"
-            or token["value"].upper() not in clause_keywords
+            or word not in clause_keywords
+            or (word == "ON" and not is_conflict_clause)
             or not (0 <= token["start"] < len(mapping))
         ):
             continue
@@ -1070,7 +1153,9 @@ def top_level_clause_source_edits(
             continue
         line_start = content.rfind("\n", 0, source_offset) + 1
         prefix = content[line_start:source_offset]
-        if prefix.strip() or len(prefix) >= len(base_indent):
+        if prefix.strip() or prefix == base_indent or (
+            word != "ON" and len(prefix) >= len(base_indent)
+        ):
             continue
         edits.append((line_start, source_offset, base_indent))
     return edits
@@ -4135,6 +4220,9 @@ class XmlMybatisSqlRule(BaseRule):
                     in_tag = False
         root_elements = parse_xml_elements(tokens)
         elements = get_all_elements_recursively(root_elements)
+        projection_fragment_ids = reusable_select_list_ids(
+            tokens, elements, content
+        )
         foreach_ranges = [
             (element["start_offset"], element["end_offset"])
             for element in elements
@@ -4207,7 +4295,7 @@ class XmlMybatisSqlRule(BaseRule):
 
                 layout_edits = (
                     []
-                    if is_reusable_column_list(el)
+                    if is_reusable_column_list(el, projection_fragment_ids)
                     else dynamic_column_layout_edits(
                         sql_text,
                         mapping,
@@ -5084,6 +5172,9 @@ class XmlMybatisSqlRule(BaseRule):
 
         root_elements = parse_xml_elements(tokens)
         elements = get_all_elements_recursively(root_elements)
+        projection_fragment_ids = reusable_select_list_ids(
+            tokens, elements, content
+        )
         foreach_ranges = [
             (element["start_offset"], element["end_offset"])
             for element in elements
@@ -5264,7 +5355,7 @@ class XmlMybatisSqlRule(BaseRule):
                 from mir.engine.embedded_bridge import fix_embedded_content
                 layout_edits = (
                     []
-                    if is_reusable_column_list(el)
+                    if is_reusable_column_list(el, projection_fragment_ids)
                     else dynamic_column_layout_edits(
                         sql_text,
                         mapping,
