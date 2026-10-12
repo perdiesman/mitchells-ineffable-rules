@@ -356,10 +356,7 @@ class XmlIndentRule(BaseRule):
             if element["tag"] != "sql":
                 continue
             fragment_id = element.get("attrs", {}).get("id", "")
-            if fragment_id not in projection_fragment_ids and not (
-                "column" in fragment_id.lower()
-                and "list" in fragment_id.lower()
-            ):
+            if fragment_id not in projection_fragment_ids:
                 continue
             body_start = tokens[element["open_end_idx"]]["end"]
             body_end = tokens[element["end_idx"] - 1]["start"]

@@ -143,60 +143,142 @@ def reusable_select_list_ids(
     """
     from mir.rules.sql.sql_utils import get_token_depths, tokenize_sql
 
-    projection_ids = {
-        element.get("attrs", {}).get("id", "")
-        for element in elements
-        if element.get("tag") == "sql"
-        and element.get("attrs", {}).get("id", "").lower().endswith(
-            "column_list"
-        )
+    projection_ids: set[str] = set()
+    fragments_by_id = {}
+    for element in elements:
+        fragment_id = element.get("attrs", {}).get("id")
+        if element.get("tag") != "sql" or not fragment_id:
+            continue
+        fragments_by_id[fragment_id] = element
+        fragments_by_id[fragment_id.split(".")[-1]] = element
+
+    clause_starters = {
+        "SELECT", "FROM", "WHERE", "JOIN", "INNER", "LEFT", "RIGHT",
+        "FULL", "CROSS", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET",
+        "FETCH", "RETURNING", "SET", "VALUES", "ON", "WITH", "INSERT",
+        "UPDATE", "DELETE", "MERGE", "UNION", "INTERSECT", "EXCEPT",
     }
+    starts_clause_cache = {}
+
+    def fragment_starts_clause(refid: str) -> bool:
+        if refid in starts_clause_cache:
+            return starts_clause_cache[refid]
+        fragment = fragments_by_id.get(refid) or fragments_by_id.get(
+            refid.split(".")[-1]
+        )
+        if fragment is None:
+            starts_clause_cache[refid] = False
+            return False
+        fragment_start = tokens[fragment["open_end_idx"]]["end"]
+        fragment_end = tokens[fragment["end_idx"] - 1]["start"]
+        fragment_text = content[fragment_start:fragment_end]
+        fragment_text = re.sub(r"<!--.*?-->", " ", fragment_text, flags=re.DOTALL)
+        fragment_text = re.sub(r"<[^>]+>", " ", fragment_text)
+        first_token = next(
+            (
+                token
+                for token in tokenize_sql(fragment_text)
+                if token["type"] not in {"WHITESPACE", "COMMENT"}
+            ),
+            None,
+        )
+        starts_clause = bool(
+            first_token
+            and first_token["type"] == "KEYWORD"
+            and first_token["value"].upper() in clause_starters
+        )
+        starts_clause_cache[refid] = starts_clause
+        return starts_clause
+
     target_tags = {"select", "insert", "update", "delete", "sql"}
+    include_contexts = []
     for host in elements:
         if host.get("tag") not in target_tags:
             continue
         body_start = tokens[host["open_end_idx"]]["end"]
+        host_id = (
+            host.get("attrs", {}).get("id", "")
+            if host.get("tag") == "sql"
+            else ""
+        )
         for include in get_all_elements_recursively(host.get("children", [])):
             if include.get("tag") != "include":
                 continue
             refid = include.get("attrs", {}).get("refid")
-            if not refid:
+            if not refid or fragment_starts_clause(refid):
                 continue
             prefix = content[body_start:include["start_offset"]]
             prefix = re.sub(r"<!--.*?-->", " ", prefix, flags=re.DOTALL)
             prefix = re.sub(r"<[^>]+>", " ", prefix)
             sql_tokens = tokenize_sql(prefix)
             depths = get_token_depths(sql_tokens)
+            current_depth = 0
+            for token in sql_tokens:
+                if token["type"] != "PAREN":
+                    continue
+                current_depth += 1 if token["value"] == "(" else -1
             select_candidates = [
                 index
                 for index, token in enumerate(sql_tokens)
                 if token["type"] == "KEYWORD"
                 and token["value"].upper() == "SELECT"
+                and depths[index] == current_depth
             ]
-            if not select_candidates:
-                continue
-            select_index = select_candidates[-1]
-            select_depth = depths[select_index]
-            owns_projection = True
-            for index in range(select_index + 1, len(sql_tokens)):
-                token = sql_tokens[index]
-                if depths[index] != select_depth or token["type"] != "KEYWORD":
-                    continue
-                if token["value"].upper() == "FROM":
-                    previous_words = [
-                        sql_tokens[candidate]["value"].upper()
-                        for candidate in range(max(select_index, index - 5), index)
-                        if sql_tokens[candidate]["type"]
-                        not in {"WHITESPACE", "COMMENT"}
-                    ]
-                    if previous_words[-2:] != ["IS", "DISTINCT"] and (
-                        previous_words[-3:] != ["IS", "NOT", "DISTINCT"]
+            direct_projection = False
+            if select_candidates:
+                select_index = select_candidates[-1]
+                direct_projection = True
+                for index in range(select_index + 1, len(sql_tokens)):
+                    token = sql_tokens[index]
+                    if (
+                        depths[index] != current_depth
+                        or token["type"] != "KEYWORD"
                     ):
-                        owns_projection = False
-                        break
-            if owns_projection:
-                projection_ids.add(refid)
-                projection_ids.add(refid.split(".")[-1])
+                        continue
+                    if token["value"].upper() == "FROM":
+                        previous_words = [
+                            sql_tokens[candidate]["value"].upper()
+                            for candidate in range(
+                                max(select_index, index - 5), index
+                            )
+                            if sql_tokens[candidate]["type"]
+                            not in {"WHITESPACE", "COMMENT"}
+                        ]
+                        if previous_words[-2:] != ["IS", "DISTINCT"] and (
+                            previous_words[-3:] != ["IS", "NOT", "DISTINCT"]
+                        ):
+                            direct_projection = False
+                            break
+            nested_projection_position = (
+                not select_candidates
+                and not any(
+                    token["type"] == "KEYWORD"
+                    and depths[index] == current_depth
+                    and token["value"].upper() in clause_starters
+                    for index, token in enumerate(sql_tokens)
+                )
+            )
+            include_contexts.append(
+                (
+                    host_id,
+                    refid,
+                    direct_projection,
+                    nested_projection_position,
+                )
+            )
+
+    changed = True
+    while changed:
+        changed = False
+        for host_id, refid, direct_projection, nested_position in include_contexts:
+            if not direct_projection and not (
+                nested_position and host_id in projection_ids
+            ):
+                continue
+            discovered_ids = {refid, refid.split(".")[-1]}
+            if not discovered_ids.issubset(projection_ids):
+                projection_ids.update(discovered_ids)
+                changed = True
     return projection_ids
 
 
@@ -218,9 +300,9 @@ def is_reusable_column_list(
 ) -> bool:
     """Return whether a SQL fragment defines columns without a SELECT owner."""
     fragment_id = element.get("attrs", {}).get("id", "")
-    return element.get("tag") == "sql" and (
-        fragment_id.lower().endswith("column_list")
-        or fragment_id in (projection_ids or set())
+    return (
+        element.get("tag") == "sql"
+        and fragment_id in (projection_ids or set())
     )
 
 

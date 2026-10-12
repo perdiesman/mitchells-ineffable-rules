@@ -2074,13 +2074,17 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
 
-    def test_xml_indent_formats_generated_column_list_fragment(self):
+    def test_xml_indent_formats_generated_column_list_fragment_from_consumer(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
             '    <sql id="Base_Column_List">\n'
             '    sample_item.item_id AS sample_item_id, sample_item.item_name AS sample_item_name,\n'
             '    sample_item.owner_id AS sample_item_owner_id\n'
             '    </sql>\n'
+            '    <select id="items">\n'
+            '        SELECT <include refid="Base_Column_List" />\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
             '</mapper>'
         )
         expected = (
@@ -2090,6 +2094,11 @@ class TestRunnerIntegration(unittest.TestCase):
             '        sample_item.item_name AS sample_item_name,\n'
             '        sample_item.owner_id AS sample_item_owner_id\n'
             '    </sql>\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            <include refid="Base_Column_List" />\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
             '</mapper>'
         )
         config = Config()
@@ -2211,6 +2220,66 @@ class TestRunnerIntegration(unittest.TestCase):
             if violation.rule_id == "IR-unresolved-alias"
         ]
         self.assertFalse(unresolved)
+
+    def test_xml_projection_fragments_are_inferred_without_name_conventions(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="selectedFields">item.item_id, item.item_name</sql>\n'
+            '    <sql id="misleading_column_list">item.enabled = true</sql>\n'
+            '    <sql id="fromColumnList">FROM sample_item item</sql>\n'
+            '    <sql id="unusedColumnList">item.unused_id, item.unused_name</sql>\n'
+            '    <select id="items">\n'
+            '        SELECT <include refid="selectedFields" />\n'
+            '        FROM sample_item item\n'
+            '        WHERE <include refid="misleading_column_list" />\n'
+            '    </select>\n'
+            '    <select id="countItems">\n'
+            '        SELECT count(*) <include refid="fromColumnList" />\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        from mir.rules.xml.xml_mybatis_sql import (
+            get_all_elements_recursively,
+            parse_xml_elements,
+            reusable_select_list_ids,
+        )
+        from mir.rules.xml.xml_utils import tokenize_xml
+
+        tokens = tokenize_xml(xml_content)
+        elements = get_all_elements_recursively(parse_xml_elements(tokens))
+
+        self.assertEqual(
+            reusable_select_list_ids(tokens, elements, xml_content),
+            {"selectedFields"},
+        )
+
+    def test_xml_projection_inference_follows_nested_include_consumers(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="identityFields">item.item_id, item.item_name</sql>\n'
+            '    <sql id="displayFields">\n'
+            '        <include refid="identityFields" />, item.display_name\n'
+            '    </sql>\n'
+            '    <select id="items">\n'
+            '        SELECT <include refid="displayFields" />\n'
+            '        FROM sample_item item\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        from mir.rules.xml.xml_mybatis_sql import (
+            get_all_elements_recursively,
+            parse_xml_elements,
+            reusable_select_list_ids,
+        )
+        from mir.rules.xml.xml_utils import tokenize_xml
+
+        tokens = tokenize_xml(xml_content)
+        elements = get_all_elements_recursively(parse_xml_elements(tokens))
+
+        self.assertEqual(
+            reusable_select_list_ids(tokens, elements, xml_content),
+            {"displayFields", "identityFields"},
+        )
 
     def test_xml_mybatis_validates_reusable_predicate_in_include_host(self):
         xml_content = (
