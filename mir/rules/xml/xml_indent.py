@@ -252,6 +252,7 @@ class XmlIndentRule(BaseRule):
     description = (
         "Enforce correct tag nesting indentation in XML files, format reusable "
         "MyBatis projection fragments according to their SELECT include sites, "
+        "align physical predicates beneath static MyBatis WHERE clauses, "
         "and keep a SQL statement terminator attached to its preceding foreach "
         "closing tag."
     )
@@ -447,6 +448,93 @@ class XmlIndentRule(BaseRule):
                     "replacement": expected_indent,
                     "message": "The first MyBatis SQL clause should align one level inside its XML tag.",
                 })
+        for element in elements:
+            if element["tag"] not in {"select", "insert", "update", "delete", "sql"}:
+                continue
+            body_start = tokens[element["open_end_idx"]]["end"]
+            body_end = tokens[element["end_idx"]]["start"]
+            body = content[body_start:body_end]
+            masked_body = re.sub(
+                r"<[^>]+>",
+                lambda match: "".join(
+                    character if character in "\r\n" else " "
+                    for character in match.group(0)
+                ),
+                body,
+                flags=re.DOTALL,
+            )
+            where_token_offsets = {
+                sql_token["start"]
+                for sql_token in tokenize_sql(masked_body)
+                if sql_token["type"] == "KEYWORD"
+                and sql_token["value"].upper() == "WHERE"
+            }
+            for where_match in re.finditer(
+                r"(?im)^(?P<indent>[ \t]*)WHERE[ \t]*\r?\n",
+                body,
+            ):
+                where_word_offset = where_match.start() + len(
+                    where_match.group("indent")
+                )
+                if where_word_offset not in where_token_offsets:
+                    continue
+                where_source = body_start + where_match.start()
+                if any(
+                    dynamic["tag"]
+                    in {
+                        "if", "foreach", "choose", "when", "otherwise",
+                        "trim", "where",
+                    }
+                    and dynamic["start_offset"]
+                    < where_source
+                    < dynamic["end_offset"]
+                    for dynamic in elements
+                ):
+                    continue
+                where_indent = where_match.group("indent")
+                expected_indent = where_indent + " " * indent_size
+                cursor = where_match.end()
+                while cursor < len(body):
+                    line_end = body.find("\n", cursor)
+                    if line_end == -1:
+                        line_end = len(body)
+                    line = body[cursor:line_end].rstrip("\r")
+                    stripped = line.strip()
+                    if not stripped:
+                        cursor = line_end + 1
+                        continue
+                    if stripped == ";":
+                        break
+                    actual_indent = line[: len(line) - len(line.lstrip(" \t"))]
+                    visible_sql = re.sub(r"<[^>]+>", " ", stripped).strip()
+                    if re.match(
+                        r"(?i)^(?:GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|OFFSET|"
+                        r"FETCH|RETURNING|UNION|INTERSECT|EXCEPT|ON\s+CONFLICT|"
+                        r"SELECT|UPDATE|INSERT|DELETE|CREATE|ALTER|DROP)\b",
+                        visible_sql,
+                    ) and len(actual_indent) <= len(where_indent):
+                        break
+                    if (
+                        stripped.startswith(")")
+                        and len(actual_indent) <= len(where_indent)
+                    ):
+                        break
+                    if stripped.startswith(("<", "--", "/*")):
+                        cursor = line_end + 1
+                        continue
+                    if len(actual_indent) <= len(where_indent):
+                        source_line_start = body_start + cursor
+                        violations.append({
+                            "line": content.count("\n", 0, source_line_start) + 1,
+                            "start_offset": source_line_start,
+                            "end_offset": source_line_start + len(actual_indent),
+                            "replacement": expected_indent,
+                            "message": (
+                                "A physical MyBatis WHERE predicate should be "
+                                "indented one level below WHERE."
+                            ),
+                        })
+                    cursor = line_end + 1
         for element in elements:
             if element["tag"] != "delete":
                 continue

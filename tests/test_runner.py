@@ -6061,7 +6061,65 @@ class TestRunnerIntegration(unittest.TestCase):
             first.content,
         )
         self.assertIn('st_makepoint(item.longitude, item.latitude)) AS boundary', first.content)
+        self.assertIn('            keyword.active\n', first.content)
         self.assertEqual(second.content, first.content)
+
+    def test_xml_indent_aligns_static_predicate_after_dynamic_where_conditions(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        WHERE\n'
+            '            <if test="status != null">item_status = #{status} AND</if>\n'
+            '        item_enabled\n'
+            '        <if test="descending">ORDER BY created_at DESC</if>\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        expected = xml_content.replace(
+            '        item_enabled\n',
+            '            item_enabled\n',
+        ).replace(
+            '        <if test="descending">ORDER BY created_at DESC</if>\n',
+            '            <if test="descending">ORDER BY created_at DESC</if>\n',
+        )
+        config = Config()
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-indent"]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_indent_does_not_treat_dollar_quoted_where_as_a_clause(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="template">\n'
+            '        SELECT $template$\n'
+            '        WHERE\n'
+            '        preserved_template_text\n'
+            '        $template$\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        config = Config()
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-indent"]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
 
     def test_xml_mybatis_maps_function_case_inside_dynamic_foreach(self):
         xml_content = (
