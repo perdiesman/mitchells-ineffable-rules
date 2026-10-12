@@ -45,6 +45,7 @@ CONTINUATION_TYPES = {
     "parenthesized_expression",
     "assignment_expression",
     "variable_declarator",
+    "element_value_pair",
 }
 STATEMENT_TYPES = {
     "expression_statement",
@@ -180,7 +181,11 @@ def _expected_depth(node, row: int) -> int:
                 list_start_rows.append(current.start_point.row)
             if active:
                 if current.type == "method_invocation":
-                    if node.type == ".":
+                    name = current.child_by_field_name("name")
+                    if node.type == "." or (
+                        name is not None
+                        and name.start_point.row > current.start_point.row
+                    ):
                         continuations.add("chain")
                 elif current.type in {"binary_expression", "ternary_expression", "parenthesized_expression"}:
                     continuations.add("expression")
@@ -188,7 +193,7 @@ def _expected_depth(node, row: int) -> int:
                         ternary_depth += 1
                     elif current.type == "parenthesized_expression":
                         parenthesized_depth += 1
-                elif current.type in {"assignment_expression", "variable_declarator"}:
+                elif current.type in {"assignment_expression", "variable_declarator", "element_value_pair"}:
                     if "chain" not in continuations and not within_switch_expression and (not within_list or any(
                         start_row > current.start_point.row
                         for start_row in list_start_rows
@@ -239,8 +244,12 @@ def _wrapped_continuation_depth(node, category: str) -> int:
                 ternary_depth += 1
             elif current.type == "parenthesized_expression":
                 parenthesized_depth += 1
-        elif current.type in {"assignment_expression", "variable_declarator"}:
-            if category != "chain" and (list_depth == 0 or any(
+        elif current.type == "method_invocation":
+            name = current.child_by_field_name("name")
+            if name is not None and name.start_point.row > current.start_point.row:
+                continuations.add("chain")
+        elif current.type in {"assignment_expression", "variable_declarator", "element_value_pair"}:
+            if category != "chain" and "chain" not in continuations and (list_depth == 0 or any(
                 start_row > current.start_point.row
                 for start_row in list_start_rows
             )):
@@ -547,6 +556,28 @@ class JavaListLayoutRule(BaseRule):
             "class Sample { void publish(String first, String second, String third) {} }\n",
             "accepted",
         ),
+        RuleCase(
+            "arguments in wrapped chain",
+            "class Sample {\n"
+            "    void run(Connection connection) {\n"
+            "        connection\n"
+            "            .configure(\n"
+            "            extraordinarilyDescriptivePrimaryConfigurationValue,\n"
+            "            extraordinarilyDescriptiveSecondaryConfigurationValue\n"
+            "        );\n"
+            "    }\n"
+            "}\n",
+            "fixed",
+            "class Sample {\n"
+            "    void run(Connection connection) {\n"
+            "        connection\n"
+            "            .configure(\n"
+            "                extraordinarilyDescriptivePrimaryConfigurationValue,\n"
+            "                extraordinarilyDescriptiveSecondaryConfigurationValue\n"
+            "            );\n"
+            "    }\n"
+            "}\n",
+        ),
     ]
 
     @staticmethod
@@ -736,9 +767,24 @@ class ChainLayoutRule(BaseRule):
             "    }\n"
             "}\n",
         ),
+        RuleCase(
+            "single call after parenthesized expression",
+            "class Sample {\n"
+            "    byte[] read(String suffix) {\n"
+            "        return (\"extraordinarily-descriptive-response-prefix-that-needs-a-continuation-before-conversion-\" + suffix).getBytes(UTF_8);\n"
+            "    }\n"
+            "}\n",
+            "fixed",
+            "class Sample {\n"
+            "    byte[] read(String suffix) {\n"
+            "        return (\"extraordinarily-descriptive-response-prefix-that-needs-a-continuation-before-conversion-\" + suffix)\n"
+            "            .getBytes(UTF_8);\n"
+            "    }\n"
+            "}\n",
+        ),
     ]
 
-    def _parts(self, document, node) -> Optional[tuple[str, list[str]]]:
+    def _parts(self, document, node) -> Optional[tuple[str, list[str], str]]:
         segments = []
         current = node
         while current is not None and current.type == "method_invocation":
@@ -754,7 +800,7 @@ class ChainLayoutRule(BaseRule):
         if current is None:
             return None
         segments.reverse()
-        return document.text(current), segments
+        return document.text(current), segments, current.type
 
     def _edits(self, content: str, config: Dict[str, Any]) -> List[JavaEdit]:
         document = parse_java(content)
@@ -770,11 +816,14 @@ class ChainLayoutRule(BaseRule):
             if parent and parent.type == "method_invocation" and parent.child_by_field_name("object") == node:
                 continue
             parts = self._parts(document, node)
-            if not parts or not parts[1] or any(
+            if not parts or not parts[1] or (
+                len(parts[1]) == 1
+                and parts[2] not in {"method_invocation", "parenthesized_expression"}
+            ) or any(
                 child.type in {"line_comment", "block_comment", "text_block"} for child in walk(node)
             ):
                 continue
-            base, segments = parts
+            base, segments, _ = parts
             compact = base + "".join(segments)
             prefix = document.content.splitlines()[node.start_point.row][:node.start_point.column]
             suffix_length = len(_terminal_suffix(document, node))
@@ -922,6 +971,23 @@ class AssignmentLayoutRule(BaseRule):
             "class Sample { int count = 1; }\n",
             "accepted",
         ),
+        RuleCase(
+            "long annotation value",
+            "class Sample {\n"
+            "    @Operation(\n"
+            "        summary = \"Describe the current, peak, percentage, and restored measurements for every selected region in the request\"\n"
+            "    )\n"
+            "    void read() {}\n"
+            "}\n",
+            "fixed",
+            "class Sample {\n"
+            "    @Operation(\n"
+            "        summary =\n"
+            "            \"Describe the current, peak, percentage, and restored measurements for every selected region in the request\"\n"
+            "    )\n"
+            "    void read() {}\n"
+            "}\n",
+        ),
     ]
 
     @staticmethod
@@ -943,13 +1009,27 @@ class AssignmentLayoutRule(BaseRule):
         size = int(config.get("indent_size", 4))
         comments = list(nodes_of_type(document, "line_comment", "block_comment"))
         edits = []
-        for node in nodes_of_type(document, "variable_declarator", "assignment_expression"):
+        for node in nodes_of_type(
+            document,
+            "variable_declarator",
+            "assignment_expression",
+            "element_value_pair",
+        ):
             value = node.child_by_field_name("value") or node.child_by_field_name("right")
             operator = self._operator(node)
             if value is None or operator is None or operator.end_point.row != value.start_point.row:
                 continue
             row = value.start_point.row
-            if len(lines[row]) <= maximum or any(
+            over_limit = len(lines[row]) > maximum
+            if node.type == "element_value_pair":
+                annotation = next(
+                    (ancestor for ancestor in _ancestors(node.parent) if ancestor.type == "annotation"),
+                    None,
+                )
+                if annotation is not None and annotation.start_point.row == annotation.end_point.row:
+                    compact_annotation = " ".join(document.text(annotation).split())
+                    over_limit = annotation.start_point.column + len(compact_annotation) > maximum
+            if not over_limit or any(
                 comment.start_point.row <= row <= comment.end_point.row for comment in comments
             ):
                 continue

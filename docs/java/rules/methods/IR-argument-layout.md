@@ -19,7 +19,7 @@ Keep fitting Java argument and parameter lists compact; otherwise place each ite
 `annotation_type_body`, `block`, `class_body`, `constructor_body`, `enum_body`, `interface_body`, `switch_block`
 
 #### Default `CONTINUATION_TYPES`
-`annotation_argument_list`, `argument_list`, `array_initializer`, `assignment_expression`, `binary_expression`, `element_value_array_initializer`, `formal_parameters`, `interfaces`, `method_invocation`, `parenthesized_expression`, `permits`, `record_header`, `resource_specification`, `super_interfaces`, `superclass`, `ternary_expression`, `throws`, `variable_declarator`
+`annotation_argument_list`, `argument_list`, `array_initializer`, `assignment_expression`, `binary_expression`, `element_value_array_initializer`, `element_value_pair`, `formal_parameters`, `interfaces`, `method_invocation`, `parenthesized_expression`, `permits`, `record_header`, `resource_specification`, `super_interfaces`, `superclass`, `ternary_expression`, `throws`, `variable_declarator`
 
 #### Default `CONTROL_KEYWORDS`
 `catch`, `for`, `if`, `switch`, `synchronized`, `try`, `while`
@@ -57,5 +57,33 @@ class Sample {
 ##### configured short width — Accepted
 ```java
 class Sample { void publish(String first, String second, String third) {} }
+
+```
+
+##### arguments in wrapped chain — Fixed
+```java
+class Sample {
+    void run(Connection connection) {
+        connection
+            .configure(
+            extraordinarilyDescriptivePrimaryConfigurationValue,
+            extraordinarilyDescriptiveSecondaryConfigurationValue
+        );
+    }
+}
+
+```
+
+Expected fixed output:
+```java
+class Sample {
+    void run(Connection connection) {
+        connection
+            .configure(
+                extraordinarilyDescriptivePrimaryConfigurationValue,
+                extraordinarilyDescriptiveSecondaryConfigurationValue
+            );
+    }
+}
 
 ```

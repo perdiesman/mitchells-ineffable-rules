@@ -18,7 +18,7 @@ Keep fitting assignments compact; otherwise place the assigned value one continu
 `annotation_type_body`, `block`, `class_body`, `constructor_body`, `enum_body`, `interface_body`, `switch_block`
 
 #### Default `CONTINUATION_TYPES`
-`annotation_argument_list`, `argument_list`, `array_initializer`, `assignment_expression`, `binary_expression`, `element_value_array_initializer`, `formal_parameters`, `interfaces`, `method_invocation`, `parenthesized_expression`, `permits`, `record_header`, `resource_specification`, `super_interfaces`, `superclass`, `ternary_expression`, `throws`, `variable_declarator`
+`annotation_argument_list`, `argument_list`, `array_initializer`, `assignment_expression`, `binary_expression`, `element_value_array_initializer`, `element_value_pair`, `formal_parameters`, `interfaces`, `method_invocation`, `parenthesized_expression`, `permits`, `record_header`, `resource_specification`, `super_interfaces`, `superclass`, `ternary_expression`, `throws`, `variable_declarator`
 
 #### Default `CONTROL_KEYWORDS`
 `catch`, `for`, `if`, `switch`, `synchronized`, `try`, `while`
@@ -50,5 +50,28 @@ class Sample {
 ##### compact assignment — Accepted
 ```java
 class Sample { int count = 1; }
+
+```
+
+##### long annotation value — Fixed
+```java
+class Sample {
+    @Operation(
+        summary = "Describe the current, peak, percentage, and restored measurements for every selected region in the request"
+    )
+    void read() {}
+}
+
+```
+
+Expected fixed output:
+```java
+class Sample {
+    @Operation(
+        summary =
+            "Describe the current, peak, percentage, and restored measurements for every selected region in the request"
+    )
+    void read() {}
+}
 
 ```
