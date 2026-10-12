@@ -3365,6 +3365,24 @@ def compact_static_order_by_edits(
                 break
         if not items or final_index == index or items[-1].endswith(","):
             continue
+        following_index = final_index + 1
+        while (
+            following_index < len(lines)
+            and not lines[following_index].strip()
+        ):
+            following_index += 1
+        if (
+            following_index < len(lines)
+            and re.match(
+                r"<(?:if|choose|foreach|trim)\b",
+                lines[following_index].lstrip(),
+                re.IGNORECASE,
+            )
+        ):
+            # The static prefix is only the first part of a list continued by
+            # a MyBatis branch. Keeping the clause expanded preserves the
+            # programming-style structure of the complete dynamic list.
+            continue
         replacement = match.group(1) + "ORDER BY " + " ".join(items)
         if source_text_length(replacement, rule_config) > max_length:
             continue

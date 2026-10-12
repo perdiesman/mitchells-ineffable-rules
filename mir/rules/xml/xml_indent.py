@@ -253,6 +253,7 @@ class XmlIndentRule(BaseRule):
         "Enforce correct tag nesting indentation in XML files, format reusable "
         "MyBatis projection fragments according to their SELECT include sites, "
         "align physical predicates beneath static MyBatis WHERE clauses, "
+        "indent SELECT and ORDER BY lists containing nested dynamic branches, "
         "and keep a SQL statement terminator attached to its preceding foreach "
         "closing tag."
     )
@@ -448,6 +449,239 @@ class XmlIndentRule(BaseRule):
                     "replacement": expected_indent,
                     "message": "The first MyBatis SQL clause should align one level inside its XML tag.",
                 })
+        dynamic_list_tags = {
+            "if", "choose", "when", "otherwise", "foreach", "trim"
+        }
+        for element in elements:
+            if element["tag"] not in {"select", "sql"}:
+                continue
+            body_start = tokens[element["open_end_idx"]]["end"]
+            body_end = tokens[element["end_idx"]]["start"]
+            body = content[body_start:body_end]
+            masked_body = re.sub(
+                r"<[^>]+>",
+                lambda match: "".join(
+                    character if character in "\r\n" else " "
+                    for character in match.group(0)
+                ),
+                body,
+                flags=re.DOTALL,
+            )
+            sql_tokens = tokenize_sql(masked_body)
+            sql_depths = get_token_depths(sql_tokens)
+            dynamic_children = [
+                child
+                for child in elements
+                if child["tag"] in dynamic_list_tags
+                and element["start_offset"] < child["start_offset"]
+                and child["end_offset"] < element["end_offset"]
+            ]
+
+            def add_dynamic_list_layout(
+                keyword_start: int,
+                keyword_end: int,
+                list_end: int,
+                semicolon: int | None = None,
+                require_nested_branch: bool = False,
+            ) -> None:
+                ancestor_ends = [
+                    tokens[child["end_idx"] - 1]["start"]
+                    for child in dynamic_children
+                    if child["start_offset"] < keyword_start < child["end_offset"]
+                ]
+                if ancestor_ends:
+                    branch_end = min(ancestor_ends)
+                    if branch_end < list_end:
+                        list_end = branch_end
+                        semicolon = None
+                list_children = [
+                    child
+                    for child in dynamic_children
+                    if keyword_end < child["start_offset"] < list_end
+                ]
+                if not list_children:
+                    return
+                if require_nested_branch and not any(
+                    outer["start_offset"] < inner["start_offset"]
+                    and inner["end_offset"] < outer["end_offset"]
+                    for outer in list_children
+                    for inner in list_children
+                    if outer is not inner
+                ):
+                    return
+                line_start = content.rfind("\n", 0, keyword_start) + 1
+                clause_indent = content[line_start:keyword_start]
+                if clause_indent.strip():
+                    return
+                item_indent = clause_indent + " " * indent_size
+                first_item = keyword_end
+                while first_item < list_end and content[first_item].isspace():
+                    first_item += 1
+                if first_item >= list_end:
+                    return
+                expected_gap = "\n" + item_indent
+                if content[keyword_end:first_item] != expected_gap:
+                    violations.append({
+                        "line": content.count("\n", 0, keyword_start) + 1,
+                        "start_offset": keyword_end,
+                        "end_offset": first_item,
+                        "replacement": expected_gap,
+                        "message": (
+                            "A SQL list containing MyBatis branches should "
+                            "start below its clause keyword."
+                        ),
+                        "structural": True,
+                    })
+
+                cursor = content.find("\n", keyword_end, list_end)
+                if cursor != -1:
+                    cursor += 1
+                while cursor != -1 and cursor < list_end:
+                    line_end = content.find("\n", cursor, list_end)
+                    if line_end == -1:
+                        line_end = list_end
+                    nonspace = cursor
+                    while (
+                        nonspace < line_end
+                        and content[nonspace] in " \t\r"
+                    ):
+                        nonspace += 1
+                    if nonspace < line_end and nonspace < list_end:
+                        dynamic_depth = sum(
+                            1
+                            for child in dynamic_children
+                            if tokens[child["open_end_idx"]]["end"]
+                            < nonspace
+                            < tokens[child["end_idx"] - 1]["start"]
+                        )
+                        expected_indent = item_indent + (
+                            " " * (indent_size * dynamic_depth)
+                        )
+                        if content[cursor:nonspace] != expected_indent:
+                            violations.append({
+                                "line": content.count("\n", 0, cursor) + 1,
+                                "start_offset": cursor,
+                                "end_offset": nonspace,
+                                "replacement": expected_indent,
+                                "message": (
+                                    "Items in a dynamic SQL list should align "
+                                    "with their MyBatis nesting level."
+                                ),
+                                "structural": True,
+                            })
+                    if line_end >= list_end:
+                        break
+                    cursor = line_end + 1
+
+                if semicolon is not None:
+                    previous = semicolon - 1
+                    while previous >= keyword_end and content[previous].isspace():
+                        previous -= 1
+                    if (
+                        content[max(keyword_end, previous - 4):previous + 1]
+                        .lower()
+                        .endswith("</if>")
+                        and content[previous + 1:semicolon]
+                    ):
+                        violations.append({
+                            "line": content.count("\n", 0, semicolon) + 1,
+                            "start_offset": previous + 1,
+                            "end_offset": semicolon,
+                            "replacement": "",
+                            "message": (
+                                "A trailing semicolon should stay with the "
+                                "closing MyBatis branch when it fits."
+                            ),
+                            "structural": True,
+                        })
+
+            for index, sql_token in enumerate(sql_tokens):
+                if (
+                    sql_depths[index] != 0
+                    or sql_token["type"] != "KEYWORD"
+                    or sql_token["value"].upper() != "SELECT"
+                ):
+                    continue
+                from_index = next((
+                    candidate
+                    for candidate in range(index + 1, len(sql_tokens))
+                    if sql_depths[candidate] == 0
+                    and sql_tokens[candidate]["type"] == "KEYWORD"
+                    and sql_tokens[candidate]["value"].upper() == "FROM"
+                ), None)
+                if from_index is None:
+                    continue
+                keyword_line_end = content.find(
+                    "\n", body_start + sql_token["end"]
+                )
+                if keyword_line_end == -1:
+                    keyword_line_end = body_end
+                if not content[
+                    body_start + sql_token["end"]:keyword_line_end
+                ].strip():
+                    # An already-expanded SELECT can contain CASE expressions,
+                    # DISTINCT ON keys, and other layouts with their own
+                    # indentation rules. Only initiate this normalization from
+                    # an inline SELECT projection.
+                    continue
+                add_dynamic_list_layout(
+                    body_start + sql_token["start"],
+                    body_start + sql_token["end"],
+                    body_start + sql_tokens[from_index]["start"],
+                    require_nested_branch=True,
+                )
+
+            for index, sql_token in enumerate(sql_tokens):
+                if (
+                    sql_depths[index] != 0
+                    or sql_token["type"] != "KEYWORD"
+                    or sql_token["value"].upper() != "ORDER"
+                ):
+                    continue
+                by_index = index + 1
+                while (
+                    by_index < len(sql_tokens)
+                    and sql_tokens[by_index]["type"] in {"WHITESPACE", "COMMENT"}
+                ):
+                    by_index += 1
+                if (
+                    by_index >= len(sql_tokens)
+                    or sql_tokens[by_index]["value"].upper() != "BY"
+                ):
+                    continue
+                end_index = next((
+                    candidate
+                    for candidate in range(by_index + 1, len(sql_tokens))
+                    if sql_depths[candidate] == 0
+                    and (
+                        sql_tokens[candidate]["type"] == "SEMI"
+                        or (
+                            sql_tokens[candidate]["type"] == "KEYWORD"
+                            and sql_tokens[candidate]["value"].upper()
+                            in {
+                                "LIMIT", "OFFSET", "FETCH", "RETURNING",
+                                "UNION", "INTERSECT", "EXCEPT",
+                            }
+                        )
+                    )
+                ), None)
+                if end_index is None:
+                    list_end = body_end
+                    semicolon = None
+                else:
+                    list_end = body_start + sql_tokens[end_index]["start"]
+                    semicolon = (
+                        list_end
+                        if sql_tokens[end_index]["type"] == "SEMI"
+                        else None
+                    )
+                add_dynamic_list_layout(
+                    body_start + sql_token["start"],
+                    body_start + sql_tokens[by_index]["end"],
+                    list_end,
+                    semicolon,
+                    require_nested_branch=True,
+                )
         for element in elements:
             if element["tag"] not in {"select", "insert", "update", "delete", "sql"}:
                 continue

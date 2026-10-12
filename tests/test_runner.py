@@ -897,6 +897,89 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_formats_nested_dynamic_select_and_order_lists(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item.item_id,\n'
+            '        item.item_name\n'
+            '        <if test="includeDetails">\n'
+            '            , detail.detail_id\n'
+            '            <if test="includeCode">, detail.detail_code</if>\n'
+            '        </if>\n'
+            '        FROM sample_item item\n'
+            '        ORDER BY item.item_id\n'
+            '        <if test="includeDetails">\n'
+            '            , detail.detail_id\n'
+            '            <if test="includeCode">, detail.detail_code</if>\n'
+            '        </if>\n'
+            '        ;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            item.item_id,\n'
+            '            item.item_name\n'
+            '            <if test="includeDetails">\n'
+            '                , detail.detail_id\n'
+            '                <if test="includeCode">, detail.detail_code</if>\n'
+            '            </if>\n'
+            '        FROM sample_item item\n'
+            '        ORDER BY\n'
+            '            item.item_id\n'
+            '            <if test="includeDetails">\n'
+            '                , detail.detail_id\n'
+            '                <if test="includeCode">, detail.detail_code</if>\n'
+            '            </if>;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_mybatis_dynamic_lists_do_not_cross_choose_branches(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="items">\n'
+            '        <choose>\n'
+            '            <when test="summarize">\n'
+            '                SELECT item_id\n'
+            '                FROM sample_item\n'
+            '                ORDER BY item_id\n'
+            '            </when>\n'
+            '            <otherwise>\n'
+            '                SELECT item_id\n'
+            '                <if test="includeCode">, item_code</if>\n'
+            '                FROM sample_item\n'
+            '            </otherwise>\n'
+            '        </choose>\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_expands_dynamic_grouping_block(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
