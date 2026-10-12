@@ -6577,6 +6577,46 @@ class TestRunnerIntegration(unittest.TestCase):
             )
             self.assertEqual(content, expected)
 
+    def test_xml_line_length_moves_self_closing_marker_after_long_attribute(self):
+        long_refid = (
+            "org.example.generated.GenericDetailedSystemEventAnalyticUpdateInfoMapper."
+            "Base_Column_List"
+        )
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            f'            <include refid="{long_refid}" />,\n'
+            '            item_id\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            <include\n'
+            f'                    refid="{long_refid}"\n'
+            '            />,\n'
+            '            item_id\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        config = Config()
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-line-length"]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_tag_collapse(self):
         # A choose-when block with multi-line tags that can fit under 120 chars
         xml_content = (

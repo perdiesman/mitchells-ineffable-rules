@@ -95,6 +95,8 @@ class XmlLineLengthRule(BaseRule):
         "MyBatis foreach forms use the same expanded layout; overlong inline "
         "dynamic SQL blocks expand without changing their expressions. SQL "
         "inside dollar quotes wraps only at existing clause whitespace. "
+        "A self-closing marker moves to its own aligned line when keeping it "
+        "with the final attribute would exceed the limit. "
         "Opaque XML text remains unchanged and is reported as non-fixable."
     )
     category = "general"
@@ -457,6 +459,25 @@ class XmlLineLengthRule(BaseRule):
             if tag_toks[-1]["type"] == "TAG_END":
                 option_a_parts.append(tag_toks[-1]["value"])
             formatted_a = "".join(option_a_parts)
+
+            physical_line_end = content.find("\n", tag_toks[-1]["end"])
+            if physical_line_end == -1:
+                physical_line_end = len(content)
+            trailing_on_line = content[tag_toks[-1]["end"]:physical_line_end]
+
+            def formatted_tag_fits(candidate: str) -> bool:
+                candidate_lines = candidate.splitlines()
+                return all(
+                    len(candidate_line)
+                    + (len(indent) if line_index == 0 else 0)
+                    + (
+                        len(trailing_on_line)
+                        if line_index == len(candidate_lines) - 1
+                        else 0
+                    )
+                    <= max_length
+                    for line_index, candidate_line in enumerate(candidate_lines)
+                )
             
             option_b_parts = [tag_toks[0]["value"]]
             # If the tag has multiple attributes, we can strip any trailing space from the tag open start token
@@ -478,16 +499,21 @@ class XmlLineLengthRule(BaseRule):
                 option_b_parts.append(tag_toks[-1]["value"])
             formatted_b = "".join(option_b_parts)
             
-            a_fits = True
-            for line_index, a_line in enumerate(formatted_a.splitlines()):
-                physical_length = len(a_line) + (
-                    len(indent) if line_index == 0 else 0
-                )
-                if physical_length > max_length:
-                    a_fits = False
-                    break
-                    
-            chosen_text = formatted_a if a_fits else formatted_b
+            a_fits = formatted_tag_fits(formatted_a)
+            b_fits = formatted_tag_fits(formatted_b)
+            closing = tag_toks[-1]["value"].strip()
+
+            if a_fits:
+                chosen_text = formatted_a
+            elif b_fits or closing != "/>":
+                chosen_text = formatted_b
+            else:
+                # Preserve the standard two-level attribute continuation. If
+                # only the self-closing marker makes the final attribute line
+                # overlong, align that marker with the opening tag instead of
+                # reducing the attribute indentation for this one element.
+                without_closing = formatted_b[: -len(tag_toks[-1]["value"])].rstrip()
+                chosen_text = without_closing + "\n" + indent + closing
             
             orig_text = "".join(t["value"] for t in tag_toks)
             if chosen_text != orig_text:
