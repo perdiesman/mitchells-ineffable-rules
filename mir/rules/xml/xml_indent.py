@@ -94,7 +94,7 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
                 tag_name == "if"
                 and active_parents
                 and active_parents[-1]["tag"]
-                in {"select", "insert", "update", "delete"}
+                in {"select", "insert", "update", "delete", "sql"}
                 and re.search(
                     r"<include\b[^>]*\brefid\s*=\s*['\"][^'\"]*where[^'\"]*['\"]",
                     dynamic_source,

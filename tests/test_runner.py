@@ -2880,6 +2880,95 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
 
+    def test_xml_mybatis_wrapped_on_compacts_a_short_comparison(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="BasicFrom">\n'
+            '        FROM\n'
+            '            sample.data_record data_record\n'
+            '            JOIN sample.extraordinarily_named_data_record_group data_record_group\n'
+            '                ON data_record.data_record_group_id =\n'
+            '        data_record_group.id\n'
+            '        <if test="filters != null">\n'
+            '            <include refid="BasicWhere" />\n'
+            '        </if>\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            'ON data_record.data_record_group_id =\n'
+            '        data_record_group.id',
+            'ON data_record.data_record_group_id = data_record_group.id',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_mybatis_wrapped_on_indents_a_long_right_operand(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="BasicFrom">\n'
+            '        FROM\n'
+            '            sample.data_record data_record\n'
+            '            JOIN sample.data_record_group data_record_group\n'
+            '                ON data_record.extraordinarily_long_record_group_identifier =\n'
+            '        data_record_group.extraordinarily_long_record_group_identifier\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '        data_record_group.extraordinarily_long_record_group_identifier',
+            '                    data_record_group.extraordinarily_long_record_group_identifier',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+        config.rule_configs = {
+            "IR-line-length": {"max_length": 100},
+        }
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_mybatis_close_line_on_preserves_reviewed_join_wrapping(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="joinedItems">\n'
+            '        SELECT item.item_id\n'
+            '        FROM\n'
+            '            sample.item item\n'
+            '            LEFT JOIN sample.items_for_time(\n'
+            '                    #{recordedAt}\n'
+            '                ) row ON row.item_id = item.item_id\n'
+            "                AND row.item_type != 'CURRENT'\n"
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_fragment_semantic_rewrite_updates_consumer_signatures(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

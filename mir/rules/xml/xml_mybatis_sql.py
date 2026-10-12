@@ -987,6 +987,23 @@ def dynamic_sql_indent_source_edits(
             if join_indent is not None:
                 head, _ = replacement.rsplit("\n", 1)
                 replacement = head + "\n" + join_indent + "    "
+        if (
+            isinstance(source_rule, JoinOnMultiRule)
+            and "\n" in replacement
+            and item["token"]["type"] == "OPERATOR"
+            and 0 <= item["token"]["start"] < len(mapping)
+        ):
+            # When ON already has its own physical line, a comparison split
+            # continues one level beyond that line. The guest SQL omits the
+            # mapper element's indentation, so recover the anchor directly
+            # from the source instead of emitting a shallow guest indent.
+            token_source = mapping[item["token"]["start"]]
+            line_start = source_content.rfind("\n", 0, token_source) + 1
+            line = source_content[line_start:token_source]
+            on_match = re.match(r"^([ \t]*)ON\b", line, re.IGNORECASE)
+            if on_match:
+                head, _ = replacement.rsplit("\n", 1)
+                replacement = head + "\n" + on_match.group(1) + "    "
         edits.append(
             (source_start, source_end, replacement)
         )
