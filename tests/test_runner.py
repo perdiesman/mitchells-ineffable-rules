@@ -19,9 +19,37 @@ from mir.rules.xml.xml_mybatis_sql import (
 )
 from mir.rules.xml.xml_line_length import XmlLineLengthRule
 from mir.rules.xml.xml_indent import XmlIndentRule
+from mir.rules.xml.xml_sql_entities import XmlSqlEntitiesRule
 from mir.rules.xml.xml_utils import tokenize_xml
 
 class TestRunnerIntegration(unittest.TestCase):
+    def test_xml_sql_entities_encode_text_operators_only(self):
+        source = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <!-- keep example -> text -->\n'
+            '    <select id="items" data-expression="count > 0">\n'
+            "        SELECT payload -> 'name', payload ->> 'code'\n"
+            '        FROM sample_item\n'
+            '        WHERE item_count > 0\n'
+            '    </select>\n'
+            '    <select id="raw"><![CDATA[SELECT payload -> \'name\']]></select>\n'
+            '</mapper>'
+        )
+        expected = source.replace(
+            "payload -> 'name', payload ->> 'code'",
+            "payload -&gt; 'name', payload -&gt;&gt; 'code'",
+        ).replace(
+            'WHERE item_count > 0',
+            'WHERE item_count &gt; 0',
+        )
+        rule = XmlSqlEntitiesRule()
+
+        fixed = rule.fix(source, "generic.xml", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.xml", {}), expected)
+        self.assertEqual(rule.check(fixed, "generic.xml", {}), [])
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         
