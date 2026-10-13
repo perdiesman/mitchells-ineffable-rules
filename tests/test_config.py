@@ -16,7 +16,7 @@ class TestConfig(unittest.TestCase):
             with redirect_stdout(output):
                 load_config(["--version"])
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(output.getvalue().strip(), "mir-linter 0.2.0")
+        self.assertEqual(output.getvalue().strip(), "mir-linter 0.3.0")
 
     def test_default_config(self):
         config = load_config([])
