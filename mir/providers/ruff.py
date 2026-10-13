@@ -124,22 +124,27 @@ class RuffProvider(BaseProvider):
             current = content
             findings = self._check(executable, current, context, provider_config) if provider_config.get("check", True) else []
             if context.fix and findings:
-                disabled = set(context.disabled_lines.get("ruff", frozenset())) | set(context.disabled_lines.get("all", frozenset()))
-                edits = []
-                for finding in findings:
-                    if context.restricted and finding.line not in context.selected_lines:
-                        continue
-                    for edit in finding.edits:
-                        if edit.applicability != "safe" and not provider_config.get("unsafe_fixes", False):
+                for _ in range(10):
+                    disabled = set(context.disabled_lines.get("ruff", frozenset())) | set(context.disabled_lines.get("all", frozenset()))
+                    edits = []
+                    for finding in findings:
+                        if context.restricted and finding.line not in context.selected_lines:
                             continue
-                        if selected_edit(current, edit, context.selected_lines, context.restricted):
-                            touched = range(
-                                current.count("\n", 0, edit.start) + 1,
-                                current.count("\n", 0, edit.end) + 2,
-                            )
-                            if not disabled.intersection(touched):
-                                edits.append(edit)
-                current = apply_edits(current, edits)
+                        for edit in finding.edits:
+                            if edit.applicability != "safe" and not provider_config.get("unsafe_fixes", False):
+                                continue
+                            if selected_edit(current, edit, context.selected_lines, context.restricted):
+                                touched = range(
+                                    current.count("\n", 0, edit.start) + 1,
+                                    current.count("\n", 0, edit.end) + 2,
+                                )
+                                if not disabled.intersection(touched):
+                                    edits.append(edit)
+                    updated = apply_edits(current, edits)
+                    if updated == current:
+                        break
+                    current = updated
+                    findings = self._check(executable, current, context, provider_config)
             format_finding = None
             if provider_config.get("format", True):
                 formatted = self._format(executable, current, context, provider_config)
