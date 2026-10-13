@@ -145,7 +145,10 @@ def load_rules_from_dir(directory: str, language: str, is_external: bool = False
         return rules
         
     search_path = os.path.join(directory, "*.py")
-    rule_files = glob.glob(search_path)
+    # Filesystem enumeration order differs between long-lived worktrees and
+    # fresh CI checkouts. Rule order affects iterative fixes, so discovery must
+    # be deterministic everywhere.
+    rule_files = sorted(glob.glob(search_path))
     
     for file_path in rule_files:
         filename = os.path.basename(file_path)

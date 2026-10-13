@@ -133,6 +133,23 @@ class TestDynamicLoader(unittest.TestCase):
         self.assertIn("IR-keyword-case", rule_ids)
         self.assertIn("IR-custom-sql", rule_ids)
 
+    def test_rule_files_load_in_filename_order(self):
+        second_rule = SQL_EXT_RULE_CONTENT.replace(
+            "CustomSqlRule", "SecondSqlRule"
+        ).replace("IR-custom-sql", "IR-second-sql")
+        first_rule = SQL_EXT_RULE_CONTENT.replace(
+            "CustomSqlRule", "FirstSqlRule"
+        ).replace("IR-custom-sql", "IR-first-sql")
+        self.create_custom_rule("sql", "z_second.py", second_rule)
+        self.create_custom_rule("sql", "a_first.py", first_rule)
+
+        rules = load_rules_for_language("sql", [self.temp_dir], "replace")
+
+        self.assertEqual(
+            [rule.rule_id for rule in rules],
+            ["IR-first-sql", "IR-second-sql"],
+        )
+
     def test_load_rules_replace_mode(self):
         # Create a custom rule in "sql" subdirectory of include dir
         self.create_custom_rule("sql", "custom_sql.py", SQL_EXT_RULE_CONTENT)
