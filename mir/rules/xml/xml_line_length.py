@@ -302,6 +302,44 @@ class XmlLineLengthRule(BaseRule):
                 chars[start:end] = list(replacement)
             return "".join(chars)
 
+        # When an inline dynamic tag is part of an overlong SQL predicate,
+        # wrap at the owning boolean boundary before expanding the tag itself.
+        # The embedded SQL formatter preserves this semantic continuation;
+        # expanding only the tag can otherwise alternate with SQL compaction.
+        dynamic_predicate_edits = []
+        line_offset = 0
+        for line in content.splitlines(keepends=True):
+            body = line.rstrip("\r\n")
+            if len(body) <= max_length or not re.search(
+                r"<(?:if|when|otherwise)\b", body, re.IGNORECASE
+            ):
+                line_offset += len(line)
+                continue
+            tag_position = body.find("<")
+            prefix = body[:tag_position]
+            if not re.search(r"\b(?:WHERE|ON|HAVING)\b", prefix, re.IGNORECASE):
+                line_offset += len(line)
+                continue
+            boundaries = list(re.finditer(r"\s+(?:AND|OR)\s+", prefix, re.IGNORECASE))
+            if not boundaries:
+                line_offset += len(line)
+                continue
+            boundary = boundaries[-1]
+            indent = body[: len(body) - len(body.lstrip(" \t"))]
+            dynamic_predicate_edits.append((
+                line_offset + boundary.start(),
+                line_offset + boundary.end(),
+                "\n" + indent + "    " + boundary.group(0).strip() + " ",
+            ))
+            line_offset += len(line)
+        if dynamic_predicate_edits:
+            chars = list(content)
+            for start, end, replacement in sorted(
+                dynamic_predicate_edits, reverse=True
+            ):
+                chars[start:end] = list(replacement)
+            return "".join(chars)
+
         block_edits = []
         for element in elements:
             if (

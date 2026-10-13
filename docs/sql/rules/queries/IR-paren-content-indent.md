@@ -38,9 +38,9 @@ b
 ####  Correct Example #2
 ```sql
 SELECT COALESCE(
-        a,
-        b
-    ) FROM users;
+    a,
+    b
+) FROM users;
 ```
 
 #### ❌ Violating Example #3

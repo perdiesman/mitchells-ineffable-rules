@@ -114,6 +114,7 @@ class SubqueryIndentRule(BaseRule):
                             violations.append({
                                 "type": "compact_join_opener",
                                 "open_tok": tok,
+                                "close_tok": tokens[close_idx],
                                 "open_line": tok["line"],
                                 "close_line": tokens[close_idx]["line"],
                                 "ws_start": whitespace_before_open["start"],
@@ -445,34 +446,35 @@ class SubqueryIndentRule(BaseRule):
         return "\n".join(lines) + ending
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        processed = set()
         while True:
             offending = self._find_violations(content, rule_config)
-            offending = [
-                item
-                for item in offending
-                if (
-                    item.get("type"),
-                    item["open_line"],
-                    item["close_line"],
-                )
-                not in processed
-            ]
             if not offending:
                 break
-                
-            # Fix from bottom to top to minimize cascading shifts
-            offending.sort(key=lambda x: x["open_line"])
-            target = offending[-1]
-            
-            fixed = self._fix_one(content, target)
-            if fixed == content:
-                processed.add((
-                    target.get("type"),
-                    target["open_line"],
-                    target["close_line"],
-                ))
-                continue
 
-            content = fixed
+            # Apply every disjoint innermost subquery in one scan. Formatting
+            # an outer range with stale line coordinates would be unsafe after
+            # an inner edit inserts a newline, so containing ranges wait for
+            # the next iteration. This bounds rescans by nesting depth instead
+            # of by the total number of subqueries in a large migration.
+            ranges = [
+                (item["open_tok"]["start"], item["close_tok"]["end"], item)
+                for item in offending
+            ]
+            innermost = [
+                item
+                for start, end, item in ranges
+                if not any(
+                    start < other_start and other_end < end
+                    for other_start, other_end, _ in ranges
+                )
+            ]
+            before_batch = content
+            for item in sorted(
+                innermost,
+                key=lambda value: value["open_tok"]["start"],
+                reverse=True,
+            ):
+                content = self._fix_one(content, item)
+            if content == before_batch:
+                break
         return content

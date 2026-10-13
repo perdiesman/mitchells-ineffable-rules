@@ -2,7 +2,6 @@ from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import (
     find_boolean_operator_indices,
-    find_matching_paren,
     get_token_depths,
     is_values_multi,
     tokenize_sql,
@@ -59,10 +58,43 @@ class ExpressionSplitRule(BaseRule):
         depths = get_token_depths(tokens)
         lines = content.splitlines()
         edits = []
+
+        # Index document-wide token relationships once. Bulk migrations can
+        # contain tens of thousands of independent statements; rescanning the
+        # complete token stream for every physical line made this rule
+        # quadratic on otherwise simple INSERT data.
+        tokens_by_line: Dict[int, List[dict]] = {}
+        matching_parens: Dict[int, int] = {}
+        enclosing_open_by_index: List[int | None] = [None] * len(tokens)
+        open_stack: List[int] = []
+        for token_index, token in enumerate(tokens):
+            tokens_by_line.setdefault(token["line"], []).append(token)
+            if token["type"] == "PAREN" and token["value"] == ")":
+                if open_stack:
+                    opening_index = open_stack.pop()
+                    matching_parens[opening_index] = token_index
+                enclosing_open_by_index[token_index] = (
+                    open_stack[-1] if open_stack else None
+                )
+                continue
+            enclosing_open_by_index[token_index] = (
+                open_stack[-1] if open_stack else None
+            )
+            if token["type"] == "PAREN" and token["value"] == "(":
+                open_stack.append(token_index)
+
+        boolean_indices_by_depth: Dict[int, set[int]] = {}
+
+        def boolean_indices_at_depth(depth: int) -> set[int]:
+            if depth not in boolean_indices_by_depth:
+                boolean_indices_by_depth[depth] = set(
+                    find_boolean_operator_indices(tokens, depths, depth)
+                )
+            return boolean_indices_by_depth[depth]
         
         for line_no in range(1, len(lines) + 1):
             line = lines[line_no - 1]
-            line_tokens = [t for t in tokens if t["line"] == line_no]
+            line_tokens = tokens_by_line.get(line_no, [])
             active_tokens = [t for t in line_tokens if t["type"] not in ("WHITESPACE", "COMMENT")]
             if not active_tokens:
                 continue
@@ -102,13 +134,9 @@ class ExpressionSplitRule(BaseRule):
             # Find enclosing parenthesis active at this line
             enclosing_open = None
             first_tok_idx = get_index(active_tokens[0])
-            for idx in range(first_tok_idx - 1, -1, -1):
-                t = tokens[idx]
-                if t["type"] == "PAREN" and t["value"] == "(":
-                    c_idx = find_matching_paren(tokens, idx)
-                    if c_idx is not None and tokens[c_idx]["line"] >= line_no:
-                        enclosing_open = t
-                        break
+            enclosing_open_index = enclosing_open_by_index[first_tok_idx]
+            if enclosing_open_index is not None:
+                enclosing_open = tokens[enclosing_open_index]
                         
             if enclosing_open:
                 eo_idx = get_index(enclosing_open)
@@ -143,9 +171,7 @@ class ExpressionSplitRule(BaseRule):
             keywords = []
             commas = []
             operators = []
-            boolean_indices = set(find_boolean_operator_indices(
-                tokens, depths, base_depth
-            ))
+            boolean_indices = boolean_indices_at_depth(base_depth)
             for t in active_tokens[:-1]:
                 t_idx = get_index(t)
                 if depths[t_idx] == base_depth:
@@ -255,8 +281,8 @@ class ExpressionSplitRule(BaseRule):
                         ):
                             continue
                         candidate_open_index = get_index(candidate_open)
-                        candidate_close_index = find_matching_paren(
-                            tokens, candidate_open_index
+                        candidate_close_index = matching_parens.get(
+                            candidate_open_index
                         )
                         if candidate_close_index is None:
                             continue
@@ -292,7 +318,7 @@ class ExpressionSplitRule(BaseRule):
                 for t_before in active_tokens:
                     if t_before["type"] == "PAREN" and t_before["value"] == "(":
                         idx_before = get_index(t_before)
-                        close_idx_before = find_matching_paren(tokens, idx_before)
+                        close_idx_before = matching_parens.get(idx_before)
                         if close_idx_before is not None:
                             active_between_before = [
                                 tokens[k_before] for k_before in range(idx_before + 1, close_idx_before)
@@ -323,7 +349,7 @@ class ExpressionSplitRule(BaseRule):
                                     
                 if open_tok:
                     open_idx = get_index(open_tok)
-                    close_idx = find_matching_paren(tokens, open_idx)
+                    close_idx = matching_parens.get(open_idx)
                     if close_idx is not None:
                         # Detect if the parenthesis is function-like
                         prev_tok = None

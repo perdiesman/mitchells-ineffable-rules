@@ -31,6 +31,21 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
     if t["type"] == "TAG_CLOSE_START":
         tag_name = t["value"][2:].lower()
         if tag_name in ("select", "insert", "update", "delete", "sql"):
+            matching_query = next(
+                (
+                    element
+                    for element in reversed(active_parents)
+                    if element["tag"] == tag_name
+                ),
+                None,
+            )
+            if matching_query is not None:
+                if matching_query.get("resolved_indent") is not None:
+                    return matching_query["resolved_indent"]
+                opening_line = lines[matching_query["token"]["line"] - 1]
+                return opening_line[:
+                    len(opening_line) - len(opening_line.lstrip(" \t"))
+                ]
             return None
         # Find the matching opening tag in active_parents
         matching_el = None
@@ -412,7 +427,7 @@ class XmlIndentRule(BaseRule):
             if element["tag"] not in {"select", "insert", "update", "delete", "sql"}:
                 continue
             body_start = tokens[element["open_end_idx"]]["end"]
-            body_end = tokens[element["end_idx"]]["start"]
+            body_end = tokens[element["end_idx"] - 1]["start"]
             body = content[body_start:body_end]
             first_clause = re.match(
                 r"\A[ \t\r\n]*(?:WITH|SELECT|FROM|UPDATE|INSERT|DELETE)\b",
@@ -456,7 +471,7 @@ class XmlIndentRule(BaseRule):
             if element["tag"] not in {"select", "sql"}:
                 continue
             body_start = tokens[element["open_end_idx"]]["end"]
-            body_end = tokens[element["end_idx"]]["start"]
+            body_end = tokens[element["end_idx"] - 1]["start"]
             body = content[body_start:body_end]
             masked_body = re.sub(
                 r"<[^>]+>",
@@ -686,7 +701,7 @@ class XmlIndentRule(BaseRule):
             if element["tag"] not in {"select", "insert", "update", "delete", "sql"}:
                 continue
             body_start = tokens[element["open_end_idx"]]["end"]
-            body_end = tokens[element["end_idx"]]["start"]
+            body_end = tokens[element["end_idx"] - 1]["start"]
             body = content[body_start:body_end]
             masked_body = re.sub(
                 r"<[^>]+>",
@@ -773,7 +788,7 @@ class XmlIndentRule(BaseRule):
             if element["tag"] not in {"select", "sql"}:
                 continue
             body_start = tokens[element["open_end_idx"]]["end"]
-            body_end = tokens[element["end_idx"]]["start"]
+            body_end = tokens[element["end_idx"] - 1]["start"]
             body = content[body_start:body_end]
             for match in re.finditer(
                 r"(?i)\bSELECT\s+DISTINCT\s+ON\s*\(", body

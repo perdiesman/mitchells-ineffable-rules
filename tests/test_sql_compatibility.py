@@ -13,6 +13,7 @@ from mir.rules.sql.case_when_wrap import CaseWhenWrapRule
 from mir.rules.sql.case_layout import CaseLayoutRule
 from mir.rules.sql.column_layout import ColumnLayoutRule
 from mir.rules.sql.comma_style import CommaStyleRule
+from mir.rules.sql.dollar_quote_alignment import DollarQuoteAlignmentRule
 from mir.rules.sql.join_on_multi import JoinOnMultiRule
 from mir.rules.sql.keyword_case import KeywordCaseRule
 from mir.rules.sql.line_length import LineLengthRule
@@ -129,6 +130,19 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
 
+    def test_inline_dollar_quote_uses_statement_indentation(self):
+        source = (
+            "CREATE FUNCTION sample_item() RETURNS VOID AS $$\n"
+            "BEGIN\n"
+            "    RETURN;\n"
+            "END;\n"
+            "$$ LANGUAGE plpgsql;"
+        )
+        rule = DollarQuoteAlignmentRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertFalse(rule.check(source, "generic.sql", {}))
+
     def test_operator_spacing_preserves_postgresql_type_attributes(self):
         source = (
             "DECLARE\n"
@@ -160,6 +174,29 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
         self.assertFalse(rule.check(source, "generic.sql", {}))
 
+    def test_multiline_function_layout_ignores_create_table_column_lists(self):
+        source = (
+            "CREATE TABLE sample_item (\n"
+            "    item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n"
+            "    item_name CHARACTER VARYING(120) NOT NULL,\n"
+            "    created_at TIMESTAMP WITH TIME ZONE NOT NULL\n"
+            ");"
+        )
+        rule = MultilineFunctionLayoutRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertFalse(rule.check(source, "generic.sql", {}))
+
+        parenthesis_rule = ParenContentIndentRule()
+        self.assertEqual(
+            parenthesis_rule.fix(source, "generic.sql", {}), source
+        )
+        self.assertFalse(parenthesis_rule.check(source, "generic.sql", {}))
+        compacted = source.replace("CREATE TABLE sample_item (", "CREATE TABLE sample_item(")
+        self.assertEqual(
+            parenthesis_rule.fix(compacted, "generic.sql", {}), source
+        )
+
     def test_multiline_function_layout_formats_row_constructors(self):
         source = (
             "WHERE\n"
@@ -186,6 +223,17 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
         self.assertFalse(rule.check(fixed, "generic.sql", {}))
+
+    def test_parenthesis_indent_preserves_returns_table_spacing(self):
+        source = (
+            "CREATE FUNCTION sample_items()\n"
+            "    RETURNS TABLE(item_id BIGINT, item_name TEXT)\n"
+            "    LANGUAGE sql;"
+        )
+        rule = ParenContentIndentRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertFalse(rule.check(source, "generic.sql", {}))
 
     def test_parenthesized_conditions_format_nested_where_arms(self):
         from mir.rules.sql.paren_multi import ParenMultiRule
@@ -1933,6 +1981,19 @@ class TestSqlCompatibility(unittest.TestCase):
         rule = ParenSameOpRule()
 
         self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
+
+    def test_cte_output_columns_keep_schema_list_spacing(self):
+        source = (
+            "WITH sample_rows(item_id) AS (\n"
+            "    SELECT item_id FROM sample_item\n"
+            ") SELECT item_id FROM sample_rows;"
+        )
+        expected = source.replace("sample_rows(", "sample_rows (")
+
+        rule = ParenContentIndentRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(expected, "generic.sql", {}), [])
         self.assertEqual(rule.check(expected, "generic.sql", {}), [])
 
     def test_between_delimiter_is_not_a_boolean_condition_boundary(self):

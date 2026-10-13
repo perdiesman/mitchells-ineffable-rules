@@ -42,6 +42,91 @@ def insert_column_lines(tokens: List[dict]) -> set[int]:
     return lines
 
 
+def is_returns_table_opening(tokens: List[dict], open_index: int) -> bool:
+    """Return whether ``(`` begins a RETURNS TABLE result declaration."""
+    active = []
+    for index in range(open_index - 1, -1, -1):
+        if tokens[index]["type"] in ("WHITESPACE", "COMMENT"):
+            continue
+        active.append(tokens[index])
+        if len(active) == 2:
+            break
+    return bool(
+        len(active) == 2
+        and active[0]["type"] == "KEYWORD"
+        and active[0]["value"].upper() == "TABLE"
+        and active[1]["value"].upper() == "RETURNS"
+    )
+
+
+def is_create_table_opening(tokens: List[dict], open_index: int) -> bool:
+    """Return whether ``(`` begins a CREATE TABLE field declaration."""
+    active = []
+    for index in range(open_index - 1, -1, -1):
+        token = tokens[index]
+        if token["type"] in ("WHITESPACE", "COMMENT"):
+            continue
+        if token["type"] in ("COMMA", "PAREN", "SEMI"):
+            break
+        active.append(token)
+        if len(active) >= 12:
+            break
+    chronological = list(reversed(active))
+    words = [token["value"].upper() for token in chronological]
+    if "TABLE" not in words:
+        return False
+    table_index = words.index("TABLE")
+    return bool(
+        "CREATE" in words[:table_index]
+        and all(
+            word in {"CREATE", "GLOBAL", "LOCAL", "TEMP", "TEMPORARY", "UNLOGGED"}
+            for word in words[:table_index]
+        )
+        and all(
+            token["value"].upper() in {"IF", "NOT", "EXISTS"}
+            or token["type"] in {"IDENTIFIER", "DOT"}
+            for token in chronological[table_index + 1:]
+        )
+    )
+
+
+def is_cte_column_opening(tokens: List[dict], open_index: int) -> bool:
+    """Return whether ``(`` begins a named CTE's output-column list."""
+    previous = next(
+        (
+            tokens[index]
+            for index in range(open_index - 1, -1, -1)
+            if tokens[index]["type"] not in ("WHITESPACE", "COMMENT")
+        ),
+        None,
+    )
+    if previous is None or previous["type"] != "IDENTIFIER":
+        return False
+    close_index = find_matching_paren(tokens, open_index)
+    if close_index is None:
+        return False
+    following = []
+    for token_index in range(close_index + 1, len(tokens)):
+        token = tokens[token_index]
+        if token["type"] in ("WHITESPACE", "COMMENT"):
+            continue
+        following.append(token)
+        if len(following) >= 4:
+            break
+    if not following or following[0]["value"].upper() != "AS":
+        return False
+    index = 1
+    if index < len(following) and following[index]["value"].upper() == "NOT":
+        index += 1
+    if index < len(following) and following[index]["value"].upper() == "MATERIALIZED":
+        index += 1
+    return bool(
+        index < len(following)
+        and following[index]["type"] == "PAREN"
+        and following[index]["value"] == "("
+    )
+
+
 class ParenContentIndentRule(BaseRule):
     rule_id = "IR-paren-content-indent"
     description = "Content inside multi-line parentheses should be indented 4 spaces relative to the opening parenthesis, and the closing parenthesis should align with it."
@@ -59,7 +144,7 @@ class ParenContentIndentRule(BaseRule):
         },
         {
             "violating": "SELECT COALESCE(\na,\nb\n) FROM users;",
-            "correct": "SELECT COALESCE(\n        a,\n        b\n    ) FROM users;"
+            "correct": "SELECT COALESCE(\n    a,\n    b\n) FROM users;"
         },
         {
             "violating": "INSERT INTO t (c) VALUES\n(1),\n    (2);",
@@ -82,6 +167,7 @@ class ParenContentIndentRule(BaseRule):
         
         # Find all multiline parentheses that are NOT subqueries
         multiline_parens = []
+        subquery_close_lines = set()
         table_function_openings = table_function_parens(tokens)
         for i, tok in enumerate(tokens):
             if tok["type"] == "PAREN" and tok["value"] == "(":
@@ -95,6 +181,11 @@ class ParenContentIndentRule(BaseRule):
                         next_active = tokens[idx]
                         break
                 if next_active and next_active["type"] == "KEYWORD" and next_active["value"].upper() == "SELECT":
+                    close_idx = find_matching_paren(tokens, i)
+                    if close_idx is not None:
+                        close_line = tokens[close_idx]["line"]
+                        if lines[close_line - 1].lstrip().startswith(")"):
+                            subquery_close_lines.add(close_line)
                     continue
                     
                 close_idx = find_matching_paren(tokens, i)
@@ -103,58 +194,48 @@ class ParenContentIndentRule(BaseRule):
                     if tok["line"] < close_tok["line"]:
                         multiline_parens.append((i, close_idx, tok, close_tok))
                         
-        # Map each line to its expected indent
+        # Map each line to its innermost owning parenthesis. Iterating every
+        # parenthesis for every line was quadratic on bulk INSERT archives;
+        # walking only the lines spanned by each parenthesis preserves the
+        # same innermost-open precedence while scaling with actual nesting.
+        owners = {}
+        for open_idx, close_idx, open_tok, close_tok in multiline_parens:
+            for line_no in range(open_tok["line"] + 1, close_tok["line"]):
+                current = owners.get(line_no)
+                if current is None or open_idx > current[0]:
+                    owners[line_no] = (
+                        open_idx, "content", open_tok, close_tok
+                    )
+            close_line = close_tok["line"]
+            if (
+                lines[close_line - 1].lstrip().startswith(")")
+                and (
+                    close_line not in owners
+                    or open_idx > owners[close_line][0]
+                )
+            ):
+                owners[close_line] = (
+                    open_idx, "close", open_tok, close_tok
+                )
+
         expected_indents = {}
-        
-        for line_no in range(1, len(lines) + 1):
+        for line_no, inner in owners.items():
             line = lines[line_no - 1]
-            if line.strip() == "":
+            if line.strip() == "" or line_no in subquery_close_lines:
+                # Subquery indentation owns a leading closing parenthesis,
+                # even when that line is also content of an enclosing
+                # arithmetic/grouping parenthesis.
                 continue
-                
-            # Find all active multiline parentheses for this line
-            active = []
-            for open_idx, close_idx, open_tok, close_tok in multiline_parens:
-                # Is L a content line?
-                if open_tok["line"] < line_no < close_tok["line"]:
-                    active.append((open_idx, "content", open_tok, close_tok))
-                # Is L the closing line, and the line starts with ')'?
-                elif line_no == close_tok["line"] and line.lstrip().startswith(")"):
-                    active.append((open_idx, "close", open_tok, close_tok))
-                    
-            if not active:
-                continue
-                
-            # Sort by open_idx descending to get the innermost active one
-            active.sort(key=lambda x: x[0], reverse=True)
-            inner = active[0]
             open_tok = inner[2]
             
             # Get opening indent of open_tok's line
             open_line_text = lines[open_tok["line"] - 1]
             open_indent = open_line_text[:len(open_line_text) - len(open_line_text.lstrip())]
             
-            # Check if this parenthesis is function-like
-            prev_tok = None
-            try:
-                open_idx = tokens.index(open_tok)
-                for p_idx in range(open_idx - 1, -1, -1):
-                    if tokens[p_idx]["type"] not in ("WHITESPACE", "COMMENT"):
-                        prev_tok = tokens[p_idx]
-                        break
-            except ValueError:
-                pass
-                
-            is_func_like = False
-            if prev_tok:
-                val_up = prev_tok["value"].upper()
-                is_val_multi = (val_up == "VALUES" and is_values_multi(tokens, open_idx))
-                if not is_val_multi and not is_insert_column_opening(tokens, open_idx) and (prev_tok["type"] == "IDENTIFIER" or val_up in ("VALUES", "TABLE", "COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST", "IN", "ANY", "SOME")):
-                    is_func_like = True
-
             if inner[1] == "content":
-                expected_indents[line_no] = open_indent + ("        " if is_func_like else "    ")
+                expected_indents[line_no] = open_indent + "    "
             else:
-                expected_indents[line_no] = open_indent + ("    " if is_func_like else "")
+                expected_indents[line_no] = open_indent
                 
         return expected_indents
 
@@ -193,9 +274,11 @@ class ParenContentIndentRule(BaseRule):
                                 )
                             )
                     else:
-                        is_keyword_op = val_up in ("VALUES", "TABLE", "IN")
-                        is_func_like = (prev_tok["type"] == "IDENTIFIER") or (val_up in ("COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST")) or is_keyword_op
-                        if is_func_like:
+                        is_keyword_op = val_up in ("VALUES", "TABLE", "IN") and not is_returns_table_opening(tokens, i)
+                        is_create_table = is_create_table_opening(tokens, i)
+                        is_cte_columns = is_cte_column_opening(tokens, i)
+                        is_func_like = not (is_create_table or is_cte_columns) and ((prev_tok["type"] == "IDENTIFIER") or (val_up in ("COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST")) or is_keyword_op)
+                        if is_func_like or is_create_table or is_cte_columns:
                             if prev_tok["line"] < tok["line"]:
                                 violations.append(
                                     Violation(
@@ -210,7 +293,7 @@ class ParenContentIndentRule(BaseRule):
                                 start_ws = prev_tok["end"]
                                 end_ws = tok["start"]
                                 spaces = content[start_ws:end_ws]
-                                expected_spaces = " " if is_keyword_op else ""
+                                expected_spaces = " " if is_keyword_op or is_create_table or is_cte_columns else ""
                                 if spaces != expected_spaces:
                                     violations.append(
                                         Violation(
@@ -269,12 +352,14 @@ class ParenContentIndentRule(BaseRule):
                         if content[start_ws:end_ws] != expected_replacement:
                             edits.append((start_ws, end_ws, expected_replacement))
                     else:
-                        is_keyword_op = val_up in ("VALUES", "TABLE", "IN")
-                        is_func_like = (prev_tok["type"] == "IDENTIFIER") or (val_up in ("COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST")) or is_keyword_op
-                        if is_func_like:
+                        is_keyword_op = val_up in ("VALUES", "TABLE", "IN") and not is_returns_table_opening(tokens, i)
+                        is_create_table = is_create_table_opening(tokens, i)
+                        is_cte_columns = is_cte_column_opening(tokens, i)
+                        is_func_like = not (is_create_table or is_cte_columns) and ((prev_tok["type"] == "IDENTIFIER") or (val_up in ("COALESCE", "ROW_NUMBER", "NULLIF", "GREATEST", "LEAST")) or is_keyword_op)
+                        if is_func_like or is_create_table or is_cte_columns:
                             start_ws = prev_tok["end"]
                             end_ws = tok["start"]
-                            expected_spaces = " " if is_keyword_op else ""
+                            expected_spaces = " " if is_keyword_op or is_create_table or is_cte_columns else ""
                             if content[start_ws:end_ws] != expected_spaces:
                                 edits.append((start_ws, end_ws, expected_spaces))
         if edits:
@@ -304,9 +389,9 @@ class ParenContentIndentRule(BaseRule):
                     
                 if mismatch:
                     lines[line_no - 1] = expected_indent + line_text.lstrip()
-                    # Re-evaluate expected indents since we modified the line prefix
-                    # which might be an opening parenthesis line for nested parens
-                    expected_indents = self._get_line_expected_indents("\n".join(lines))
+                    # Nested opening lines settle on the runner's next bounded
+                    # convergence pass. Re-tokenizing the full document after
+                    # every changed line makes large migrations quadratic.
                     
         ending = "\n" if content.endswith("\n") else ""
         return "\n".join(lines) + ending

@@ -52,6 +52,11 @@ class FromParenLayoutRule(BaseRule):
                 for idx in range(i - 1, -1, -1):
                     t = tokens[idx]
                     if depths[idx] == outer_depth:
+                        if t["value"] == ";":
+                            # FROM/JOIN ownership never crosses a statement
+                            # boundary. Stopping here keeps bulk files with
+                            # thousands of independent INSERT rows linear.
+                            break
                         if t["type"] == "KEYWORD" and t["value"].upper() in ("FROM", "JOIN"):
                             in_from_or_join = True
                             break

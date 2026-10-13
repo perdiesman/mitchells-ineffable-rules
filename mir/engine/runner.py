@@ -54,6 +54,9 @@ def print_diff_with_delta(diff_lines: List[str]) -> None:
 
 
 def _plpgsql_bodies(content: str) -> list[dict]:
+    if "$" not in content:
+        return []
+
     from mir.rules.sql.sql_utils import tokenize_sql
 
     tokens = tokenize_sql(content)
@@ -298,28 +301,6 @@ def _rule_enabled(config: Config, rule: BaseRule, lang: str, rule_config: dict) 
     return bool(rule_config.get("enabled", rule.enabled_by_default))
 
 
-def _find_rule(rule_id: str, lang: str, config: Config) -> Optional[BaseRule]:
-    languages = [lang] + [
-        candidate
-        for candidate in get_supported_languages(config.include_dirs)
-        if candidate != lang
-    ]
-    for language in languages:
-        rule = next(
-            (
-                candidate
-                for candidate in load_rules_for_language(
-                    language, config.include_dirs, config.rule_mode
-                )
-                if candidate.rule_id == rule_id
-            ),
-            None,
-        )
-        if rule is not None:
-            return rule
-    return None
-
-
 def _collect(
     config: Config,
     content: str,
@@ -337,7 +318,19 @@ def _collect(
             template_dialect = "trellis"
     collected: list[tuple[Violation, BaseRule, str]] = []
     diagnostics: list[str] = []
-    for rule in load_rules_for_language(lang, config.include_dirs, config.rule_mode):
+    language_rules = load_rules_for_language(
+        lang, config.include_dirs, config.rule_mode
+    )
+    rules_by_id = {rule.rule_id: rule for rule in language_rules}
+    for candidate_language in get_supported_languages(config.include_dirs):
+        if candidate_language == lang:
+            continue
+        for candidate_rule in load_rules_for_language(
+            candidate_language, config.include_dirs, config.rule_mode
+        ):
+            rules_by_id.setdefault(candidate_rule.rule_id, candidate_rule)
+
+    for rule in language_rules:
         rule_config = resolve_rule_config(
             config,
             rule.rule_id,
@@ -359,7 +352,7 @@ def _collect(
                 continue
             if violation.line_number in disabled_lines or violation.line_number in disabled.get(violation.rule_id, set()):
                 continue
-            violation_rule = _find_rule(violation.rule_id, lang, config) or rule
+            violation_rule = rules_by_id.get(violation.rule_id, rule)
             violation_config = resolve_rule_config(
                 config,
                 violation_rule.rule_id,
@@ -527,13 +520,18 @@ def process_document(
         else:
             result.errors += 1
     result.errors += len(result.diagnostics)
-    if lang == "sql":
+    if lang in {"sql", "xml"}:
         # Tokenization is shared across every rule and formatting pass for this
-        # document. Do not retain large compatibility or migration files after
-        # their result has been fully materialized.
+        # document. Do not retain large compatibility, mapper, or migration
+        # files after their result has been fully materialized. MyBatis XML
+        # processing uses both tokenizers for its embedded SQL.
         from mir.rules.sql.sql_utils import _tokenize_sql_impl
 
         _tokenize_sql_impl.cache_clear()
+        if lang == "xml":
+            from mir.rules.xml.xml_utils import _tokenize_xml_cached
+
+            _tokenize_xml_cached.cache_clear()
     return result
 
 
@@ -643,9 +641,28 @@ def run_linter(config: Config) -> int:
         language = get_file_language(file_path)
         if not language:
             continue
+        source_encoding = "utf-8"
         try:
-            original = Path(file_path).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as error:
+            original = Path(file_path).read_text(encoding=source_encoding)
+        except UnicodeDecodeError:
+            # Some long-lived SQL migration archives predate UTF-8 project
+            # conventions. Latin-1 is a reversible byte mapping, so the
+            # formatter can preserve those files' encoding while still
+            # applying ASCII-oriented SQL layout fixes.
+            source_encoding = "latin-1"
+            try:
+                original = Path(file_path).read_text(
+                    encoding=source_encoding
+                )
+            except OSError as error:
+                if not config.quiet:
+                    print(
+                        f"Error reading file '{file_path}': {error}",
+                        file=sys.stderr,
+                    )
+                total_errors += 1
+                continue
+        except OSError as error:
             if not config.quiet:
                 print(f"Error reading file '{file_path}': {error}", file=sys.stderr)
             total_errors += 1
@@ -656,7 +673,11 @@ def run_linter(config: Config) -> int:
         if result.content == original:
             continue
         if config.fix:
-            Path(file_path).write_text(result.content, encoding="utf-8", newline="")
+            Path(file_path).write_text(
+                result.content,
+                encoding=source_encoding,
+                newline="",
+            )
             if not config.quiet:
                 print(f"Fixed issues in {file_path} ({', '.join(sorted(result.rules_fixed))})")
         elif config.dry_run and not config.quiet:

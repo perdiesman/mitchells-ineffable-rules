@@ -76,7 +76,6 @@ class TestRunnerIntegration(unittest.TestCase):
             "$$ LANGUAGE plpgsql;\n"
         )
         config = Config()
-        config.profile = "commit"
         config.fix = True
 
         first = process_document(config, sql_content, "generic.sql", "sql")
@@ -85,7 +84,7 @@ class TestRunnerIntegration(unittest.TestCase):
         )
 
         self.assertIn(
-            "    INSERT INTO sample_item_history (\n"
+            "    INSERT INTO sample_item_history(\n"
             "        recorded_timestamp,\n"
             "        sample_item_identifier,\n"
             "        sample_owner_identifier,\n"
@@ -95,10 +94,10 @@ class TestRunnerIntegration(unittest.TestCase):
         )
         self.assertIn(
             "        VALUES (\n"
-            "            new.recorded_timestamp,\n"
-            "            new.sample_item_identifier,\n"
-            "            new.sample_owner_identifier,\n"
-            "            new.sample_region_identifier\n"
+            "            NEW.recorded_timestamp,\n"
+            "            NEW.sample_item_identifier,\n"
+            "            NEW.sample_owner_identifier,\n"
+            "            NEW.sample_region_identifier\n"
             "        );",
             first.content,
         )
@@ -1152,6 +1151,48 @@ class TestRunnerIntegration(unittest.TestCase):
         
         with open(path, "r") as f:
             self.assertEqual(f.read(), "SELECT id FROM t;")
+
+    def test_runner_preserves_latin1_source_encoding(self):
+        path = os.path.join(self.temp_dir.name, "legacy.sql")
+        source = "select id from sample_item; -- año\n"
+        with open(path, "wb") as stream:
+            stream.write(source.encode("latin-1"))
+        config = Config()
+        config.paths = [path]
+        config.fix = True
+
+        exit_code = run_linter(config)
+
+        self.assertEqual(exit_code, 0)
+        with open(path, "rb") as stream:
+            self.assertEqual(
+                stream.read(),
+                "SELECT id FROM sample_item; -- año\n".encode("latin-1"),
+            )
+
+    def test_nested_multiline_function_calls_converge(self):
+        source = (
+            "SELECT source.item_id\n"
+            "FROM sample_source source\n"
+            "JOIN sample_target target ON replace(\n"
+            "        upper(source.item_name),\n"
+            "        ' ',\n"
+            "        ''\n"
+            "    ) = replace(\n"
+            "        replace(upper(target.item_name), '''', ''),\n"
+            "        ' ',\n"
+            "        ''\n"
+            "    );"
+        )
+        config = Config()
+        config.fix = True
+
+        first = process_document(config, source, "generic.sql", "sql")
+        second = process_document(config, first.content, "generic.sql", "sql")
+
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
 
     def test_formatter_cycle_does_not_persist_a_partial_state(self):
         class OscillatingRule(BaseRule):
@@ -4914,6 +4955,44 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
 
+    def test_xml_mybatis_set_operator_keeps_dynamic_cte_indent(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        WITH current_items AS (\n'
+            '            SELECT item_id\n'
+            '            FROM current_item\n'
+            '        ),\n'
+            '        <if test="includeArchived">\n'
+            '            selected_items AS (\n'
+            '                SELECT item_id\n'
+            '                FROM current_items\n'
+            '                UNION ALL\n'
+            '                SELECT item_id\n'
+            '                FROM archived_item\n'
+            '            ),\n'
+            '        </if>\n'
+            '        final_items AS (\n'
+            '            SELECT item_id\n'
+            '            FROM current_items\n'
+            '        )\n'
+            '        SELECT item_id\n'
+            '        FROM final_items\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_formats_dynamic_window_ordering(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
@@ -5344,6 +5423,144 @@ class TestRunnerIntegration(unittest.TestCase):
 
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_create_table_as_long_select_does_not_split_scalar_call(self):
+        sql_content = (
+            "CREATE TEMP TABLE sample_rollup AS SELECT min(item_id) AS first_id, "
+            "external_id, item_name, region_name, category_name, status_name "
+            "FROM sample_item GROUP BY external_id, item_name, region_name, "
+            "category_name, status_name;\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertIn("min(item_id) AS first_id", first.content)
+        self.assertNotIn("min(\n", first.content)
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+
+    def test_nested_scalar_subquery_closers_do_not_cycle(self):
+        sql_content = (
+            "SELECT round(\n"
+            "    ((\n"
+            "        SELECT sum(metric_value)\n"
+            "        FROM sample_metric\n"
+            "    ) / (\n"
+            "        SELECT sum(total_value)\n"
+            "        FROM sample_total\n"
+            "    )) * 100,\n"
+            "    2\n"
+            ");\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(second.content, first.content)
+        self.assertIn("\n        ) / (\n", first.content)
+        self.assertFalse(first.diagnostics)
+
+    def test_raise_message_additive_continuations_do_not_cycle(self):
+        sql_content = (
+            "RAISE unique_violation USING MESSAGE = 'id: ' || NEW.item_id::TEXT "
+            "|| ' already exists in sample_schema.sample_table_with_a_long_name';\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertIn(
+            "USING MESSAGE = 'id: ' || NEW.item_id::TEXT\n",
+            first.content,
+        )
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+
+    def test_inline_dynamic_predicate_wraps_at_boolean_boundary(self):
+        xml_content = """<mapper namespace="sample.Mapper">
+    <select id="findItems">
+        SELECT item_id
+        FROM sample_item item
+        WHERE (#{scope} = 'all' OR item.scope_name = ANY('{${scopes}}'::TEXT[])) AND item.owner_id IS <if test="excludeOwner">NOT</if> NULL
+    </select>
+</mapper>
+"""
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "SampleMapper.xml", "xml")
+        second = process_document(
+            config, first.content, "SampleMapper.xml", "xml"
+        )
+
+        self.assertIn(
+            "\n            AND item.owner_id IS <if test=\"excludeOwner\">NOT</if> NULL",
+            first.content,
+        )
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+
+    def test_query_closer_aligns_after_inline_dynamic_ordering(self):
+        xml_content = """<mapper namespace="sample.Mapper">
+    <select id="findItems">
+        SELECT item_id
+        FROM sample_item
+        ORDER BY
+            <choose>
+                <when test="byName">item_name</when>
+                <otherwise>created_at</otherwise>
+            </choose>, item_id
+    </select>
+</mapper>
+"""
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "SampleMapper.xml", "xml")
+        second = process_document(
+            config, first.content, "SampleMapper.xml", "xml"
+        )
+
+        self.assertIn("\n    </select>\n", first.content)
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+
+    def test_create_view_union_branches_share_query_indent(self):
+        sql_content = (
+            "CREATE VIEW sample_combined AS\n"
+            "    SELECT item_id FROM sample_primary\n"
+            "UNION\n"
+            "    SELECT item_id FROM sample_secondary;\n"
+        )
+        config = Config()
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertIn("\n    UNION\n    SELECT", first.content)
+        self.assertEqual(second.content, first.content)
         self.assertFalse(first.diagnostics)
 
     def test_where_case_comparison_continuation_does_not_cycle(self):

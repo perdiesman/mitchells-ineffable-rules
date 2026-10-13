@@ -652,6 +652,7 @@ class LineLengthRule(BaseRule):
                             all_calls.append({
                                 "start": tokens[open_idx]["start"],
                                 "end": tokens[close_idx]["end"],
+                                "name_idx": i,
                                 "open_idx": open_idx,
                                 "close_idx": close_idx,
                                 "name_token": tok
@@ -707,6 +708,28 @@ class LineLengthRule(BaseRule):
                         for item in earlier_line_tokens
                         if item["type"] == "KEYWORD"
                     }
+                    call_depth = token_depths[call["name_idx"]]
+                    select_owns_line = any(
+                        tokens[index]["type"] == "KEYWORD"
+                        and tokens[index]["value"].upper() == "SELECT"
+                        and token_depths[index] == call_depth
+                        for index in active_by_line.get(
+                            call["name_token"]["line"], []
+                        )
+                        if index < call["name_idx"]
+                    ) and any(
+                        tokens[index]["type"] == "COMMA"
+                        and token_depths[index] == call_depth
+                        for index in active_by_line.get(
+                            call["name_token"]["line"], []
+                        )
+                        if index > call["close_idx"]
+                    )
+                    if select_owns_line:
+                        # The SELECT-column layout rule owns this wrapping
+                        # opportunity. Expanding a scalar call first can make
+                        # column compaction and line-length expansion cycle.
+                        continue
                     if (
                         "JOIN" in earlier_keywords
                         and earlier_keywords.intersection({"AND", "OR"})

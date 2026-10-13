@@ -3,6 +3,7 @@ from typing import Any, Dict, List
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 from mir.rules.sql.table_function_indent import table_function_parens
+from mir.rules.sql.paren_content_indent import is_create_table_opening
 
 
 class MultilineFunctionLayoutRule(BaseRule):
@@ -195,6 +196,11 @@ class MultilineFunctionLayoutRule(BaseRule):
                 and tokens[first_inner_index]["type"] == "PAREN"
             )
             parent_open = parent_openings.get(open_index)
+            if parent_open is None and is_create_table_opening(tokens, open_index):
+                # The relation name before a CREATE TABLE column list is an
+                # identifier, but it is not a callable owner. DDL field layout
+                # and generic parenthesis indentation own this list.
+                continue
             parent_owner = (
                 previous_active_indices[parent_open]
                 if parent_open is not None else None

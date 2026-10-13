@@ -45,11 +45,8 @@ class DollarQuoteAlignmentRule(BaseRule):
                 line_start = content.rfind("\n", 0, t["start"]) + 1
                 line_prefix = content[line_start:t["start"]]
                 opening_indent = ""
-                for char in line_prefix:
-                    if char in (" ", "\t"):
-                        opening_indent += char
-                    else:
-                        break
+                if not line_prefix.strip():
+                    opening_indent = line_prefix
                         
                 pre_body = inner_body[:last_newline]
                 expected_val = tag + pre_body + "\n" + opening_indent + tag
