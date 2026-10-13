@@ -386,12 +386,12 @@ class MyXmlRule(BaseRule):
 
 ## Publishing to PyPI
 
-For instructions on building distribution archives, TestPyPI validation, and publishing to the live Python Package Index, refer to the [PyPI Publishing Guide](docs/publishing.md).
+Releases are published from `main` through GitHub Actions and PyPI Trusted Publishing. Publishing a GitHub Release with a matching `vX.Y.Z` tag runs the complete test and documentation checks, validates the distributions, smoke-tests the wheel, and uploads without a stored API token. Refer to the [PyPI Publishing Guide](docs/publishing.md) for the one-time publisher registration and release procedure.
 
 ---
 
 *This package has been developed with **Antigravity** and **OpenAI Codex**.*
 
-*Total Cumulative Development Time: ~70.9 hours*
+*Total Cumulative Development Time: ~71.3 hours*
 
-*Last Developer Session: 2026-10-13T18:01:05Z*
+*Last Developer Session: 2026-10-13T18:27:54Z*

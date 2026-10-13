@@ -1,90 +1,54 @@
 # Publishing to PyPI
 
-This guide outlines how to package and publish the **Mitchell's Ineffable Rules (MIR) Linter** to the Python Package Index (PyPI).
+MIR releases are published to the production Python Package Index by GitHub Actions and [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/). The workflow exchanges GitHub's short-lived OpenID Connect identity for permission to upload `mir-linter`; the repository does not store a PyPI password or API token.
 
----
+## One-time project setup
 
-## 1. Prerequisites
+The repository owner must register the workflow once on the existing [`mir-linter` PyPI project](https://pypi.org/project/mir-linter/):
 
-You need the `build` package (to compile your source code into distributable packages) and `twine` (to securely upload packages to PyPI).
+1. Open **Manage project → Publishing** on PyPI.
+2. Add a GitHub publisher with these exact values:
 
-Install these dependencies locally using `uv`:
-```bash
-uv pip install build twine
-```
+   | Field | Value |
+   | --- | --- |
+   | GitHub owner | `perdiesman` |
+   | Repository | `mitchells-ineffable-rules` |
+   | Workflow name | `publish.yml` |
+   | Environment name | `pypi` |
 
----
+3. Save the publisher. No PyPI secret needs to be added to GitHub.
 
-## 2. Package Configuration (`pyproject.toml`)
+The GitHub `pypi` environment permits `v*` tags and does not require a reviewer. Repository settings prevent deletion or force-pushes of `main` without preventing the owner's normal direct pushes.
 
-The package config [pyproject.toml](file:///home/me/projects/mitchells-ineffable-rules/pyproject.toml) defines metadata and sets up executable CLI entrypoints. After installation, users can invoke the linter directly from their terminal using either command:
-- `mir`
-- `mir-linter`
+## Publish a release
 
----
+1. Update every recorded version and merge the release commit into `main`. The project version in `pyproject.toml` and `mir.__version__` must match.
+2. Run the normal checks locally if desired:
 
-## 3. Build the Distribution Archives
-
-Before building, clean up any previous build outputs (if `dist/` or `build/` directories exist).
-
-Run the build tool in the root of the project:
-```bash
-uv run python -m build
-```
-
-This command generates two files in the `dist/` directory:
-- A source archive (`.tar.gz`)
-- A built distribution wheel (`.whl`)
-
----
-
-## 4. Upload to TestPyPI (Optional but Recommended)
-
-It is good practice to test the publication on TestPyPI first to ensure metadata renders correctly and installation works without issues.
-
-1. Register an account on [TestPyPI](https://test.pypi.org/).
-2. Create an API token on TestPyPI.
-3. Upload the files using `twine`:
    ```bash
-   uv run twine upload --repository testpypi dist/*
-   ```
-4. Test the installation from TestPyPI:
-   ```bash
-   pip install --index-url https://test.pypi.org/simple/ --no-deps mitchells-ineffable-rules
+   uv run --frozen python -m unittest discover -s tests -p "test_*.py"
+   uv run --frozen mir/main.py --help docs
+   git diff --exit-code -- docs
    ```
 
----
+3. On GitHub, create a release targeting `main`. Create or select a tag named `vX.Y.Z`, where `X.Y.Z` exactly matches the package version, and publish the release.
 
-## 5. Upload to PyPI
+The [Publish to PyPI workflow](../.github/workflows/publish.yml) then verifies the version and `main` ancestry, runs the complete tests, checks generated documentation, builds both distributions, validates their metadata, installs and smoke-tests the wheel, and publishes them to PyPI. Draft releases do not trigger it. A prerelease does trigger it when published and must use a tag matching its Python package version.
 
-Once verified, upload the build distributions to live PyPI:
+PyPI versions are immutable. If validation fails because release content is wrong, fix the problem on `main`, select a new version, and publish a new release rather than reusing a version already uploaded. A transient failed workflow run can be retried from the GitHub Actions page.
 
-1. Register an account on [PyPI](https://pypi.org/).
-2. Create an API token on PyPI.
-3. Upload the files using `twine` (you will be prompted for your username `__token__` and API token password):
-   ```bash
-   uv run twine upload dist/*
-   ```
+## Verify the release
 
----
-
-## 6. Installing and Running the Package
-
-After publishing, anyone can install the linter globally using `pip` or `uv`:
+The completed workflow links to the PyPI project from its `pypi` environment deployment. Confirm that the new release displays GitHub provenance, then test either supported installation form:
 
 ```bash
-# Via pip
-pip install mitchells-ineffable-rules
-
-# Via uv (recommended tool launcher)
-uv tool install mitchells-ineffable-rules
+pip install mir-linter
+uv tool install mir-linter
 ```
 
-Once installed, execute the linter directly:
-```bash
-# Run on the current directory
-mir .
+Both installations provide the `mir` and `mir-linter` commands:
 
-# Run with verbose and auto-fixes
-mir-linter --fix -v path/to/file.sql
+```bash
+mir --version
+mir-linter --version
 ```
