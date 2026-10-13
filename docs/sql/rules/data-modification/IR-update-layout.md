@@ -38,6 +38,18 @@ SET
 WHERE some_condition;
 ```
 
+#### ❌ Violating Example #3
+```sql
+UPDATE sample_item SET enabled = true,
+                    updated_at = now()
+                WHERE item_id = :item_id
+```
+
+####  Correct Example #3
+```sql
+UPDATE sample_item SET enabled = true, updated_at = now() WHERE item_id = :item_id
+```
+
 #### Additional Validations
 ```sql
 UPDATE t SET a = 1 WHERE b = 2;

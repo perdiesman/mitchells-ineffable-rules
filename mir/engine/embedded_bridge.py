@@ -638,7 +638,20 @@ def fix_embedded_content(
                                 # that is invisible in the expanded SQL view.
                                 # Keep it atomic unless the responsible rule
                                 # explicitly allows a deeper continuation.
-                                if not dynamic_indent_safe:
+                                # Even an indentation-safe rule must not
+                                # remove physical XML nesting while aligning
+                                # the expanded guest query. For example, a
+                                # UNION inside an <if> aligns with its SELECT
+                                # in source even though both appear one level
+                                # shallower after the tag is removed.
+                                if (
+                                    not dynamic_indent_safe
+                                    or len(replacement.expandtabs(4))
+                                    < len(
+                                        original_xml[start_orig:end_orig]
+                                        .expandtabs(4)
+                                    )
+                                ):
                                     skip = True
 
                     candidate_edit = (start_orig, end_orig, replacement)
@@ -719,6 +732,38 @@ def fix_embedded_content(
                     for position in range(guest_start + 1, guest_end)
                 ):
                     continue
+                if extra_fix_args and "original_xml" in extra_fix_args:
+                    original_xml = extra_fix_args["original_xml"]
+                    xml_line_start = original_xml.rfind(
+                        "\n", 0, start_orig
+                    ) + 1
+                    xml_indent_end = xml_line_start
+                    while (
+                        xml_indent_end < len(original_xml)
+                        and original_xml[xml_indent_end] in " \t"
+                    ):
+                        xml_indent_end += 1
+                    is_dynamic_line = any(
+                        range_start < xml_indent_end < range_end
+                        for range_start, range_end, _
+                        in extra_fix_args.get(
+                            "mybatis_dynamic_indent_ranges", []
+                        )
+                    )
+                    if (
+                        is_dynamic_line
+                        and xml_line_start <= start_orig <= xml_indent_end
+                        and end_orig <= xml_indent_end
+                        and len(fixed_line[:fixed_indent].expandtabs(4))
+                        < len(
+                            original_xml[start_orig:end_orig].expandtabs(4)
+                        )
+                    ):
+                        # The occurrence recovery below exists to restore
+                        # deeper SQL continuations. It must not re-add a
+                        # shallower edit that the primary mapping rejected
+                        # because that would erase physical XML nesting.
+                        continue
                 candidate = (start_orig, end_orig, fixed_line[:fixed_indent])
                 if any(
                     start_orig < existing_end and existing_start < end_orig

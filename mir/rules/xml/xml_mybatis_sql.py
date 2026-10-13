@@ -132,13 +132,177 @@ def owns_runtime_where(element: dict) -> bool:
     return False
 
 
-def is_reusable_column_list(element: dict) -> bool:
+def reusable_select_list_ids(
+    tokens: List[dict], elements: List[dict], content: str
+) -> set[str]:
+    """Infer reusable projection fragments from their include sites.
+
+    Fragment names are conventions, not syntax. A fragment included after a
+    SELECT and before its matching FROM is a projection list regardless of its
+    id. The fragment remains formatted at its own local XML indentation.
+    """
+    from mir.rules.sql.sql_utils import get_token_depths, tokenize_sql
+
+    projection_ids: set[str] = set()
+    fragments_by_id = {}
+    for element in elements:
+        fragment_id = element.get("attrs", {}).get("id")
+        if element.get("tag") != "sql" or not fragment_id:
+            continue
+        fragments_by_id[fragment_id] = element
+        fragments_by_id[fragment_id.split(".")[-1]] = element
+
+    clause_starters = {
+        "SELECT", "FROM", "WHERE", "JOIN", "INNER", "LEFT", "RIGHT",
+        "FULL", "CROSS", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET",
+        "FETCH", "RETURNING", "SET", "VALUES", "ON", "WITH", "INSERT",
+        "UPDATE", "DELETE", "MERGE", "UNION", "INTERSECT", "EXCEPT",
+    }
+    starts_clause_cache = {}
+
+    def fragment_starts_clause(refid: str) -> bool:
+        if refid in starts_clause_cache:
+            return starts_clause_cache[refid]
+        fragment = fragments_by_id.get(refid) or fragments_by_id.get(
+            refid.split(".")[-1]
+        )
+        if fragment is None:
+            starts_clause_cache[refid] = False
+            return False
+        fragment_start = tokens[fragment["open_end_idx"]]["end"]
+        fragment_end = tokens[fragment["end_idx"] - 1]["start"]
+        fragment_text = content[fragment_start:fragment_end]
+        fragment_text = re.sub(r"<!--.*?-->", " ", fragment_text, flags=re.DOTALL)
+        fragment_text = re.sub(r"<[^>]+>", " ", fragment_text)
+        first_token = next(
+            (
+                token
+                for token in tokenize_sql(fragment_text)
+                if token["type"] not in {"WHITESPACE", "COMMENT"}
+            ),
+            None,
+        )
+        starts_clause = bool(
+            first_token
+            and first_token["type"] == "KEYWORD"
+            and first_token["value"].upper() in clause_starters
+        )
+        starts_clause_cache[refid] = starts_clause
+        return starts_clause
+
+    target_tags = {"select", "insert", "update", "delete", "sql"}
+    include_contexts = []
+    for host in elements:
+        if host.get("tag") not in target_tags:
+            continue
+        body_start = tokens[host["open_end_idx"]]["end"]
+        host_id = (
+            host.get("attrs", {}).get("id", "")
+            if host.get("tag") == "sql"
+            else ""
+        )
+        for include in get_all_elements_recursively(host.get("children", [])):
+            if include.get("tag") != "include":
+                continue
+            refid = include.get("attrs", {}).get("refid")
+            if not refid or fragment_starts_clause(refid):
+                continue
+            prefix = content[body_start:include["start_offset"]]
+            prefix = re.sub(r"<!--.*?-->", " ", prefix, flags=re.DOTALL)
+            prefix = re.sub(r"<[^>]+>", " ", prefix)
+            sql_tokens = tokenize_sql(prefix)
+            depths = get_token_depths(sql_tokens)
+            current_depth = 0
+            for token in sql_tokens:
+                if token["type"] != "PAREN":
+                    continue
+                current_depth += 1 if token["value"] == "(" else -1
+            select_candidates = [
+                index
+                for index, token in enumerate(sql_tokens)
+                if token["type"] == "KEYWORD"
+                and token["value"].upper() == "SELECT"
+                and depths[index] == current_depth
+            ]
+            direct_projection = False
+            if select_candidates:
+                select_index = select_candidates[-1]
+                direct_projection = True
+                for index in range(select_index + 1, len(sql_tokens)):
+                    token = sql_tokens[index]
+                    if (
+                        depths[index] != current_depth
+                        or token["type"] != "KEYWORD"
+                    ):
+                        continue
+                    if token["value"].upper() == "FROM":
+                        previous_words = [
+                            sql_tokens[candidate]["value"].upper()
+                            for candidate in range(
+                                max(select_index, index - 5), index
+                            )
+                            if sql_tokens[candidate]["type"]
+                            not in {"WHITESPACE", "COMMENT"}
+                        ]
+                        if previous_words[-2:] != ["IS", "DISTINCT"] and (
+                            previous_words[-3:] != ["IS", "NOT", "DISTINCT"]
+                        ):
+                            direct_projection = False
+                            break
+            nested_projection_position = (
+                not select_candidates
+                and not any(
+                    token["type"] == "KEYWORD"
+                    and depths[index] == current_depth
+                    and token["value"].upper() in clause_starters
+                    for index, token in enumerate(sql_tokens)
+                )
+            )
+            include_contexts.append(
+                (
+                    host_id,
+                    refid,
+                    direct_projection,
+                    nested_projection_position,
+                )
+            )
+
+    changed = True
+    while changed:
+        changed = False
+        for host_id, refid, direct_projection, nested_position in include_contexts:
+            if not direct_projection and not (
+                nested_position and host_id in projection_ids
+            ):
+                continue
+            discovered_ids = {refid, refid.split(".")[-1]}
+            if not discovered_ids.issubset(projection_ids):
+                projection_ids.update(discovered_ids)
+                changed = True
+    return projection_ids
+
+
+def included_sql_fragment_ids(elements: List[dict]) -> set[str]:
+    """Return full and local ids referenced by MyBatis include elements."""
+    fragment_ids = set()
+    for element in elements:
+        if element.get("tag") != "include":
+            continue
+        refid = element.get("attrs", {}).get("refid")
+        if refid:
+            fragment_ids.add(refid)
+            fragment_ids.add(refid.split(".")[-1])
+    return fragment_ids
+
+
+def is_reusable_column_list(
+    element: dict, projection_ids: set[str] | None = None
+) -> bool:
     """Return whether a SQL fragment defines columns without a SELECT owner."""
+    fragment_id = element.get("attrs", {}).get("id", "")
     return (
         element.get("tag") == "sql"
-        and element.get("attrs", {}).get("id", "").lower().endswith(
-            "column_list"
-        )
+        and fragment_id in (projection_ids or set())
     )
 
 
@@ -987,6 +1151,23 @@ def dynamic_sql_indent_source_edits(
             if join_indent is not None:
                 head, _ = replacement.rsplit("\n", 1)
                 replacement = head + "\n" + join_indent + "    "
+        if (
+            isinstance(source_rule, JoinOnMultiRule)
+            and "\n" in replacement
+            and item["token"]["type"] == "OPERATOR"
+            and 0 <= item["token"]["start"] < len(mapping)
+        ):
+            # When ON already has its own physical line, a comparison split
+            # continues one level beyond that line. The guest SQL omits the
+            # mapper element's indentation, so recover the anchor directly
+            # from the source instead of emitting a shallow guest indent.
+            token_source = mapping[item["token"]["start"]]
+            line_start = source_content.rfind("\n", 0, token_source) + 1
+            line = source_content[line_start:token_source]
+            on_match = re.match(r"^([ \t]*)ON\b", line, re.IGNORECASE)
+            if on_match:
+                head, _ = replacement.rsplit("\n", 1)
+                replacement = head + "\n" + on_match.group(1) + "    "
         edits.append(
             (source_start, source_end, replacement)
         )
@@ -1016,7 +1197,7 @@ def top_level_clause_source_edits(
     clause_keywords = {
         "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "HAVING", "LIMIT",
         "OFFSET", "UNION", "INTERSECT", "EXCEPT", "UPDATE", "INSERT",
-        "DELETE", "VALUES", "SET", "RETURNING", "WITH",
+        "DELETE", "VALUES", "SET", "RETURNING", "WITH", "ON",
     }
     statement_depth = next(
         (
@@ -1033,10 +1214,24 @@ def top_level_clause_source_edits(
     source_start, source_end = source_range
     edits = []
     for index, token in enumerate(tokens):
+        word = token["value"].upper()
+        is_conflict_clause = False
+        if word == "ON":
+            next_index = index + 1
+            while next_index < len(tokens) and tokens[next_index]["type"] in {
+                "WHITESPACE", "COMMENT"
+            }:
+                next_index += 1
+            is_conflict_clause = bool(
+                next_index < len(tokens)
+                and tokens[next_index]["type"] == "KEYWORD"
+                and tokens[next_index]["value"].upper() == "CONFLICT"
+            )
         if (
             depths[index] != statement_depth
             or token["type"] != "KEYWORD"
-            or token["value"].upper() not in clause_keywords
+            or word not in clause_keywords
+            or (word == "ON" and not is_conflict_clause)
             or not (0 <= token["start"] < len(mapping))
         ):
             continue
@@ -1053,7 +1248,9 @@ def top_level_clause_source_edits(
             continue
         line_start = content.rfind("\n", 0, source_offset) + 1
         prefix = content[line_start:source_offset]
-        if prefix.strip() or len(prefix) >= len(base_indent):
+        if prefix.strip() or prefix == base_indent or (
+            word != "ON" and len(prefix) >= len(base_indent)
+        ):
             continue
         edits.append((line_start, source_offset, base_indent))
     return edits
@@ -1965,6 +2162,61 @@ def post_choose_clause_source_edits(
     return edits
 
 
+def post_dynamic_where_sibling_source_edits(
+    content: str,
+    source_range: tuple[int, int],
+) -> List[tuple[int, int, str]]:
+    """Re-anchor a physical WHERE condition after a dynamic sibling."""
+    start, end = source_range
+    fragment = content[start:end]
+    lines = fragment.splitlines(keepends=True)
+    offsets = []
+    offset = start
+    for line in lines:
+        offsets.append(offset)
+        offset += len(line)
+
+    edits = []
+    close_pattern = re.compile(
+        r"^([ \t]*)</(?:if|when|otherwise)>[ \t]*$",
+        re.IGNORECASE,
+    )
+    for index, raw_line in enumerate(lines):
+        close_match = close_pattern.match(raw_line.rstrip("\r\n"))
+        if close_match is None:
+            continue
+        close_width = len(close_match.group(1))
+        candidate_index = index + 1
+        while candidate_index < len(lines) and not lines[candidate_index].strip():
+            candidate_index += 1
+        if candidate_index >= len(lines):
+            continue
+        candidate = lines[candidate_index].rstrip("\r\n")
+        body = candidate.lstrip(" \t")
+        if not body or body.startswith("<"):
+            continue
+
+        where_indent = None
+        for previous_index in range(index - 1, -1, -1):
+            previous = lines[previous_index].rstrip("\r\n")
+            previous_body = previous.lstrip(" \t")
+            previous_width = len(previous) - len(previous_body)
+            if (
+                previous_width < close_width
+                and re.match(r"^WHERE\b", previous_body, re.IGNORECASE)
+            ):
+                where_indent = previous[:previous_width]
+                break
+        if where_indent is None:
+            continue
+        current_width = len(candidate) - len(body)
+        expected = where_indent + "    "
+        if current_width > len(expected) + 8:
+            line_start = offsets[candidate_index]
+            edits.append((line_start, line_start + current_width, expected))
+    return edits
+
+
 def join_case_source_edits(
     content: str,
     source_range: tuple[int, int],
@@ -2203,6 +2455,22 @@ def dynamic_body_indent_source_edits(
             source_start < range_start < range_end < source_end
         ):
             continue
+        first_line_start = content.find("\n", range_start, range_end)
+        range_is_extreme = False
+        probe = first_line_start
+        while probe != -1 and probe + 1 < range_end:
+            probe_start = probe + 1
+            probe_end = content.find("\n", probe_start, range_end)
+            if probe_end == -1:
+                probe_end = range_end
+            probe_line = content[probe_start:probe_end]
+            if probe_line.strip():
+                probe_width = len(probe_line) - len(probe_line.lstrip(" \t"))
+                range_is_extreme = probe_width > expected_width + 16
+                break
+            if probe_end >= range_end:
+                break
+            probe = probe_end
         cursor = content.find("\n", range_start, range_end)
         while cursor != -1 and cursor + 1 < range_end:
             line_start = cursor + 1
@@ -2218,6 +2486,17 @@ def dynamic_body_indent_source_edits(
                 "UNION", "INTERSECT", "EXCEPT", "UPDATE", "INSERT",
                 "DELETE", "VALUES", "SET", "RETURNING",
             }
+            inside_nested_dynamic = any(
+                nested_start > range_start
+                and nested_end < range_end
+                and nested_start < line_start < nested_end
+                for nested_start, nested_end, _ in dynamic_ranges
+            )
+            excessive_indent = (
+                range_is_extreme
+                and not inside_nested_dynamic
+                and indent_width > expected_width + 16
+            )
             closes_dynamic_inline = bool(
                 range_end <= line_end and re.search(
                     r"</(?:if|foreach|when|otherwise|trim|where|set)>\s*$",
@@ -2227,16 +2506,21 @@ def dynamic_body_indent_source_edits(
             )
             if (
                 body
-                and not body.startswith("<")
                 and (
-                    indent_width < expected_width
+                    excessive_indent
                     or (
-                        closes_dynamic_inline
-                        and indent_width != expected_width
-                    )
-                    or (
-                        indent_width == expected_width
-                        and protects_direct_clause
+                        not body.startswith("<")
+                        and (
+                            indent_width < expected_width
+                            or (
+                                closes_dynamic_inline
+                                and indent_width != expected_width
+                            )
+                            or (
+                                indent_width == expected_width
+                                and protects_direct_clause
+                            )
+                        )
                     )
                 )
             ):
@@ -2690,6 +2974,57 @@ def dynamic_null_coalesce_source_edits(
     return edits, rule.fix(sql_text, "embedded.sql", {})
 
 
+def delete_from_source_edits(
+    sql_text: str,
+    mapping: List[int],
+    content: str,
+    source_range: tuple[int, int],
+    tag_ranges: List[tuple[int, int]],
+    rule_config: dict,
+) -> List[tuple[int, int, str]]:
+    """Map ``DELETE FROM target`` compaction inside dynamic XML blocks."""
+    from mir.rules.sql.from_single import FromSingleRule
+
+    disabled = rule_config.get("_rules_to_disable", set())
+    enabled = rule_config.get("_rules_to_enable", set())
+    if "IR-from-single" in disabled or (
+        rule_config.get("_disable_all", False)
+        and "IR-from-single" not in enabled
+        and "sql:IR-from-single" not in enabled
+    ):
+        return []
+
+    source_start, source_end = source_range
+    edits = []
+    for finding in FromSingleRule()._find_violations(sql_text, rule_config):
+        if finding["replacement"] != " FROM ":
+            continue
+        guest_start = finding["ws_start"]
+        guest_end = finding["ws_end"]
+        if not (0 <= guest_start < guest_end <= len(mapping)):
+            continue
+        if any(
+            mapping[index] - mapping[index - 1] != 1
+            for index in range(guest_start + 1, guest_end)
+        ):
+            continue
+        edit_start = mapping[guest_start]
+        edit_end = mapping[guest_end - 1] + 1
+        if not (
+            source_start <= edit_start < edit_end <= source_end
+            and content[edit_start:edit_end]
+            == sql_text[guest_start:guest_end]
+        ):
+            continue
+        if any(
+            max(edit_start, tag_start) < min(edit_end, tag_end)
+            for tag_start, tag_end in tag_ranges
+        ):
+            continue
+        edits.append((edit_start, edit_end, finding["replacement"]))
+    return list(dict.fromkeys(edits))
+
+
 def dynamic_paren_single_source_edits(
     sql_text: str,
     mapping: List[int],
@@ -3030,6 +3365,24 @@ def compact_static_order_by_edits(
                 break
         if not items or final_index == index or items[-1].endswith(","):
             continue
+        following_index = final_index + 1
+        while (
+            following_index < len(lines)
+            and not lines[following_index].strip()
+        ):
+            following_index += 1
+        if (
+            following_index < len(lines)
+            and re.match(
+                r"<(?:if|choose|foreach|trim)\b",
+                lines[following_index].lstrip(),
+                re.IGNORECASE,
+            )
+        ):
+            # The static prefix is only the first part of a list continued by
+            # a MyBatis branch. Keeping the clause expanded preserves the
+            # programming-style structure of the complete dynamic list.
+            continue
         replacement = match.group(1) + "ORDER BY " + " ".join(items)
         if source_text_length(replacement, rule_config) > max_length:
             continue
@@ -3361,6 +3714,7 @@ def physical_case_indent_source_edits(
     line_start = content.rfind("\n", 0, start) + 1
     edits = []
     case_indents: List[str] = []
+    pending_else_line_end = None
     while line_start < end:
         line_end = content.find("\n", line_start, end)
         if line_end == -1:
@@ -3371,8 +3725,23 @@ def physical_case_indent_source_edits(
         upper = body.upper()
         if "<" in body:
             case_indents.clear()
+            pending_else_line_end = None
         elif upper == "CASE":
-            case_indents.append(indent)
+            if (
+                case_indents
+                and pending_else_line_end is not None
+                and pending_else_line_end + 1 == line_start
+            ):
+                nested_base = case_indents[-1] + "    "
+                edits.append((
+                    pending_else_line_end,
+                    line_start + len(indent),
+                    " ",
+                ))
+                case_indents.append(nested_base)
+            else:
+                case_indents.append(indent)
+            pending_else_line_end = None
         elif case_indents:
             base = case_indents[-1]
             expected = None
@@ -3401,6 +3770,16 @@ def physical_case_indent_source_edits(
             elif upper.startswith("ELSE"):
                 expected = base + "    "
                 tokens = tokenize_sql(body)
+                case_count = sum(
+                    token["type"] == "KEYWORD"
+                    and token["value"].upper() == "CASE"
+                    for token in tokens
+                )
+                end_count = sum(
+                    token["type"] == "KEYWORD"
+                    and token["value"].upper() == "END"
+                    for token in tokens
+                )
                 end_index = next(
                     (
                         index
@@ -3427,11 +3806,22 @@ def physical_case_indent_source_edits(
                         "\n" + base,
                     ))
                     case_indents.pop()
+                elif case_count > end_count:
+                    # A nested CASE belongs to the ELSE branch. Retain that
+                    # relationship on later passes after a standalone
+                    # ``ELSE``/``CASE`` pair has been compacted.
+                    case_indents.append(expected)
+                pending_else_line_end = line_end if upper == "ELSE" else None
             elif upper.startswith("END"):
                 expected = base
                 case_indents.pop()
+                pending_else_line_end = None
+            elif body:
+                pending_else_line_end = None
             if expected is not None and indent != expected:
                 edits.append((line_start, line_start + len(indent), expected))
+        elif body:
+            pending_else_line_end = None
         if line_end >= end:
             break
         line_start = line_end + 1
@@ -4118,6 +4508,10 @@ class XmlMybatisSqlRule(BaseRule):
                     in_tag = False
         root_elements = parse_xml_elements(tokens)
         elements = get_all_elements_recursively(root_elements)
+        projection_fragment_ids = reusable_select_list_ids(
+            tokens, elements, content
+        )
+        included_fragment_ids = included_sql_fragment_ids(elements)
         foreach_ranges = [
             (element["start_offset"], element["end_offset"])
             for element in elements
@@ -4190,7 +4584,7 @@ class XmlMybatisSqlRule(BaseRule):
 
                 layout_edits = (
                     []
-                    if is_reusable_column_list(el)
+                    if is_reusable_column_list(el, projection_fragment_ids)
                     else dynamic_column_layout_edits(
                         sql_text,
                         mapping,
@@ -4224,6 +4618,12 @@ class XmlMybatisSqlRule(BaseRule):
                 post_choose_edits = post_choose_clause_source_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
+                )
+                post_choose_edits.extend(
+                    post_dynamic_where_sibling_source_edits(
+                        content,
+                        (el["start_offset"], el["end_offset"]),
+                    )
                 )
                 join_case_edits = join_case_source_edits(
                     content,
@@ -4785,6 +5185,14 @@ class XmlMybatisSqlRule(BaseRule):
                     })
 
                 excluded_guest_rule_ids = set()
+                if (
+                    el["tag"] == "sql"
+                    and el["attrs"].get("id") in included_fragment_ids
+                ):
+                    # A reusable fragment may inherit relations from its
+                    # include site. Its aliases are validated in every
+                    # expanded host, where the actual scope is available.
+                    excluded_guest_rule_ids.add("IR-unresolved-alias")
                 # Exact source-mapped WHERE checks above own physical XML
                 # layout. Guest WHERE findings can point through a dynamic tag
                 # or reusable fragment to whitespace that the host fixer must
@@ -5067,6 +5475,10 @@ class XmlMybatisSqlRule(BaseRule):
 
         root_elements = parse_xml_elements(tokens)
         elements = get_all_elements_recursively(root_elements)
+        projection_fragment_ids = reusable_select_list_ids(
+            tokens, elements, content
+        )
+        included_fragment_ids = included_sql_fragment_ids(elements)
         foreach_ranges = [
             (element["start_offset"], element["end_offset"])
             for element in elements
@@ -5247,7 +5659,7 @@ class XmlMybatisSqlRule(BaseRule):
                 from mir.engine.embedded_bridge import fix_embedded_content
                 layout_edits = (
                     []
-                    if is_reusable_column_list(el)
+                    if is_reusable_column_list(el, projection_fragment_ids)
                     else dynamic_column_layout_edits(
                         sql_text,
                         mapping,
@@ -5261,6 +5673,12 @@ class XmlMybatisSqlRule(BaseRule):
                 post_choose_edits = post_choose_clause_source_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
+                )
+                post_choose_edits.extend(
+                    post_dynamic_where_sibling_source_edits(
+                        content,
+                        (el["start_offset"], el["end_offset"]),
+                    )
                 )
                 join_case_edits = join_case_source_edits(
                     content,
@@ -5343,6 +5761,14 @@ class XmlMybatisSqlRule(BaseRule):
                     (el["start_offset"], el["end_offset"]),
                     inner_config,
                 )
+                delete_from_edits = delete_from_source_edits(
+                    sql_text,
+                    mapping,
+                    content,
+                    (el["start_offset"], el["end_offset"]),
+                    tag_ranges,
+                    inner_config,
+                )
                 layout_edits = (
                     post_choose_edits
                     + join_case_edits
@@ -5355,6 +5781,7 @@ class XmlMybatisSqlRule(BaseRule):
                     + keyword_case_edits
                     + function_case_edits
                     + datatype_case_edits
+                    + delete_from_edits
                     + layout_edits
                 )
                 join_config = dict(inner_config)
@@ -5636,6 +6063,7 @@ class XmlMybatisSqlRule(BaseRule):
                     + long_case_edits
                     + dynamic_case_edits
                     + expression_compaction_edits
+                    + delete_from_edits
                 ] + [
                     (start, end)
                     for start, end, replacement in (
@@ -5683,6 +6111,7 @@ class XmlMybatisSqlRule(BaseRule):
                         + dynamic_case_edits
                         + expression_compaction_edits
                         + include_relation_edits
+                        + delete_from_edits
                     )
                 ) | set(
                     edit
@@ -5716,6 +6145,7 @@ class XmlMybatisSqlRule(BaseRule):
                     + long_case_edits
                     + dynamic_case_edits
                     + expression_compaction_edits
+                    + delete_from_edits
                 )
                 layout_edits = [
                     (start, end, replacement)
@@ -5743,6 +6173,11 @@ class XmlMybatisSqlRule(BaseRule):
                 # same logical newline at both sides of a source-map boundary,
                 # producing doubled blank lines in otherwise static SQL.
                 excluded_guest_rule_ids.add("IR-where-multi")
+                if (
+                    el["tag"] == "sql"
+                    and el["attrs"].get("id") in included_fragment_ids
+                ):
+                    excluded_guest_rule_ids.add("IR-unresolved-alias")
                 if has_dynamic_window_choose(
                     content,
                     (el["start_offset"], el["end_offset"]),
@@ -5771,6 +6206,9 @@ class XmlMybatisSqlRule(BaseRule):
                 if datatype_case_edits:
                     excluded_guest_rule_ids.add("IR-datatype-case")
                     applied_rules.add("IR-datatype-case")
+                if delete_from_edits:
+                    excluded_guest_rule_ids.add("IR-from-single")
+                    applied_rules.add("IR-from-single")
                 if owns_runtime_where(el):
                     # MyBatis <where> owns prefix insertion/removal across
                     # mutually exclusive dynamic branches. Concatenating all
@@ -5889,6 +6327,7 @@ class XmlMybatisSqlRule(BaseRule):
                     keyword_case_edits
                     + function_case_edits
                     + datatype_case_edits
+                    + delete_from_edits
                 ) | {
                     edit
                     for edit in layout_edits

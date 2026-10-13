@@ -59,7 +59,7 @@ class ParenMultiRule(BaseRule):
                 owning_clause = None
                 for idx in range(i - 1, -1, -1):
                     t = tokens[idx]
-                    if depths[idx] == depths[i]:
+                    if depths[idx] <= depths[i]:
                         if t["type"] == "SEMI" or t["value"] == ";":
                             break
                         if t["type"] == "KEYWORD" and t["value"].upper() in ("WHERE", "ON"):

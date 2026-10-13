@@ -238,6 +238,23 @@ where retired_at is null
 
         self.assertEqual(_tokenize_sql_impl.cache_info().currsize, 0)
 
+    def test_processing_releases_mybatis_token_caches(self):
+        from mir.rules.sql.sql_utils import _tokenize_sql_impl
+        from mir.rules.xml.xml_utils import _tokenize_xml_cached
+
+        _tokenize_sql_impl.cache_clear()
+        _tokenize_xml_cached.cache_clear()
+        config = Config()
+        content = """<mapper namespace="sample.Mapper">
+    <select id="findItems">select item_id from sample_item</select>
+</mapper>
+"""
+
+        process_document(config, content, "SampleMapper.xml", "xml")
+
+        self.assertEqual(_tokenize_sql_impl.cache_info().currsize, 0)
+        self.assertEqual(_tokenize_xml_cached.cache_info().currsize, 0)
+
     def test_changed_directive_expands_through_its_block(self):
         content = """SELECT item_id
 FROM sample_table

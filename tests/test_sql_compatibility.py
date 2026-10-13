@@ -5,6 +5,7 @@ from mir.rules.sql.union_layout import UnionLayoutRule
 from mir.rules.sql.alias_as import AliasAsRule
 from mir.rules.sql.as_spacing import ASSpacingRule
 from mir.rules.sql.function_case import FunctionCaseRule
+from mir.rules.sql.from_single import FromSingleRule
 from mir.rules.sql.from_multi import FromMultiRule
 from mir.rules.sql.expression_split import ExpressionSplitRule
 from mir.rules.sql.clause_alignment import ClauseAlignmentRule
@@ -12,6 +13,7 @@ from mir.rules.sql.case_when_wrap import CaseWhenWrapRule
 from mir.rules.sql.case_layout import CaseLayoutRule
 from mir.rules.sql.column_layout import ColumnLayoutRule
 from mir.rules.sql.comma_style import CommaStyleRule
+from mir.rules.sql.dollar_quote_alignment import DollarQuoteAlignmentRule
 from mir.rules.sql.join_on_multi import JoinOnMultiRule
 from mir.rules.sql.keyword_case import KeywordCaseRule
 from mir.rules.sql.line_length import LineLengthRule
@@ -39,6 +41,24 @@ from mir.rules.sql.window_layout import WindowLayoutRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_delete_target_stays_with_delete_from(self):
+        source = "DELETE\nFROM\n    sample_item\nWHERE item_id = :item_id;"
+        expected = "DELETE FROM sample_item\nWHERE item_id = :item_id;"
+        rule = FromSingleRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+
+    def test_delete_comment_prevents_unsafe_compaction(self):
+        source = "DELETE -- retain this explanation\nFROM sample_item;"
+        rule = FromSingleRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
     def test_insert_select_aligns_with_the_insert_statement(self):
         source = (
             "    INSERT INTO sample_item_history (item_id, owner_id)\n"
@@ -110,6 +130,19 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(fixed, expected)
         self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
 
+    def test_inline_dollar_quote_uses_statement_indentation(self):
+        source = (
+            "CREATE FUNCTION sample_item() RETURNS VOID AS $$\n"
+            "BEGIN\n"
+            "    RETURN;\n"
+            "END;\n"
+            "$$ LANGUAGE plpgsql;"
+        )
+        rule = DollarQuoteAlignmentRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertFalse(rule.check(source, "generic.sql", {}))
+
     def test_operator_spacing_preserves_postgresql_type_attributes(self):
         source = (
             "DECLARE\n"
@@ -140,6 +173,99 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
         self.assertFalse(rule.check(source, "generic.sql", {}))
+
+    def test_multiline_function_layout_ignores_create_table_column_lists(self):
+        source = (
+            "CREATE TABLE sample_item (\n"
+            "    item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n"
+            "    item_name CHARACTER VARYING(120) NOT NULL,\n"
+            "    created_at TIMESTAMP WITH TIME ZONE NOT NULL\n"
+            ");"
+        )
+        rule = MultilineFunctionLayoutRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertFalse(rule.check(source, "generic.sql", {}))
+
+        parenthesis_rule = ParenContentIndentRule()
+        self.assertEqual(
+            parenthesis_rule.fix(source, "generic.sql", {}), source
+        )
+        self.assertFalse(parenthesis_rule.check(source, "generic.sql", {}))
+        compacted = source.replace("CREATE TABLE sample_item (", "CREATE TABLE sample_item(")
+        self.assertEqual(
+            parenthesis_rule.fix(compacted, "generic.sql", {}), source
+        )
+
+    def test_multiline_function_layout_formats_row_constructors(self):
+        source = (
+            "WHERE\n"
+            "    (item_id, owner_id,\n"
+            "  coalesce(item_version, 0)) IS DISTINCT FROM (source_id,\n"
+            " source_owner_id, coalesce(source_version, 0))"
+        )
+        expected = (
+            "WHERE\n"
+            "    (\n"
+            "        item_id,\n"
+            "        owner_id,\n"
+            "        coalesce(item_version, 0)\n"
+            "    ) IS DISTINCT FROM (\n"
+            "        source_id,\n"
+            "        source_owner_id,\n"
+            "        coalesce(source_version, 0)\n"
+            "    )"
+        )
+        rule = MultilineFunctionLayoutRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
+        self.assertFalse(rule.check(fixed, "generic.sql", {}))
+
+    def test_parenthesis_indent_preserves_returns_table_spacing(self):
+        source = (
+            "CREATE FUNCTION sample_items()\n"
+            "    RETURNS TABLE(item_id BIGINT, item_name TEXT)\n"
+            "    LANGUAGE sql;"
+        )
+        rule = ParenContentIndentRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertFalse(rule.check(source, "generic.sql", {}))
+
+    def test_parenthesized_conditions_format_nested_where_arms(self):
+        from mir.rules.sql.paren_multi import ParenMultiRule
+
+        source = (
+            "SELECT item_id\n"
+            "FROM sample_item\n"
+            "WHERE scope_id = :scope_id\n"
+            "    AND (\n"
+            "        (extraordinarily_long_current_item_classification = 'CURRENT_ITEM_CLASSIFICATION' "
+            "AND extraordinarily_long_archive_item_classification = 'ARCHIVED_ITEM_CLASSIFICATION')\n"
+            "        OR fallback_enabled\n"
+            "    )"
+        )
+        expected = (
+            "SELECT item_id\n"
+            "FROM sample_item\n"
+            "WHERE scope_id = :scope_id\n"
+            "    AND (\n"
+            "        (\n"
+            "            extraordinarily_long_current_item_classification = 'CURRENT_ITEM_CLASSIFICATION'\n"
+            "            AND extraordinarily_long_archive_item_classification = 'ARCHIVED_ITEM_CLASSIFICATION'\n"
+            "        )\n"
+            "        OR fallback_enabled\n"
+            "    )"
+        )
+        rule = ParenMultiRule()
+
+        fixed = rule.fix(source, "generic.sql", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), expected)
 
     def test_line_length_wraps_create_table_constraint_details(self):
         source = (
@@ -323,6 +449,21 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
         self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
+    def test_plpgsql_of_can_be_a_relation_alias(self):
+        source = "SELECT of.item_id FROM outage_fact of WHERE of.active;"
+        rule = PlpgsqlKeywordCaseRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+        self.assertEqual(rule.check(source, "generic.sql", {}), [])
+
+    def test_plpgsql_trigger_update_of_is_uppercased(self):
+        source = "CREATE TRIGGER sample_trigger BEFORE UPDATE of status ON sample_item;"
+        expected = "CREATE TRIGGER sample_trigger BEFORE UPDATE OF status ON sample_item;"
+        rule = PlpgsqlKeywordCaseRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(expected, "generic.sql", {}), [])
 
     def test_full_outer_join_keeps_outer_keyword(self):
         source = "SELECT * FROM first_item FULL OUTER JOIN second_item USING (item_id);"
@@ -1840,6 +1981,19 @@ class TestSqlCompatibility(unittest.TestCase):
         rule = ParenSameOpRule()
 
         self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
+
+    def test_cte_output_columns_keep_schema_list_spacing(self):
+        source = (
+            "WITH sample_rows(item_id) AS (\n"
+            "    SELECT item_id FROM sample_item\n"
+            ") SELECT item_id FROM sample_rows;"
+        )
+        expected = source.replace("sample_rows(", "sample_rows (")
+
+        rule = ParenContentIndentRule()
+
+        self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
+        self.assertEqual(rule.check(expected, "generic.sql", {}), [])
         self.assertEqual(rule.check(expected, "generic.sql", {}), [])
 
     def test_between_delimiter_is_not_a_boolean_condition_boundary(self):

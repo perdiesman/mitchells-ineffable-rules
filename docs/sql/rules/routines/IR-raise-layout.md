@@ -20,8 +20,7 @@ RAISE unique_violation USING MESSAGE = 'id: ' || NEW.id::text || ' already exist
 ####  Correct Example
 ```sql
 RAISE unique_violation
-    USING MESSAGE = 'id: '
-        || NEW.id::text
+    USING MESSAGE = 'id: ' || NEW.id::text
         || ' already exists in my_schema.my_very_long_table_name_to_exceed_the_line_length_limit';
 ```
 

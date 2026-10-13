@@ -62,6 +62,8 @@ def has_trellis_syntax(content: str) -> bool:
     """Recognize directive templates and external SQL with named binds."""
     if has_trellis_directives(content):
         return True
+    if ":" not in content:
+        return False
     # Import lazily to avoid making the tokenizer depend on Trellis parsing.
     from mir.rules.sql.sql_utils import tokenize_sql
 

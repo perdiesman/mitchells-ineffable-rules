@@ -73,26 +73,14 @@ class UnionLayoutRule(BaseRule):
                 # Determine expected indent of select_token
                 indent_str = ""
                 if select_token:
-                    # Find beginning of line of select_token
-                    sel_idx = token_to_idx[id(select_token)]
-                    line_start = sel_idx
-                    for k in range(sel_idx - 1, -1, -1):
-                        if "\n" in tokens[k]["value"]:
-                            line_start = k + 1
-                            break
-                        if k == 0:
-                            line_start = 0
-                            break
-                    # The indent is any leading whitespace on this line
-                    leading = []
-                    for k in range(line_start, sel_idx):
-                        if tokens[k]["type"] == "WHITESPACE":
-                            leading.append(tokens[k]["value"])
-                        else:
-                            break
-                    # Extract last line's indent if multiline whitespace
-                    indent_parts = "".join(leading).split("\n")
-                    indent_str = indent_parts[-1] if indent_parts else ""
+                    select_line_start = content.rfind(
+                        "\n", 0, select_token["start"]
+                    ) + 1
+                    select_prefix = content[
+                        select_line_start:select_token["start"]
+                    ]
+                    if not select_prefix or select_prefix.isspace():
+                        indent_str = select_prefix
 
                 # Check before the operator: is there a newline?
                 # We check the tokens between the preceding active token and our operator
@@ -128,7 +116,22 @@ class UnionLayoutRule(BaseRule):
                     operator_line_start = content.rfind("\n", 0, t["start"]) + 1
                     operator_prefix = content[operator_line_start:t["start"]]
                     if operator_prefix.isspace() or not operator_prefix:
-                        expected_after = "\n" + operator_prefix
+                        canonical_prefix = (
+                            indent_str if select_token is not None else operator_prefix
+                        )
+                        if operator_prefix != canonical_prefix:
+                            violations.append({
+                                "token": t,
+                                "line": t["line"],
+                                "start_offset": operator_line_start,
+                                "end_offset": t["start"],
+                                "replacement": canonical_prefix,
+                                "message": (
+                                    f"Set operator '{operator_str}' must align "
+                                    "with its preceding SELECT."
+                                ),
+                            })
+                        expected_after = "\n" + canonical_prefix
                         if after_str != expected_after:
                             violations.append({
                                 "token": t,
@@ -172,7 +175,7 @@ class UnionLayoutRule(BaseRule):
                                 clause_line_start:clause["start"]
                             ]
                             if (
-                                clause_prefix != operator_prefix
+                                clause_prefix != canonical_prefix
                                 and (not clause_prefix or clause_prefix.isspace())
                             ):
                                 violations.append({
@@ -180,7 +183,7 @@ class UnionLayoutRule(BaseRule):
                                     "line": clause["line"],
                                     "start_offset": clause_line_start,
                                     "end_offset": clause["start"],
-                                    "replacement": operator_prefix,
+                                    "replacement": canonical_prefix,
                                     "message": (
                                         "Clauses in a set-operation branch "
                                         "must align with its SELECT."

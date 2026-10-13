@@ -3,6 +3,7 @@ from typing import Any, Dict, List
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 from mir.rules.sql.table_function_indent import table_function_parens
+from mir.rules.sql.paren_content_indent import is_create_table_opening
 
 
 class MultilineFunctionLayoutRule(BaseRule):
@@ -11,9 +12,9 @@ class MultilineFunctionLayoutRule(BaseRule):
     embedded_dynamic_indent_safe = True
     rule_id = "IR-multiline-function-layout"
     description = (
-        "Multiline function calls and single-row VALUES lists should put every "
-        "direct argument on its own indented line and align the closing "
-        "parenthesis with the caller."
+        "Multiline function calls, row constructors, and single-row VALUES "
+        "lists should put every direct argument on its own indented line and "
+        "align the closing parenthesis with the caller."
     )
     category = "queries"
     is_fixable = "yes"
@@ -37,9 +38,25 @@ class MultilineFunctionLayoutRule(BaseRule):
                 "    0\n"
                 ")"
             ),
-        }
+        },
+        {
+            "violating": "WHERE (item_id,\nowner_id) = (source_id,\nsource_owner_id)",
+            "correct": (
+                "WHERE (\n"
+                "    item_id,\n"
+                "    owner_id\n"
+                ") = (\n"
+                "    source_id,\n"
+                "    source_owner_id\n"
+                ")"
+            ),
+        },
     ]
-    additional_validations = ["sum(item_count)", "coalesce(item_count, 0)"]
+    additional_validations = [
+        "sum(item_count)",
+        "coalesce(item_count, 0)",
+        "WHERE (item_id, owner_id) = (:item_id, :owner_id)",
+    ]
 
     def _find_edits(self, content: str, rule_config: Dict[str, Any]) -> List[dict]:
         tokens = tokenize_sql(content)
@@ -52,6 +69,8 @@ class MultilineFunctionLayoutRule(BaseRule):
         previous_active_indices = [None] * len(tokens)
         previous_active_index = None
         paren_pairs = {}
+        closing_to_opening = {}
+        parent_openings = {}
         paren_stack = []
         for token_index, token in enumerate(tokens):
             previous_active_indices[token_index] = previous_active_index
@@ -60,9 +79,14 @@ class MultilineFunctionLayoutRule(BaseRule):
             if token["type"] != "PAREN":
                 continue
             if token["value"] == "(":
+                parent_openings[token_index] = (
+                    paren_stack[-1] if paren_stack else None
+                )
                 paren_stack.append(token_index)
             elif token["value"] == ")" and paren_stack:
-                paren_pairs[paren_stack.pop()] = token_index
+                matched_open = paren_stack.pop()
+                paren_pairs[matched_open] = token_index
+                closing_to_opening[token_index] = matched_open
 
         def edit_whitespace(index: int, replacement: str, before: bool) -> None:
             whitespace_index = index - 1 if before else index + 1
@@ -94,14 +118,116 @@ class MultilineFunctionLayoutRule(BaseRule):
                 or open_index in table_openings
             ):
                 continue
+            close_index = paren_pairs.get(open_index)
+            if close_index is None or tokens[close_index]["line"] == opening["line"]:
+                continue
+            direct_comma = False
+            depth = 0
+            for candidate in range(open_index + 1, close_index):
+                token = tokens[candidate]
+                if token["type"] == "PAREN":
+                    depth += 1 if token["value"] == "(" else -1
+                elif token["type"] == "COMMA" and depth == 0:
+                    direct_comma = True
+                    break
+
             name_index = previous_active_indices[open_index]
-            if name_index is None or tokens[name_index]["type"] not in (
-                "IDENTIFIER",
-                "KEYWORD",
+            has_callable_owner = bool(
+                name_index is not None
+                and (
+                    tokens[name_index]["type"] == "IDENTIFIER"
+                    or (
+                        tokens[name_index]["type"] == "KEYWORD"
+                        and tokens[name_index]["value"].upper()
+                        in {"COALESCE", "NULLIF", "VALUES"}
+                    )
+                )
+            )
+            next_active_index = next(
+                (
+                    candidate
+                    for candidate in range(close_index + 1, len(tokens))
+                    if tokens[candidate]["type"]
+                    not in ("WHITESPACE", "COMMENT")
+                ),
+                None,
+            )
+            first_inner_index = next(
+                (
+                    candidate
+                    for candidate in range(open_index + 1, close_index)
+                    if tokens[candidate]["type"]
+                    not in ("WHITESPACE", "COMMENT")
+                ),
+                None,
+            )
+            follows_row_operator = bool(
+                next_active_index is not None
+                and (
+                    tokens[next_active_index]["type"] == "OPERATOR"
+                    or (
+                        tokens[next_active_index]["type"] == "KEYWORD"
+                        and tokens[next_active_index]["value"].upper()
+                        in {"IS", "IN"}
+                    )
+                )
+            )
+            follows_comparison_operator = bool(
+                name_index is not None
+                and tokens[name_index]["type"] == "OPERATOR"
+            )
+            preceded_by_distinct_from = False
+            if (
+                name_index is not None
+                and tokens[name_index]["type"] == "KEYWORD"
+                and tokens[name_index]["value"].upper() == "FROM"
             ):
+                distinct_index = previous_active_indices[name_index]
+                preceded_by_distinct_from = bool(
+                    distinct_index is not None
+                    and tokens[distinct_index]["type"] == "KEYWORD"
+                    and tokens[distinct_index]["value"].upper() == "DISTINCT"
+                )
+            is_row_value_list = bool(
+                name_index is not None
+                and tokens[name_index]["type"] == "KEYWORD"
+                and tokens[name_index]["value"].upper() == "IN"
+                and first_inner_index is not None
+                and tokens[first_inner_index]["type"] == "PAREN"
+            )
+            parent_open = parent_openings.get(open_index)
+            if parent_open is None and is_create_table_opening(tokens, open_index):
+                # The relation name before a CREATE TABLE column list is an
+                # identifier, but it is not a callable owner. DDL field layout
+                # and generic parenthesis indentation own this list.
+                continue
+            parent_owner = (
+                previous_active_indices[parent_open]
+                if parent_open is not None else None
+            )
+            is_nested_row_value = bool(
+                parent_owner is not None
+                and tokens[parent_owner]["type"] == "KEYWORD"
+                and tokens[parent_owner]["value"].upper() == "IN"
+            )
+            # Parenthesized comma expressions are SQL row constructors (or a
+            # list of row constructors). They use the same readable layout as
+            # function arguments even though there is no callable identifier
+            # immediately before the opening parenthesis.
+            is_row_constructor = direct_comma and not has_callable_owner and (
+                follows_row_operator
+                or follows_comparison_operator
+                or preceded_by_distinct_from
+                or is_row_value_list
+                or is_nested_row_value
+            )
+            if not has_callable_owner and not is_row_constructor:
                 continue
             preceding_active = []
-            preceding_index = previous_active_indices[name_index]
+            preceding_index = (
+                previous_active_indices[name_index]
+                if name_index is not None else None
+            )
             while preceding_index is not None and len(preceding_active) < 4:
                 preceding_active.append(tokens[preceding_index])
                 preceding_index = previous_active_indices[preceding_index]
@@ -118,15 +244,6 @@ class MultilineFunctionLayoutRule(BaseRule):
             if is_reference_target:
                 # A relation followed by its referenced columns is schema
                 # syntax, not a function call. Constraint layout owns it.
-                continue
-            if (
-                tokens[name_index]["type"] == "KEYWORD"
-                and tokens[name_index]["value"].upper()
-                not in {"COALESCE", "NULLIF", "VALUES"}
-            ):
-                continue
-            close_index = paren_pairs.get(open_index)
-            if close_index is None or tokens[close_index]["line"] == opening["line"]:
                 continue
             first_inner_active = next(
                 (
@@ -148,6 +265,43 @@ class MultilineFunctionLayoutRule(BaseRule):
                 continue
             line = lines[opening["line"] - 1]
             base_indent = line[: len(line) - len(line.lstrip(" \t"))]
+            connector_start = None
+            left_close_index = None
+            if name_index is not None and tokens[name_index]["type"] == "KEYWORD":
+                connector = tokens[name_index]["value"].upper()
+                if connector == "IN":
+                    connector_start = name_index
+                    left_close_index = previous_active_indices[name_index]
+                elif connector == "FROM":
+                    distinct_index = previous_active_indices[name_index]
+                    if (
+                        distinct_index is not None
+                        and tokens[distinct_index]["type"] == "KEYWORD"
+                        and tokens[distinct_index]["value"].upper() == "DISTINCT"
+                    ):
+                        is_index = previous_active_indices[distinct_index]
+                        if (
+                            is_index is not None
+                            and tokens[is_index]["type"] == "KEYWORD"
+                            and tokens[is_index]["value"].upper() == "NOT"
+                        ):
+                            is_index = previous_active_indices[is_index]
+                        if (
+                            is_index is not None
+                            and tokens[is_index]["type"] == "KEYWORD"
+                            and tokens[is_index]["value"].upper() == "IS"
+                        ):
+                            connector_start = is_index
+                            left_close_index = previous_active_indices[is_index]
+            left_open_index = closing_to_opening.get(left_close_index)
+            if left_open_index is not None:
+                left_opening = tokens[left_open_index]
+                left_line = lines[left_opening["line"] - 1]
+                base_indent = left_line[
+                    : len(left_line) - len(left_line.lstrip(" \t"))
+                ]
+                edit_whitespace(connector_start, " ", before=True)
+                edit_whitespace(open_index, " ", before=True)
             argument_indent = base_indent + unit
             edit_whitespace(open_index, "\n" + argument_indent, before=False)
             edit_whitespace(close_index, "\n" + base_indent, before=True)

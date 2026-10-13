@@ -1,6 +1,6 @@
 # IR-case
 
-CASE statements should be formatted with WHEN/THEN on separate lines unless the block is simple (exactly one WHEN condition and an optional ELSE clause) and fits on a single line within length constraints.
+CASE statements should be formatted with WHEN/THEN on separate lines unless the block is simple (exactly one WHEN condition and an optional ELSE clause) and fits on a single line within length constraints. Nested CASE results stay attached to ELSE and indent as child blocks.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
@@ -46,4 +46,14 @@ SELECT
 
 ```sql
 SELECT CASE WHEN x IS NULL THEN NULL ELSE CASE WHEN y = 1 THEN true ELSE false END END FROM users;
+```
+
+```sql
+SELECT CASE
+    WHEN group_id = 1 THEN group_name
+    ELSE CASE
+        WHEN group_id = 2 THEN option_name
+        ELSE CASE WHEN group_id = 3 THEN style_name ELSE null END
+    END
+END AS display_name FROM sample_item;
 ```

@@ -19,9 +19,37 @@ from mir.rules.xml.xml_mybatis_sql import (
 )
 from mir.rules.xml.xml_line_length import XmlLineLengthRule
 from mir.rules.xml.xml_indent import XmlIndentRule
+from mir.rules.xml.xml_sql_entities import XmlSqlEntitiesRule
 from mir.rules.xml.xml_utils import tokenize_xml
 
 class TestRunnerIntegration(unittest.TestCase):
+    def test_xml_sql_entities_encode_text_operators_only(self):
+        source = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <!-- keep example -> text -->\n'
+            '    <select id="items" data-expression="count > 0">\n'
+            "        SELECT payload -> 'name', payload ->> 'code'\n"
+            '        FROM sample_item\n'
+            '        WHERE item_count > 0\n'
+            '    </select>\n'
+            '    <select id="raw"><![CDATA[SELECT payload -> \'name\']]></select>\n'
+            '</mapper>'
+        )
+        expected = source.replace(
+            "payload -> 'name', payload ->> 'code'",
+            "payload -&gt; 'name', payload -&gt;&gt; 'code'",
+        ).replace(
+            'WHERE item_count > 0',
+            'WHERE item_count &gt; 0',
+        )
+        rule = XmlSqlEntitiesRule()
+
+        fixed = rule.fix(source, "generic.xml", {})
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.fix(fixed, "generic.xml", {}), expected)
+        self.assertEqual(rule.check(fixed, "generic.xml", {}), [])
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         
@@ -48,7 +76,6 @@ class TestRunnerIntegration(unittest.TestCase):
             "$$ LANGUAGE plpgsql;\n"
         )
         config = Config()
-        config.profile = "commit"
         config.fix = True
 
         first = process_document(config, sql_content, "generic.sql", "sql")
@@ -57,7 +84,7 @@ class TestRunnerIntegration(unittest.TestCase):
         )
 
         self.assertIn(
-            "    INSERT INTO sample_item_history (\n"
+            "    INSERT INTO sample_item_history(\n"
             "        recorded_timestamp,\n"
             "        sample_item_identifier,\n"
             "        sample_owner_identifier,\n"
@@ -67,10 +94,10 @@ class TestRunnerIntegration(unittest.TestCase):
         )
         self.assertIn(
             "        VALUES (\n"
-            "            new.recorded_timestamp,\n"
-            "            new.sample_item_identifier,\n"
-            "            new.sample_owner_identifier,\n"
-            "            new.sample_region_identifier\n"
+            "            NEW.recorded_timestamp,\n"
+            "            NEW.sample_item_identifier,\n"
+            "            NEW.sample_owner_identifier,\n"
+            "            NEW.sample_region_identifier\n"
             "        );",
             first.content,
         )
@@ -869,6 +896,89 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_formats_nested_dynamic_select_and_order_lists(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item.item_id,\n'
+            '        item.item_name\n'
+            '        <if test="includeDetails">\n'
+            '            , detail.detail_id\n'
+            '            <if test="includeCode">, detail.detail_code</if>\n'
+            '        </if>\n'
+            '        FROM sample_item item\n'
+            '        ORDER BY item.item_id\n'
+            '        <if test="includeDetails">\n'
+            '            , detail.detail_id\n'
+            '            <if test="includeCode">, detail.detail_code</if>\n'
+            '        </if>\n'
+            '        ;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            item.item_id,\n'
+            '            item.item_name\n'
+            '            <if test="includeDetails">\n'
+            '                , detail.detail_id\n'
+            '                <if test="includeCode">, detail.detail_code</if>\n'
+            '            </if>\n'
+            '        FROM sample_item item\n'
+            '        ORDER BY\n'
+            '            item.item_id\n'
+            '            <if test="includeDetails">\n'
+            '                , detail.detail_id\n'
+            '                <if test="includeCode">, detail.detail_code</if>\n'
+            '            </if>;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_mybatis_dynamic_lists_do_not_cross_choose_branches(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="items">\n'
+            '        <choose>\n'
+            '            <when test="summarize">\n'
+            '                SELECT item_id\n'
+            '                FROM sample_item\n'
+            '                ORDER BY item_id\n'
+            '            </when>\n'
+            '            <otherwise>\n'
+            '                SELECT item_id\n'
+            '                <if test="includeCode">, item_code</if>\n'
+            '                FROM sample_item\n'
+            '            </otherwise>\n'
+            '        </choose>\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_expands_dynamic_grouping_block(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
@@ -999,8 +1109,7 @@ class TestRunnerIntegration(unittest.TestCase):
         expected = (
             '<mapper namespace="GenericMapper">\n'
             '    <delete id="remove">\n'
-            '        DELETE\n'
-            '        FROM sample_item\n'
+            '        DELETE FROM sample_item\n'
             '    </delete>\n'
             '</mapper>'
         )
@@ -1042,6 +1151,48 @@ class TestRunnerIntegration(unittest.TestCase):
         
         with open(path, "r") as f:
             self.assertEqual(f.read(), "SELECT id FROM t;")
+
+    def test_runner_preserves_latin1_source_encoding(self):
+        path = os.path.join(self.temp_dir.name, "legacy.sql")
+        source = "select id from sample_item; -- año\n"
+        with open(path, "wb") as stream:
+            stream.write(source.encode("latin-1"))
+        config = Config()
+        config.paths = [path]
+        config.fix = True
+
+        exit_code = run_linter(config)
+
+        self.assertEqual(exit_code, 0)
+        with open(path, "rb") as stream:
+            self.assertEqual(
+                stream.read(),
+                "SELECT id FROM sample_item; -- año\n".encode("latin-1"),
+            )
+
+    def test_nested_multiline_function_calls_converge(self):
+        source = (
+            "SELECT source.item_id\n"
+            "FROM sample_source source\n"
+            "JOIN sample_target target ON replace(\n"
+            "        upper(source.item_name),\n"
+            "        ' ',\n"
+            "        ''\n"
+            "    ) = replace(\n"
+            "        replace(upper(target.item_name), '''', ''),\n"
+            "        ' ',\n"
+            "        ''\n"
+            "    );"
+        )
+        config = Config()
+        config.fix = True
+
+        first = process_document(config, source, "generic.sql", "sql")
+        second = process_document(config, first.content, "generic.sql", "sql")
+
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
 
     def test_formatter_cycle_does_not_persist_a_partial_state(self):
         class OscillatingRule(BaseRule):
@@ -2074,13 +2225,17 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
 
-    def test_xml_indent_formats_generated_column_list_fragment(self):
+    def test_xml_indent_formats_generated_column_list_fragment_from_consumer(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
             '    <sql id="Base_Column_List">\n'
             '    sample_item.item_id AS sample_item_id, sample_item.item_name AS sample_item_name,\n'
             '    sample_item.owner_id AS sample_item_owner_id\n'
             '    </sql>\n'
+            '    <select id="items">\n'
+            '        SELECT <include refid="Base_Column_List" />\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
             '</mapper>'
         )
         expected = (
@@ -2090,6 +2245,11 @@ class TestRunnerIntegration(unittest.TestCase):
             '        sample_item.item_name AS sample_item_name,\n'
             '        sample_item.owner_id AS sample_item_owner_id\n'
             '    </sql>\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            <include refid="Base_Column_List" />\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
             '</mapper>'
         )
         config = Config()
@@ -2158,6 +2318,177 @@ class TestRunnerIntegration(unittest.TestCase):
             '                WHERE\n'
             '                    item_table.extraordinarily_long_start_timestamp &gt; #{start}\n'
             '                    OR item_table.extraordinarily_long_completion_timestamp IS NULL',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_indent_infers_projection_fragment_from_include_use(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="itemFields">\n'
+            '        item.item_id, item.owner_id, item.item_name, item.updated_at,\n'
+            '        (\n'
+            '            SELECT count(*)\n'
+            '            FROM sample_account acct\n'
+            '            WHERE acct.item_id = item.item_id\n'
+            '        ) AS owner_count\n'
+            '    </sql>\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            <include refid="itemFields" />\n'
+            '        FROM sample_item item\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '        item.item_id, item.owner_id, item.item_name, item.updated_at,',
+            '        item.item_id,\n'
+            '        item.owner_id,\n'
+            '        item.item_name,\n'
+            '        item.updated_at,',
+        )
+        config = Config()
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+        unresolved = [
+            violation
+            for violation, _, _ in first.violations
+            if violation.rule_id == "IR-unresolved-alias"
+        ]
+        self.assertFalse(unresolved)
+
+    def test_xml_projection_fragments_are_inferred_without_name_conventions(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="selectedFields">item.item_id, item.item_name</sql>\n'
+            '    <sql id="misleading_column_list">item.enabled = true</sql>\n'
+            '    <sql id="fromColumnList">FROM sample_item item</sql>\n'
+            '    <sql id="unusedColumnList">item.unused_id, item.unused_name</sql>\n'
+            '    <select id="items">\n'
+            '        SELECT <include refid="selectedFields" />\n'
+            '        FROM sample_item item\n'
+            '        WHERE <include refid="misleading_column_list" />\n'
+            '    </select>\n'
+            '    <select id="countItems">\n'
+            '        SELECT count(*) <include refid="fromColumnList" />\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        from mir.rules.xml.xml_mybatis_sql import (
+            get_all_elements_recursively,
+            parse_xml_elements,
+            reusable_select_list_ids,
+        )
+        from mir.rules.xml.xml_utils import tokenize_xml
+
+        tokens = tokenize_xml(xml_content)
+        elements = get_all_elements_recursively(parse_xml_elements(tokens))
+
+        self.assertEqual(
+            reusable_select_list_ids(tokens, elements, xml_content),
+            {"selectedFields"},
+        )
+
+    def test_xml_projection_inference_follows_nested_include_consumers(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="identityFields">item.item_id, item.item_name</sql>\n'
+            '    <sql id="displayFields">\n'
+            '        <include refid="identityFields" />, item.display_name\n'
+            '    </sql>\n'
+            '    <select id="items">\n'
+            '        SELECT <include refid="displayFields" />\n'
+            '        FROM sample_item item\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        from mir.rules.xml.xml_mybatis_sql import (
+            get_all_elements_recursively,
+            parse_xml_elements,
+            reusable_select_list_ids,
+        )
+        from mir.rules.xml.xml_utils import tokenize_xml
+
+        tokens = tokenize_xml(xml_content)
+        elements = get_all_elements_recursively(parse_xml_elements(tokens))
+
+        self.assertEqual(
+            reusable_select_list_ids(tokens, elements, xml_content),
+            {"displayFields", "identityFields"},
+        )
+
+    def test_xml_mybatis_validates_reusable_predicate_in_include_host(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="itemFilters">\n'
+            '        item.enabled\n'
+            '        <if test="ownerId != null">AND item.owner_id = #{ownerId}</if>\n'
+            '    </sql>\n'
+            '    <select id="items">\n'
+            '        SELECT item.item_id\n'
+            '        FROM sample_item item\n'
+            '        WHERE <include refid="itemFilters" />\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+
+        result = process_document(config, xml_content, "generic.xml", "xml")
+
+        unresolved = [
+            violation
+            for violation, _, _ in result.violations
+            if violation.rule_id == "IR-unresolved-alias"
+        ]
+        self.assertFalse(unresolved)
+
+    def test_xml_mybatis_anchors_on_conflict_after_nested_subquery(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="saveMissingItems">\n'
+            '        INSERT INTO sample_item (item_id)\n'
+            '            SELECT source.item_id\n'
+            '            FROM sample_source source\n'
+            '            WHERE NOT EXISTS (\n'
+            '                SELECT 1\n'
+            '                FROM sample_item item\n'
+            '                WHERE item.item_id = source.item_id\n'
+            '            )\n'
+            '                    ON CONFLICT (item_id) DO NOTHING\n'
+            '    </insert>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <insert id="saveMissingItems">\n'
+            '        INSERT INTO sample_item (item_id)\n'
+            '            SELECT source.item_id\n'
+            '            FROM sample_source source\n'
+            '            WHERE\n'
+            '                NOT EXISTS (\n'
+            '                    SELECT 1\n'
+            '                    FROM sample_item item\n'
+            '                    WHERE item.item_id = source.item_id\n'
+            '                )\n'
+            '        ON CONFLICT (item_id) DO NOTHING\n'
+            '    </insert>\n'
+            '</mapper>'
         )
         config = Config()
         config.profile = "commit"
@@ -2270,6 +2601,54 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.violations)
         self.assertFalse(second.violations)
         self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_indents_nested_case_in_reusable_column_list(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="Basic_Column_List">\n'
+            '        CASE\n'
+            '            WHEN preference_group_id = 1 THEN group_name\n'
+            '            ELSE\n'
+            '        CASE\n'
+            '            WHEN preference_group_id = 2 THEN option_name\n'
+            '            ELSE\n'
+            '        CASE\n'
+            '            WHEN preference_group_id = 3\n'
+            "                THEN style_name || ':' || style_variant\n"
+            '            ELSE null\n'
+            '        END\n'
+            '        END\n'
+            '        END AS display_name\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="Basic_Column_List">\n'
+            '        CASE\n'
+            '            WHEN preference_group_id = 1 THEN group_name\n'
+            '            ELSE CASE\n'
+            '                WHEN preference_group_id = 2 THEN option_name\n'
+            '                ELSE CASE\n'
+            "                    WHEN preference_group_id = 3 THEN style_name || ':' || style_variant\n"
+            '                    ELSE null\n'
+            '                END\n'
+            '            END\n'
+            '        END AS display_name\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
 
     def test_xml_mybatis_trim_owned_where_is_clean(self):
         xml_content = (
@@ -2880,6 +3259,95 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
 
+    def test_xml_mybatis_wrapped_on_compacts_a_short_comparison(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="BasicFrom">\n'
+            '        FROM\n'
+            '            sample.data_record data_record\n'
+            '            JOIN sample.extraordinarily_named_data_record_group data_record_group\n'
+            '                ON data_record.data_record_group_id =\n'
+            '        data_record_group.id\n'
+            '        <if test="filters != null">\n'
+            '            <include refid="BasicWhere" />\n'
+            '        </if>\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            'ON data_record.data_record_group_id =\n'
+            '        data_record_group.id',
+            'ON data_record.data_record_group_id = data_record_group.id',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_mybatis_wrapped_on_indents_a_long_right_operand(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="BasicFrom">\n'
+            '        FROM\n'
+            '            sample.data_record data_record\n'
+            '            JOIN sample.data_record_group data_record_group\n'
+            '                ON data_record.extraordinarily_long_record_group_identifier =\n'
+            '        data_record_group.extraordinarily_long_record_group_identifier\n'
+            '    </sql>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '        data_record_group.extraordinarily_long_record_group_identifier',
+            '                    data_record_group.extraordinarily_long_record_group_identifier',
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+        config.rule_configs = {
+            "IR-line-length": {"max_length": 100},
+        }
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_mybatis_close_line_on_preserves_reviewed_join_wrapping(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="joinedItems">\n'
+            '        SELECT item.item_id\n'
+            '        FROM\n'
+            '            sample.item item\n'
+            '            LEFT JOIN sample.items_for_time(\n'
+            '                    #{recordedAt}\n'
+            '                ) row ON row.item_id = item.item_id\n'
+            "                AND row.item_type != 'CURRENT'\n"
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_fragment_semantic_rewrite_updates_consumer_signatures(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
@@ -3166,6 +3634,38 @@ class TestRunnerIntegration(unittest.TestCase):
             '        FROM sample_item;\n'
             '    </select>\n'
             '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_physical_columns_align_after_select_include(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            <include refid="Base_Column_List" />,\n'
+            '        sample_item.description,\n'
+            '            <include refid="Audit_Column_List" />,\n'
+            '\n'
+            '        sample_item.status\n'
+            '        FROM sample_item;\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            '        sample_item.description,',
+            '            sample_item.description,',
+        ).replace(
+            '        sample_item.status',
+            '            sample_item.status',
         )
         config = Config()
         config.profile = "commit"
@@ -3495,6 +3995,67 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_rebases_final_dynamic_update_without_semicolon(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <update id="disableItems">\n'
+            '        UPDATE sample_item SET enabled = false;\n'
+            '        UPDATE sample_item item SET enabled = true,\n'
+            '                                updated_at = now()\n'
+            '                            WHERE\n'
+            '                                <if test="roles != null">\n'
+            '                                        EXISTS(\n'
+            '                                            SELECT role_id\n'
+            '                                            FROM sample_role role\n'
+            '                                            WHERE role.item_id = item.item_id\n'
+            '                                        )\n'
+            '                                    OR\n'
+            '                                </if>\n'
+            '                                                    expires_at &gt; now()\n'
+            '                                OR item_name IN\n'
+            '                                    <foreach collection="names" item="name" open="(" close=")" separator=",">\n'
+            '                                        #{name}\n'
+            '                                    </foreach>\n'
+            '    </update>\n'
+            '</mapper>'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <update id="disableItems">\n'
+            '        UPDATE sample_item SET enabled = false;\n'
+            '        UPDATE sample_item item\n'
+            '        SET\n'
+            '            enabled = true,\n'
+            '            updated_at = now()\n'
+            '        WHERE\n'
+            '            <if test="roles != null">\n'
+            '                EXISTS(\n'
+            '                    SELECT role_id\n'
+            '                    FROM sample_role role\n'
+            '                    WHERE role.item_id = item.item_id\n'
+            '                )\n'
+            '                OR\n'
+            '            </if>\n'
+            '            expires_at &gt; now()\n'
+            '            OR item_name IN\n'
+            '                <foreach collection="names" item="name" open="(" close=")" separator=",">\n'
+            '                    #{name}\n'
+            '                </foreach>\n'
+            '    </update>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_does_not_merge_optional_range_bounds(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
@@ -3563,7 +4124,7 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
-    def test_xml_mybatis_delete_statement_places_from_on_next_line(self):
+    def test_xml_mybatis_delete_statement_keeps_delete_from_together(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
             '    <delete id="cleanup">\n'
@@ -3572,7 +4133,34 @@ class TestRunnerIntegration(unittest.TestCase):
             '    </delete>\n'
             '</mapper>'
         )
-        expected = xml_content.replace("DELETE FROM", "DELETE\n        FROM")
+        expected = xml_content
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_xml_mybatis_delete_inside_foreach_keeps_delete_from_together(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <delete id="removeItems">\n'
+            '        <foreach collection="items" item="item">\n'
+            '            DELETE\n'
+            '            FROM sample_item\n'
+            '            WHERE item_id = #{item.id};\n'
+            '        </foreach>\n'
+            '    </delete>\n'
+            '</mapper>'
+        )
+        expected = xml_content.replace(
+            "            DELETE\n            FROM sample_item",
+            "            DELETE FROM sample_item",
+        )
         config = Config()
         config.profile = "commit"
         config.fix = True
@@ -4367,6 +4955,44 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
 
+    def test_xml_mybatis_set_operator_keeps_dynamic_cte_indent(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        WITH current_items AS (\n'
+            '            SELECT item_id\n'
+            '            FROM current_item\n'
+            '        ),\n'
+            '        <if test="includeArchived">\n'
+            '            selected_items AS (\n'
+            '                SELECT item_id\n'
+            '                FROM current_items\n'
+            '                UNION ALL\n'
+            '                SELECT item_id\n'
+            '                FROM archived_item\n'
+            '            ),\n'
+            '        </if>\n'
+            '        final_items AS (\n'
+            '            SELECT item_id\n'
+            '            FROM current_items\n'
+            '        )\n'
+            '        SELECT item_id\n'
+            '        FROM final_items\n'
+            '    </select>\n'
+            '</mapper>'
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_formats_dynamic_window_ordering(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
@@ -4797,6 +5423,144 @@ class TestRunnerIntegration(unittest.TestCase):
 
         self.assertEqual(first.content, expected)
         self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+
+    def test_create_table_as_long_select_does_not_split_scalar_call(self):
+        sql_content = (
+            "CREATE TEMP TABLE sample_rollup AS SELECT min(item_id) AS first_id, "
+            "external_id, item_name, region_name, category_name, status_name "
+            "FROM sample_item GROUP BY external_id, item_name, region_name, "
+            "category_name, status_name;\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertIn("min(item_id) AS first_id", first.content)
+        self.assertNotIn("min(\n", first.content)
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+
+    def test_nested_scalar_subquery_closers_do_not_cycle(self):
+        sql_content = (
+            "SELECT round(\n"
+            "    ((\n"
+            "        SELECT sum(metric_value)\n"
+            "        FROM sample_metric\n"
+            "    ) / (\n"
+            "        SELECT sum(total_value)\n"
+            "        FROM sample_total\n"
+            "    )) * 100,\n"
+            "    2\n"
+            ");\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertEqual(second.content, first.content)
+        self.assertIn("\n        ) / (\n", first.content)
+        self.assertFalse(first.diagnostics)
+
+    def test_raise_message_additive_continuations_do_not_cycle(self):
+        sql_content = (
+            "RAISE unique_violation USING MESSAGE = 'id: ' || NEW.item_id::TEXT "
+            "|| ' already exists in sample_schema.sample_table_with_a_long_name';\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertIn(
+            "USING MESSAGE = 'id: ' || NEW.item_id::TEXT\n",
+            first.content,
+        )
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+
+    def test_inline_dynamic_predicate_wraps_at_boolean_boundary(self):
+        xml_content = """<mapper namespace="sample.Mapper">
+    <select id="findItems">
+        SELECT item_id
+        FROM sample_item item
+        WHERE (#{scope} = 'all' OR item.scope_name = ANY('{${scopes}}'::TEXT[])) AND item.owner_id IS <if test="excludeOwner">NOT</if> NULL
+    </select>
+</mapper>
+"""
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "SampleMapper.xml", "xml")
+        second = process_document(
+            config, first.content, "SampleMapper.xml", "xml"
+        )
+
+        self.assertIn(
+            "\n            AND item.owner_id IS <if test=\"excludeOwner\">NOT</if> NULL",
+            first.content,
+        )
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+
+    def test_query_closer_aligns_after_inline_dynamic_ordering(self):
+        xml_content = """<mapper namespace="sample.Mapper">
+    <select id="findItems">
+        SELECT item_id
+        FROM sample_item
+        ORDER BY
+            <choose>
+                <when test="byName">item_name</when>
+                <otherwise>created_at</otherwise>
+            </choose>, item_id
+    </select>
+</mapper>
+"""
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+
+        first = process_document(config, xml_content, "SampleMapper.xml", "xml")
+        second = process_document(
+            config, first.content, "SampleMapper.xml", "xml"
+        )
+
+        self.assertIn("\n    </select>\n", first.content)
+        self.assertEqual(second.content, first.content)
+        self.assertFalse(first.diagnostics)
+
+    def test_create_view_union_branches_share_query_indent(self):
+        sql_content = (
+            "CREATE VIEW sample_combined AS\n"
+            "    SELECT item_id FROM sample_primary\n"
+            "UNION\n"
+            "    SELECT item_id FROM sample_secondary;\n"
+        )
+        config = Config()
+        config.fix = True
+
+        first = process_document(config, sql_content, "generic.sql", "sql")
+        second = process_document(
+            config, first.content, "generic.sql", "sql"
+        )
+
+        self.assertIn("\n    UNION\n    SELECT", first.content)
+        self.assertEqual(second.content, first.content)
         self.assertFalse(first.diagnostics)
 
     def test_where_case_comparison_continuation_does_not_cycle(self):
@@ -5792,7 +6556,65 @@ class TestRunnerIntegration(unittest.TestCase):
             first.content,
         )
         self.assertIn('st_makepoint(item.longitude, item.latitude)) AS boundary', first.content)
+        self.assertIn('            keyword.active\n', first.content)
         self.assertEqual(second.content, first.content)
+
+    def test_xml_indent_aligns_static_predicate_after_dynamic_where_conditions(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT item_id\n'
+            '        FROM sample_item\n'
+            '        WHERE\n'
+            '            <if test="status != null">item_status = #{status} AND</if>\n'
+            '        item_enabled\n'
+            '        <if test="descending">ORDER BY created_at DESC</if>\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        expected = xml_content.replace(
+            '        item_enabled\n',
+            '            item_enabled\n',
+        ).replace(
+            '        <if test="descending">ORDER BY created_at DESC</if>\n',
+            '            <if test="descending">ORDER BY created_at DESC</if>\n',
+        )
+        config = Config()
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-indent"]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_indent_does_not_treat_dollar_quoted_where_as_a_clause(self):
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="template">\n'
+            '        SELECT $template$\n'
+            '        WHERE\n'
+            '        preserved_template_text\n'
+            '        $template$\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        config = Config()
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-indent"]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, xml_content)
+        self.assertEqual(second.content, xml_content)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
 
     def test_xml_mybatis_maps_function_case_inside_dynamic_foreach(self):
         xml_content = (
@@ -6376,6 +7198,46 @@ class TestRunnerIntegration(unittest.TestCase):
                 '        secondAttribute="another_value_to_wrap" />'
             )
             self.assertEqual(content, expected)
+
+    def test_xml_line_length_moves_self_closing_marker_after_long_attribute(self):
+        long_refid = (
+            "org.example.generated.GenericDetailedSystemEventAnalyticUpdateInfoMapper."
+            "Base_Column_List"
+        )
+        xml_content = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            f'            <include refid="{long_refid}" />,\n'
+            '            item_id\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            '        SELECT\n'
+            '            <include\n'
+            f'                    refid="{long_refid}"\n'
+            '            />,\n'
+            '            item_id\n'
+            '        FROM sample_item\n'
+            '    </select>\n'
+            '</mapper>\n'
+        )
+        config = Config()
+        config.disable_all = True
+        config.rules_to_enable = ["IR-xml-line-length"]
+        config.fix = True
+
+        first = process_document(config, xml_content, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
 
     def test_xml_tag_collapse(self):
         # A choose-when block with multi-line tags that can fit under 120 chars

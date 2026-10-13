@@ -315,6 +315,10 @@ class JoinOnMultiRule(BaseRule):
                     " " if t["type"] == "WHITESPACE" else t["value"]
                     for t in on_clause_tokens
                 )
+                on_line_start = content.rfind("\n", 0, tok["start"]) + 1
+                on_has_own_line = not content[
+                    on_line_start:tok["start"]
+                ].strip()
                 estimated_line_len = source_text_length(
                     join_prefix_for_on.rstrip()
                     + " "
@@ -366,6 +370,16 @@ class JoinOnMultiRule(BaseRule):
                 
                 from mir.rules.sql.line_length import LineLengthRule
                 max_len = self.get_config_value(rule_config, "max_line_length", 100, fallbacks=[(LineLengthRule, "max_length")])
+                wrapped_on_line_len = source_text_length(
+                    expected_indent + on_clause_single.strip(),
+                    rule_config,
+                ) + source_indent_offset
+                compact_on_wrapped_line = bool(
+                    "original_xml" in rule_config
+                    and join_target_multiline
+                    and on_has_own_line
+                    and wrapped_on_line_len <= max_len
+                )
                 
                 first_cond_toks = []
                 for actual_idx, t in enumerate(tokens[i + 1:clause_end], start=i + 1):
@@ -381,6 +395,10 @@ class JoinOnMultiRule(BaseRule):
                     " " if t["type"] == "WHITESPACE" else t["value"]
                     for t in first_cond_toks
                 ).strip()
+                wrapped_first_condition_line_len = source_text_length(
+                    expected_indent + "ON " + first_cond_str_normalized,
+                    rule_config,
+                ) + source_indent_offset
                 # An additive continuation has its own wrapping policy.  Do
                 # not count the continuation when deciding whether ON fits
                 # beside a multiline join target; otherwise a stable
@@ -417,6 +435,7 @@ class JoinOnMultiRule(BaseRule):
                 ).strip()
 
                 operator_split = None
+                operator_split_after_wrapped_on = False
                 comparison_operators = {"=", "!=", "<>", "<", ">", "<=", ">="}
                 for actual_idx in range(i + 1, clause_end):
                     if actual_idx in boolean_indices:
@@ -476,6 +495,31 @@ class JoinOnMultiRule(BaseRule):
                             )
                         ):
                             operator_split = actual_idx
+                        elif (
+                            "original_xml" in rule_config
+                            and join_target_multiline
+                            and on_has_own_line
+                            and right
+                            and wrapped_first_condition_line_len > max_len
+                            and source_text_length(
+                                expected_indent
+                                + "ON "
+                                + left
+                                + " "
+                                + candidate["value"],
+                                rule_config,
+                            )
+                            + source_indent_offset
+                            <= max_len
+                            and source_text_length(
+                                expected_indent + "    " + right,
+                                rule_config,
+                            )
+                            + source_indent_offset
+                            <= max_len
+                        ):
+                            operator_split = actual_idx
+                            operator_split_after_wrapped_on = True
                         break
                 
                 estimated_first_line_len = (
@@ -527,7 +571,13 @@ class JoinOnMultiRule(BaseRule):
                             break
                 expected_pre_on_ws = (
                     "\n" + expected_indent
-                    if estimated_first_line_len > max_len and operator_split is None
+                    if (
+                        operator_split_after_wrapped_on
+                        or (
+                            estimated_first_line_len > max_len
+                            and operator_split is None
+                        )
+                    )
                     else " "
                 )
                 expected_post_on_ws = " "
@@ -573,7 +623,11 @@ class JoinOnMultiRule(BaseRule):
                         and tokens[operator_split + 1]["type"] == "WHITESPACE"
                         else None
                     )
-                    expected_operator_ws = "\n" + expected_indent
+                    expected_operator_ws = (
+                        "\n" + expected_indent + "    "
+                        if operator_split_after_wrapped_on
+                        else "\n" + expected_indent
+                    )
                     if (
                         ws_after_operator is None
                         or ws_after_operator["value"] != expected_operator_ws
@@ -629,11 +683,15 @@ class JoinOnMultiRule(BaseRule):
                         })
                 
                 if (
-                    estimated_line_len <= max_len
+                    (
+                        estimated_line_len <= max_len
+                        or compact_on_wrapped_line
+                    )
                     and (
                         not join_target_multiline
                         or join_target_is_subquery
                         or has_additive_continuation
+                        or compact_on_wrapped_line
                     )
                     and not has_multiline_group
                 ):
