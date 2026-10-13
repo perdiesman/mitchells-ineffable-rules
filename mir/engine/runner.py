@@ -71,8 +71,14 @@ def _plpgsql_bodies(content: str) -> list[dict]:
                 tag = value[: delimiter_end + 1]
                 if value.endswith(tag):
                     body = value[len(tag) : -len(tag)]
-                    first_line = next((line for line in body.splitlines() if line.strip()), "")
-                    first_word = first_line.strip().split()[0].upper() if first_line.strip() else ""
+                    first_line = next(
+                        (line for line in body.splitlines() if line.strip()), ""
+                    )
+                    first_word = (
+                        first_line.strip().split()[0].upper()
+                        if first_line.strip()
+                        else ""
+                    )
                     if (
                         previous_active
                         and previous_active["value"].upper() in {"AS", "DO"}
@@ -90,19 +96,26 @@ def run_rule_check_recursively(
     rule_config: dict,
     lang: str,
 ) -> List[Violation]:
-    violations = [] if rule.only_recursive else rule.check(content, file_path, rule_config)
+    violations = (
+        [] if rule.only_recursive else rule.check(content, file_path, rule_config)
+    )
     if lang != "sql" or rule.exclude_recursive:
         return violations
     lines = content.splitlines()
     for body_info in _plpgsql_bodies(content):
         body = body_info["body"]
-        body_start = content.count("\n", 0, body_info["token"]["start"] + len(body_info["tag"])) + 1
+        body_start = (
+            content.count("\n", 0, body_info["token"]["start"] + len(body_info["tag"]))
+            + 1
+        )
         recursive_config = dict(rule_config)
         recursive_config["_recursive"] = True
         for violation in rule.check(body, file_path, recursive_config):
             violation.line_number = body_start + violation.line_number - 1
             violation.offending_lines = [
-                lines[violation.line_number - 1] if violation.line_number <= len(lines) else ""
+                lines[violation.line_number - 1]
+                if violation.line_number <= len(lines)
+                else ""
             ]
             violations.append(violation)
     return violations
@@ -115,7 +128,9 @@ def run_rule_fix_recursively(
     rule_config: dict,
     lang: str,
 ) -> str:
-    current = content if rule.only_recursive else rule.fix(content, file_path, rule_config)
+    current = (
+        content if rule.only_recursive else rule.fix(content, file_path, rule_config)
+    )
     if lang != "sql" or rule.exclude_recursive:
         return current
     for body_info in reversed(_plpgsql_bodies(current)):
@@ -132,7 +147,9 @@ def run_rule_fix_recursively(
                 != protected_sql_signature(body_info["body"])
                 and not rule.commit_semantic_rewrite
             ):
-                raise ValueError("protected SQL syntax changed inside a dollar-quoted body")
+                raise ValueError(
+                    "protected SQL syntax changed inside a dollar-quoted body"
+                )
         token = body_info["token"]
         replacement = body_info["tag"] + fixed + body_info["tag"]
         current = current[: token["start"]] + replacement + current[token["end"] :]
@@ -169,9 +186,7 @@ def apply_filtered_fixes(original: str, fixed: str, target_lines: Set[int]) -> s
     return "".join(result)
 
 
-def remap_selected_lines(
-    original: str, fixed: str, target_lines: Set[int]
-) -> Set[int]:
+def remap_selected_lines(original: str, fixed: str, target_lines: Set[int]) -> Set[int]:
     """Map an authorized line scope through an accepted formatting edit."""
     if not target_lines or original == fixed:
         return set(target_lines)
@@ -296,7 +311,10 @@ def format_violation(
 
 
 def _rule_enabled(config: Config, rule: BaseRule, lang: str, rule_config: dict) -> bool:
-    if rule.rule_id in config.rules_to_disable or f"{lang}:{rule.rule_id}" in config.rules_to_disable:
+    if (
+        rule.rule_id in config.rules_to_disable
+        or f"{lang}:{rule.rule_id}" in config.rules_to_disable
+    ):
         return False
     global_config = config.rule_configs.get(rule.rule_id, {})
     language_config = config.rule_configs.get(f"{lang}:{rule.rule_id}", {})
@@ -304,7 +322,11 @@ def _rule_enabled(config: Config, rule: BaseRule, lang: str, rule_config: dict) 
         return False
     if config.profile == "commit" and not rule.commit_profile:
         return False
-    if lang == "sql" and rule_config.get("_template_dialect") == "trellis" and not rule.trellis_safe:
+    if (
+        lang == "sql"
+        and rule_config.get("_template_dialect") == "trellis"
+        and not rule.trellis_safe
+    ):
         return False
     if config.disable_all:
         return bool(
@@ -357,15 +379,22 @@ def _collect(
         if not _rule_enabled(config, rule, lang, rule_config):
             continue
         try:
-            violations = run_rule_check_recursively(rule, content, path, rule_config, lang)
+            violations = run_rule_check_recursively(
+                rule, content, path, rule_config, lang
+            )
         except Exception as error:
             diagnostics.append(f"Error running rule {rule.rule_id} on {path}: {error}")
             continue
-        disabled_lines = disabled.get(rule.rule_id, set()) | disabled.get("IR-all", set())
+        disabled_lines = disabled.get(rule.rule_id, set()) | disabled.get(
+            "IR-all", set()
+        )
         for violation in violations:
             if not selection.contains(violation.line_number):
                 continue
-            if violation.line_number in disabled_lines or violation.line_number in disabled.get(violation.rule_id, set()):
+            if (
+                violation.line_number in disabled_lines
+                or violation.line_number in disabled.get(violation.rule_id, set())
+            ):
                 continue
             violation_rule = rules_by_id.get(violation.rule_id, rule)
             violation_config = resolve_rule_config(
@@ -377,7 +406,9 @@ def _collect(
                 template_dialect,
                 config.language_configs.get(lang, {}),
             )
-            severity = violation_rule.get_config_value(violation_config, "severity", "error")
+            severity = violation_rule.get_config_value(
+                violation_config, "severity", "error"
+            )
             if config.no_warnings and severity == "warning":
                 continue
             if config.warnings_only and severity != "warning":
@@ -420,7 +451,11 @@ def _provider_pipeline(config: Config, language: str) -> list[object]:
     configured = config.language_configs.get(language, {}).get("providers")
     if isinstance(configured, list):
         by_id = {provider.provider_id: provider for provider in providers}
-        return [by_id[value] for value in configured if value in by_id and language in by_id[value].languages]
+        return [
+            by_id[value]
+            for value in configured
+            if value in by_id and language in by_id[value].languages
+        ]
     return [provider for provider in providers if language in provider.languages]
 
 
@@ -432,54 +467,98 @@ def _run_providers(
 ) -> None:
     current = result.content
     active_selection = selection
-    for provider in _provider_pipeline(config, language):
-        provider_config = _provider_config(config, provider)
-        if provider_config.get("enabled") is False:
-            continue
-        disabled = get_disabled_rules_map(current, result.path) if "IR-" in current else {}
-        context = ProviderContext(
-            path=result.path,
-            language=language,
-            selected_lines=frozenset(active_selection.allowed),
-            restricted=active_selection.restricted,
-            fix=config.fix or config.dry_run,
-            profile=config.profile,
-            disabled_lines={
-                provider.provider_id: frozenset(disabled.get(f"IR-{provider.provider_id}", set())),
-                "all": frozenset(disabled.get("IR-all", set())),
-            },
-        )
-        provider_result = provider.run(current, context, provider_config)
-        result.diagnostics.extend(provider_result.diagnostics)
-        if provider_result.content != current:
-            if active_selection.restricted:
-                active_selection = LineSelection(
-                    active_selection.changed,
-                    frozenset(remap_selected_lines(current, provider_result.content, set(active_selection.allowed))),
-                )
-            current = provider_result.content
-            result.rules_fixed.add(provider.provider_id.upper())
-        lines = current.splitlines()
-        for finding in provider_result.findings:
-            if active_selection.restricted and not active_selection.contains(finding.line):
+    providers = _provider_pipeline(config, language)
+    violation_start = len(result.violations)
+    seen = {current}
+    for _ in range(10):
+        before = current
+        del result.violations[violation_start:]
+        for provider in providers:
+            provider_config = _provider_config(config, provider)
+            if provider_config.get("enabled") is False:
                 continue
-            provider_disabled = disabled.get(f"IR-{provider.provider_id}", set())
-            code_disabled = disabled.get(f"IR-{provider.provider_id}:{finding.code}", set())
-            if finding.line in provider_disabled or finding.line in code_disabled or finding.line in disabled.get("IR-all", set()):
-                continue
-            if config.no_warnings and finding.severity == "warning":
-                continue
-            if config.warnings_only and finding.severity != "warning":
-                continue
-            rule_id = f"{provider.provider_id.upper()}:{finding.code}"
-            violation = Violation(
-                rule_id,
-                finding.line,
-                finding.message,
-                [lines[finding.line - 1]] if 0 < finding.line <= len(lines) else [],
-                bool(finding.edits),
+            disabled = (
+                get_disabled_rules_map(current, result.path) if "IR-" in current else {}
             )
-            result.violations.append((violation, _ProviderRule(rule_id, provider.description), finding.severity))
+            context = ProviderContext(
+                path=result.path,
+                language=language,
+                selected_lines=frozenset(active_selection.allowed),
+                restricted=active_selection.restricted,
+                fix=config.fix or config.dry_run,
+                profile=config.profile,
+                disabled_lines={
+                    provider.provider_id: frozenset(
+                        disabled.get(f"IR-{provider.provider_id}", set())
+                    ),
+                    "all": frozenset(disabled.get("IR-all", set())),
+                },
+            )
+            provider_result = provider.run(current, context, provider_config)
+            for diagnostic in provider_result.diagnostics:
+                if diagnostic not in result.diagnostics:
+                    result.diagnostics.append(diagnostic)
+            if provider_result.content != current:
+                if active_selection.restricted:
+                    active_selection = LineSelection(
+                        active_selection.changed,
+                        frozenset(
+                            remap_selected_lines(
+                                current,
+                                provider_result.content,
+                                set(active_selection.allowed),
+                            )
+                        ),
+                    )
+                current = provider_result.content
+                result.rules_fixed.add(provider.provider_id.upper())
+            lines = current.splitlines()
+            for finding in provider_result.findings:
+                if active_selection.restricted and not active_selection.contains(
+                    finding.line
+                ):
+                    continue
+                provider_disabled = disabled.get(f"IR-{provider.provider_id}", set())
+                code_disabled = disabled.get(
+                    f"IR-{provider.provider_id}:{finding.code}", set()
+                )
+                if (
+                    finding.line in provider_disabled
+                    or finding.line in code_disabled
+                    or finding.line in disabled.get("IR-all", set())
+                ):
+                    continue
+                if config.no_warnings and finding.severity == "warning":
+                    continue
+                if config.warnings_only and finding.severity != "warning":
+                    continue
+                rule_id = f"{provider.provider_id.upper()}:{finding.code}"
+                violation = Violation(
+                    rule_id,
+                    finding.line,
+                    finding.message,
+                    [lines[finding.line - 1]] if 0 < finding.line <= len(lines) else [],
+                    bool(finding.edits),
+                )
+                result.violations.append(
+                    (
+                        violation,
+                        _ProviderRule(rule_id, provider.description),
+                        finding.severity,
+                    )
+                )
+        if current == before or not (config.fix or config.dry_run):
+            break
+        if current in seen:
+            result.diagnostics.append(
+                f"External provider pipeline did not converge for {result.path}"
+            )
+            break
+        seen.add(current)
+    else:
+        result.diagnostics.append(
+            f"External provider pipeline exceeded 10 passes for {result.path}"
+        )
     result.content = current
 
 
@@ -518,7 +597,11 @@ def process_document(
         for _ in range(max_fix_passes):
             fix_rules: list[BaseRule] = []
             for violation, rule, _ in violations:
-                if violation.is_fixable and rule.is_fixable in {"yes", "sometimes"} and rule not in fix_rules:
+                if (
+                    violation.is_fixable
+                    and rule.is_fixable in {"yes", "sometimes"}
+                    and rule not in fix_rules
+                ):
                     fix_rules.append(rule)
             if not fix_rules:
                 break
@@ -547,20 +630,22 @@ def process_document(
                 if has_disable_directive and disabled_content != current:
                     disabled_by_rule = get_disabled_rules_map(current, path)
                     disabled_content = current
-                rule_config["_disabled_lines"] = (
-                    disabled_by_rule.get(rule.rule_id, set())
-                    | disabled_by_rule.get("IR-all", set())
-                )
+                rule_config["_disabled_lines"] = disabled_by_rule.get(
+                    rule.rule_id, set()
+                ) | disabled_by_rule.get("IR-all", set())
                 rule_config["rules_fixed"] = result.rules_fixed
                 try:
-                    fixed = run_rule_fix_recursively(rule, current, path, rule_config, lang)
+                    fixed = run_rule_fix_recursively(
+                        rule, current, path, rule_config, lang
+                    )
                 except Exception as error:
-                    result.diagnostics.append(f"Error fixing rule {rule.rule_id} on {path}: {error}")
+                    result.diagnostics.append(
+                        f"Error fixing rule {rule.rule_id} on {path}: {error}"
+                    )
                     continue
-                protected_lines = (
-                    disabled_by_rule.get(rule.rule_id, set())
-                    | disabled_by_rule.get("IR-all", set())
-                )
+                protected_lines = disabled_by_rule.get(
+                    rule.rule_id, set()
+                ) | disabled_by_rule.get("IR-all", set())
                 if active_selection.restricted or protected_lines:
                     allowed_lines = (
                         set(active_selection.allowed)
@@ -568,14 +653,13 @@ def process_document(
                         else set(range(1, len(current.splitlines()) + 1))
                     )
                     allowed_lines.difference_update(protected_lines)
-                    fixed = apply_filtered_fixes(
-                        current, fixed, allowed_lines
-                    )
+                    fixed = apply_filtered_fixes(current, fixed, allowed_lines)
                 if config.profile == "commit" and lang == "sql" and fixed != current:
                     from mir.rules.sql.sql_utils import protected_sql_signature
 
                     if (
-                        protected_sql_signature(fixed) != protected_sql_signature(current)
+                        protected_sql_signature(fixed)
+                        != protected_sql_signature(current)
                         and not rule.commit_semantic_rewrite
                     ):
                         result.diagnostics.append(
@@ -584,9 +668,13 @@ def process_document(
                         )
                         continue
                     if template_dialect == "trellis":
-                        from mir.rules.sql.trellis_utils import trellis_directive_signature
+                        from mir.rules.sql.trellis_utils import (
+                            trellis_directive_signature,
+                        )
 
-                        if trellis_directive_signature(fixed) != trellis_directive_signature(current):
+                        if trellis_directive_signature(
+                            fixed
+                        ) != trellis_directive_signature(current):
                             result.diagnostics.append(
                                 f"Unsafe fix rejected for {rule.rule_id} on {path}: "
                                 "Trellis directive semantics changed"
@@ -610,7 +698,9 @@ def process_document(
                         if rule.commit_semantic_rewrite
                         else protected_java_signature(fixed)
                     )
-                    if before_signature != after_signature or error_nodes(parse_java(fixed)):
+                    if before_signature != after_signature or error_nodes(
+                        parse_java(fixed)
+                    ):
                         result.diagnostics.append(
                             f"Unsafe fix rejected for {rule.rule_id} on {path}: "
                             "protected Java syntax changed"
@@ -638,14 +728,15 @@ def process_document(
             )
             result.diagnostics.extend(pass_diagnostics)
             if cycle_detected:
-                result.diagnostics.append(f"Formatter did not converge for {path}; a formatting cycle was detected")
+                result.diagnostics.append(
+                    f"Formatter did not converge for {path}; a formatting cycle was detected"
+                )
                 convergence_failed = True
                 break
             seen.add(current)
         else:
             result.diagnostics.append(
-                f"Formatter did not converge for {path} after "
-                f"{max_fix_passes} passes"
+                f"Formatter did not converge for {path} after {max_fix_passes} passes"
             )
             convergence_failed = True
         if convergence_failed:
@@ -695,7 +786,11 @@ def _print_result(config: Config, result: DocumentResult) -> None:
     for diagnostic in result.diagnostics:
         print(diagnostic, file=sys.stderr)
     for violation, rule, severity in result.violations:
-        print(format_violation(violation, result.path, config.verbose, rule.description, severity))
+        print(
+            format_violation(
+                violation, result.path, config.verbose, rule.description, severity
+            )
+        )
 
 
 def _read_stdin() -> Optional[str]:
@@ -712,11 +807,17 @@ def _read_stdin() -> Optional[str]:
 
 
 def _run_staged(config: Config) -> int:
-    from mir.engine.git_staged import read_staged_documents, repository_root, update_staged_documents
+    from mir.engine.git_staged import (
+        read_staged_documents,
+        repository_root,
+        update_staged_documents,
+    )
 
     try:
         root = repository_root()
-        documents = read_staged_documents(root, _supported_extensions(config.include_dirs, config.provider_dirs))
+        documents = read_staged_documents(
+            root, _supported_extensions(config.include_dirs, config.provider_dirs)
+        )
     except subprocess.CalledProcessError as error:
         print(f"Error reading staged content: {error}", file=sys.stderr)
         return 2
@@ -728,13 +829,17 @@ def _run_staged(config: Config) -> int:
         if not lang:
             continue
         selection = expand_selection(document.content, lang, document.changed_lines)
-        result = process_document(config, document.content, document.path, lang, selection)
+        result = process_document(
+            config, document.content, document.path, lang, selection
+        )
         _print_result(config, result)
         errors += result.errors
         if config.fix and result.content != document.content:
             changes.append((document, result.content))
             if not config.quiet:
-                print(f"Fixed staged issues in {document.path} ({', '.join(sorted(result.rules_fixed))})")
+                print(
+                    f"Fixed staged issues in {document.path} ({', '.join(sorted(result.rules_fixed))})"
+                )
         elif config.dry_run and result.content != document.content and not config.quiet:
             print_diff_with_delta(
                 list(
@@ -771,7 +876,10 @@ def run_linter(config: Config) -> int:
         content = _read_stdin()
     if content is not None:
         if not lang:
-            print("Error: Language must be specified for raw or piped content (use --lang/--language).", file=sys.stderr)
+            print(
+                "Error: Language must be specified for raw or piped content (use --lang/--language).",
+                file=sys.stderr,
+            )
             return 1
         result = process_document(config, content, "<stdin>", lang)
         _print_result(config, result)
@@ -791,7 +899,9 @@ def run_linter(config: Config) -> int:
         return 1 if result.errors else 0
 
     total_errors = 0
-    for file_path in find_files(config.paths, config.include_dirs, config.provider_dirs):
+    for file_path in find_files(
+        config.paths, config.include_dirs, config.provider_dirs
+    ):
         language = get_file_language(file_path)
         if not language:
             continue
@@ -805,9 +915,7 @@ def run_linter(config: Config) -> int:
             # applying ASCII-oriented SQL layout fixes.
             source_encoding = "latin-1"
             try:
-                original = Path(file_path).read_text(
-                    encoding=source_encoding
-                )
+                original = Path(file_path).read_text(encoding=source_encoding)
             except OSError as error:
                 if not config.quiet:
                     print(
@@ -833,7 +941,9 @@ def run_linter(config: Config) -> int:
                 newline="",
             )
             if not config.quiet:
-                print(f"Fixed issues in {file_path} ({', '.join(sorted(result.rules_fixed))})")
+                print(
+                    f"Fixed issues in {file_path} ({', '.join(sorted(result.rules_fixed))})"
+                )
         elif config.dry_run and not config.quiet:
             print_diff_with_delta(
                 list(

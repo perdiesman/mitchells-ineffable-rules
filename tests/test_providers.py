@@ -13,6 +13,7 @@ from mir.engine.provider_interface import (
     BaseProvider,
     ProviderCapabilities,
     ProviderContext,
+    ProviderResult,
 )
 from mir.engine.providers_loader import (
     ProviderValidationError,
@@ -147,6 +148,32 @@ class TestProviders(unittest.TestCase):
             project_root_for_executable("/project/node_modules/.bin/eslint"),
             "/project",
         )
+
+    def test_provider_pipeline_converges_across_ordered_tools(self):
+        calls = {"eslint": 0, "prettier": 0}
+
+        def eslint_run(provider, content, context, provider_config):
+            calls["eslint"] += 1
+            updated = content.replace("let value = 1;", "const value = 1;")
+            return ProviderResult(updated, changed=updated != content)
+
+        def prettier_run(provider, content, context, provider_config):
+            calls["prettier"] += 1
+            updated = content.replace("let value=1", "let value = 1;")
+            return ProviderResult(updated, changed=updated != content)
+
+        config = Config()
+        config.fix = True
+        with (
+            patch.object(EslintProvider, "run", eslint_run),
+            patch.object(PrettierProvider, "run", prettier_run),
+        ):
+            result = process_document(
+                config, "let value=1\n", "/tmp/provider-pipeline.ts", "typescript"
+            )
+        self.assertEqual(result.content, "const value = 1;\n")
+        self.assertGreaterEqual(calls["eslint"], 3)
+        self.assertEqual(result.diagnostics, [])
 
     @unittest.skipUnless(RUFF, "Ruff optional dependency is not installed")
     def test_real_ruff_fix_is_clean_and_idempotent(self):
