@@ -166,6 +166,25 @@ class TestProviders(unittest.TestCase):
         self.assertEqual(second.content, first.content)
 
     @unittest.skipUnless(RUFF, "Ruff optional dependency is not installed")
+    def test_real_ruff_respects_force_excluded_stdin_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "pyproject.toml").write_text(
+                '[tool.ruff]\nexclude = ["generated"]\n', encoding="utf-8"
+            )
+            generated = root / "generated" / "sample.py"
+            generated.parent.mkdir()
+            source = "def add( left,right ):\n return left+right\n"
+            generated.write_text(source, encoding="utf-8")
+            config = Config()
+            config.fix = True
+            config.provider_configs = {"ruff": {"enabled": True, "executable": RUFF}}
+            result = process_document(config, source, str(generated), "python")
+            self.assertEqual(result.content, source)
+            self.assertEqual(result.violations, [])
+            self.assertEqual(result.diagnostics, [])
+
+    @unittest.skipUnless(RUFF, "Ruff optional dependency is not installed")
     def test_staged_ruff_updates_index_and_preserves_unstaged_content(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

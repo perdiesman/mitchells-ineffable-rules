@@ -19,5 +19,19 @@ providers:
     enabled: auto
     executable: auto
     config: discover
+    required_version: null
     timeout_seconds: 30
+```
+
+## Executable examples
+
+### formatted object
+```
+const options={enabled:true};
+
+```
+Expected output:
+```
+const options = { enabled: true };
+
 ```

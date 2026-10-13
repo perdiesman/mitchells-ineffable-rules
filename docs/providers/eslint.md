@@ -20,5 +20,14 @@ providers:
     executable: auto
     config: discover
     fix: true
+    required_version: null
     timeout_seconds: 30
+```
+
+## Executable examples
+
+### reported expression
+```
+value == null;
+
 ```

@@ -14,7 +14,7 @@ For Java, the profile verifies the parsed token and comment sequence after every
 
 For external providers, MIR sends the staged blob rather than the working-tree file. Ruff and ESLint fixes must be anchored in the authorized changed range, while Ruff and Prettier range formatting may expand only to the enclosing logical statement. Disabled regions and unrelated staged lines remain protected. Provider failures and rejected edits are reported instead of falling back to whole-file writes.
 
-Install Ruff with `mir-linter[python]`. Prettier and ESLint must be installed and locked in the consumer project; the hook never invokes a network-installing `npx` fallback.
+Install Ruff with `mir-linter[python]`. Prettier and ESLint must be installed and locked in the consumer project; the hook never invokes a network-installing `npx` fallback. Use an exact provider `required_version` when the lockfile alone is not sufficient for the hook environment.
 
 ## Install in a consumer repository
 
@@ -46,6 +46,10 @@ cd ~/projects/eaglei/webstack/aerie
 # install/copy commands above
 
 cd ~/projects/eaglei/eagle_ai
+# install/copy commands above
+
+cd ~/projects/eaglei/ong-analytics
+git switch feature/EI-8398-mir-linter
 # install/copy commands above
 ```
 

@@ -384,7 +384,10 @@ def generate_docs_to_path(
         page.append("providers:")
         page.append(f"  {provider.provider_id}:")
         for key, value in provider.default_config.items():
-            rendered = str(value).lower() if isinstance(value, bool) else str(value)
+            if value is None:
+                rendered = "null"
+            else:
+                rendered = str(value).lower() if isinstance(value, bool) else str(value)
             page.append(f"    {key}: {rendered}")
         page.append("```\n")
         if provider.cases:
@@ -394,7 +397,7 @@ def generate_docs_to_path(
                 if case.fixed is not None:
                     page.extend(["Expected output:", "```", case.fixed, "```"])
         with open(os.path.join(providers_dir, f"{provider.provider_id}.md"), "w", encoding="utf-8") as stream:
-            stream.write("\n".join(page))
+            stream.write("\n".join(page) + "\n")
     with open(os.path.join(providers_dir, "README.md"), "w", encoding="utf-8") as stream:
         stream.write("\n".join(provider_index) + "\n")
     print(f"Generated provider docs -> {providers_dir}")

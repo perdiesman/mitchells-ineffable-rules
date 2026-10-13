@@ -22,6 +22,7 @@ providers:
     check: true
     format: true
     unsafe_fixes: false
+    required_version: null
     timeout_seconds: 30
 ```
 

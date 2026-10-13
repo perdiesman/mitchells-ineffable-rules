@@ -228,13 +228,14 @@ Every Java rule supplies generic executable cases used by both the generated [Ja
 
 External providers use the same file, stdin, line-selection, dry-run, and staged-index workflow as native MIR rules. Python runs Ruff lint fixes before Ruff formatting. JavaScript and TypeScript run ESLint fixes before Prettier; CSS, SCSS, and HTML use Prettier. JSON, YAML, Markdown, and Jupyter notebooks are intentionally outside the initial default scope.
 
-MIR respects the nearest native tool configuration. Ruff discovers `pyproject.toml`, `ruff.toml`, and `.ruff.toml`; Prettier and ESLint use their project configuration and locally locked plugins. In `auto` mode an unavailable provider is skipped. An explicitly enabled provider without a usable executable is an error.
+MIR respects the nearest native tool configuration. Ruff discovers `pyproject.toml`, `ruff.toml`, and `.ruff.toml`; Prettier and ESLint use their project configuration, ignore files, and locally locked plugins. Node providers share persistent project-local processes during a run so large repositories do not pay startup cost per file. In `auto` mode an unavailable provider is skipped. An explicitly enabled provider without a usable executable is an error.
 
 ```yaml
 providers:
   ruff:
     enabled: auto
     unsafe_fixes: false
+    required_version: null
   eslint:
     enabled: auto
     fix: true
