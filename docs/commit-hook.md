@@ -55,6 +55,34 @@ git switch feature/EI-8398-mir-linter
 
 No consumer-specific SQL is stored in MIR's documentation or tests. Compatibility scans use ignored local clones only.
 
+## Docker-backed hook
+
+The portable hook can keep Git and the index entirely on the host while running MIR in a locked-down container. This mode requires Git, Docker, and the standard `base64` command on the host; it does not require a host Python or MIR installation.
+
+Build the image once and configure each consumer repository:
+
+```bash
+MIR_ROOT=/path/to/mitchells-ineffable-rules
+docker build -t mir-linter:latest "$MIR_ROOT"
+cp "$MIR_ROOT/pre-commit-hook.sh" .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+git config mir.executionMode docker
+git config mir.dockerImage mir-linter:latest
+```
+
+`MIR_EXECUTION_MODE` and `MIR_DOCKER_IMAGE` can temporarily override those repository settings. To return to a host installation, run `git config mir.executionMode host`.
+
+For each commit, the host hook:
+
+1. Uses Git to collect supported staged paths, modes, exact staged blobs, and zero-context changed-line diffs.
+2. Starts one container for the complete batch. The repository is mounted read-only, and an empty mount hides its `.git` directory or worktree pointer.
+3. Passes only an isolated exchange directory as writable state. The container has no Git client and cannot update the index itself.
+4. Hashes successful formatted blobs and updates the host index, then applies the same patch to the working tree only when it does not overlap unstaged work.
+
+The container runs without network access, Linux capabilities, or privilege escalation. It uses the host user and group IDs so returned files have the correct ownership. Ruff is installed in the image. A Node.js runtime is present for Prettier and ESLint, while the provider packages and configuration still come from the consumer repository's locked `node_modules`.
+
+External rule and provider directories used by Docker mode must be inside the mounted repository. The batch exchange accepts UTF-8 regular files; unsupported extensions, symlinks, submodules, and non-UTF-8 content are skipped just as non-source inputs.
+
 ## Optional configuration
 
 Normal command-line behavior remains unchanged. The hook's commit profile focuses on conservative SQL token formatting, XML validity/attribute quoting, MyBatis source-mapped SQL, Trellis directives, and syntax-preserving Java layout. Project overrides still use `.ir-config.yaml`:

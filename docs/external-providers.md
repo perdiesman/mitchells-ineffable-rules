@@ -46,6 +46,8 @@ Set `required_version` to an exact version when reproducible output must be enfo
 
 For commit hooks, use `mir --staged --fix`. That limits work to staged files and authorized changed ranges. Whole-repository review runs are intentionally more expensive, especially when ESLint performs type-aware analysis.
 
+The Docker-backed commit hook provides Ruff in the MIR image and a Node.js runtime for project-local Prettier and ESLint installations. It mounts the consumer repository read-only, so provider executables and configuration remain discoverable without allowing the container to modify project files directly. See the [staged commit hook guide](commit-hook.md#docker-backed-hook) for setup and index-safety details.
+
 ## Adding a provider
 
 An external provider package registers a `BaseProvider` subclass in the `mir.providers` entry-point group. A local provider directory may contain Python modules defining the same subclasses. Every provider declares a unique ID, languages, extensions, capabilities, defaults, configuration metadata, generic executable cases, and `run()` implementation. The validated loader rejects duplicate or incomplete providers before source processing begins.

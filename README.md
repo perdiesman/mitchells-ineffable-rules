@@ -139,21 +139,26 @@ Build and execute the linter entirely inside a containerized sandbox.
 
 ### 1. Build the Docker Image
 ```bash
-docker build -t mitchells-ineffable-rules:latest .
+docker build -t mir-linter:latest .
 ```
 
 ### 2. Lint Files via Docker
 Mount your workspace volume into `/workspace` in the container:
 ```bash
 # Basic check on the current directory
-docker run --rm -v "$(pwd):/workspace" mitchells-ineffable-rules:latest .
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -v "$(pwd):/workspace" mir-linter:latest .
 
 # Run auto-fixes
-docker run --rm -v "$(pwd):/workspace" mitchells-ineffable-rules:latest --fix .
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -v "$(pwd):/workspace" mir-linter:latest --fix .
 
 # Verbose dry-run on a file
-docker run --rm -v "$(pwd):/workspace" mitchells-ineffable-rules:latest --dry-run -v query.sql
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -v "$(pwd):/workspace" mir-linter:latest --dry-run -v query.sql
 ```
+
+The image includes Ruff and a Node.js runtime. Prettier and ESLint are still resolved from the mounted project's locked `node_modules`, and the image does not download provider tools while linting.
 
 ---
 
@@ -174,6 +179,18 @@ python3 -m pip install -e /path/to/mitchells-ineffable-rules
 cp /path/to/mitchells-ineffable-rules/pre-commit-hook.sh .git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
 ```
+
+The same portable hook can run MIR in Docker without installing Python or MIR on the host. Build the image, copy the hook, and select Docker mode in the consumer repository:
+
+```bash
+docker build -t mir-linter:latest /path/to/mitchells-ineffable-rules
+cp /path/to/mitchells-ineffable-rules/pre-commit-hook.sh .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+git config mir.executionMode docker
+git config mir.dockerImage mir-linter:latest
+```
+
+Git remains on the host. The hook sends exact staged blobs and changed-line diffs through a temporary batch exchange, hides `.git` from the container, and writes accepted results back to the index. The repository is read-only inside the container, apart from the isolated exchange directory.
 
 The hook selects supported staged files itself; do not pass the output of `git diff` as filenames.
 
@@ -392,6 +409,6 @@ Releases are published from `main` through GitHub Actions and PyPI Trusted Publi
 
 *This package has been developed with **Antigravity** and **OpenAI Codex**.*
 
-*Total Cumulative Development Time: ~71.5 hours*
+*Total Cumulative Development Time: ~72.8 hours*
 
-*Last Developer Session: 2026-10-13T18:38:52Z*
+*Last Developer Session: 2026-10-13T19:59:10Z*
