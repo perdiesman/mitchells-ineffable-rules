@@ -195,6 +195,44 @@ class RuffProvider(BaseProvider):
             current = process.stdout
         return current
 
+    def _apply_fixes(
+        self,
+        executable: str,
+        content: str,
+        context: ProviderContext,
+        config: Dict[str, Any],
+    ) -> str:
+        current = content
+        disabled = set(context.disabled_lines.get("ruff", frozenset())) | set(
+            context.disabled_lines.get("all", frozenset())
+        )
+        for _ in range(10):
+            findings = self._check(executable, current, context, config)
+            edits = []
+            for finding in findings:
+                if context.restricted and finding.line not in context.selected_lines:
+                    continue
+                for edit in finding.edits:
+                    if edit.applicability != "safe" and not config.get(
+                        "unsafe_fixes", False
+                    ):
+                        continue
+                    if not selected_edit(
+                        current, edit, context.selected_lines, context.restricted
+                    ):
+                        continue
+                    touched = range(
+                        current.count("\n", 0, edit.start) + 1,
+                        current.count("\n", 0, edit.end) + 2,
+                    )
+                    if not disabled.intersection(touched):
+                        edits.append(edit)
+            updated = apply_edits(current, edits)
+            if updated == current:
+                break
+            current = updated
+        return current
+
     def run(
         self, content: str, context: ProviderContext, provider_config: Dict[str, Any]
     ) -> ProviderResult:
@@ -218,59 +256,28 @@ class RuffProvider(BaseProvider):
             if mismatch:
                 return ProviderResult(content, diagnostics=[mismatch], version=version)
             current = content
-            findings = (
-                self._check(executable, current, context, provider_config)
-                if provider_config.get("check", True)
-                else []
-            )
-            if context.fix and findings:
-                for _ in range(10):
-                    disabled = set(
-                        context.disabled_lines.get("ruff", frozenset())
-                    ) | set(context.disabled_lines.get("all", frozenset()))
-                    edits = []
-                    for finding in findings:
-                        if (
-                            context.restricted
-                            and finding.line not in context.selected_lines
-                        ):
-                            continue
-                        for edit in finding.edits:
-                            if edit.applicability != "safe" and not provider_config.get(
-                                "unsafe_fixes", False
-                            ):
-                                continue
-                            if selected_edit(
-                                current,
-                                edit,
-                                context.selected_lines,
-                                context.restricted,
-                            ):
-                                touched = range(
-                                    current.count("\n", 0, edit.start) + 1,
-                                    current.count("\n", 0, edit.end) + 2,
-                                )
-                                if not disabled.intersection(touched):
-                                    edits.append(edit)
-                    updated = apply_edits(current, edits)
-                    if updated == current:
-                        break
-                    current = updated
-                    findings = self._check(
-                        executable, current, context, provider_config
-                    )
             format_finding = None
-            if provider_config.get("format", True):
+            if context.fix:
+                for _ in range(10):
+                    before = current
+                    if provider_config.get("check", True):
+                        current = self._apply_fixes(
+                            executable, current, context, provider_config
+                        )
+                    if provider_config.get("format", True):
+                        current = self._format(
+                            executable, current, context, provider_config
+                        )
+                    if current == before:
+                        break
+            elif provider_config.get("format", True):
                 formatted = self._format(executable, current, context, provider_config)
                 if formatted != current:
-                    if context.fix:
-                        current = formatted
-                    else:
-                        format_finding = ProviderFinding(
-                            "format",
-                            "File is not formatted with Ruff",
-                            min(context.selected_lines or {1}),
-                        )
+                    format_finding = ProviderFinding(
+                        "format",
+                        "File is not formatted with Ruff",
+                        min(context.selected_lines or {1}),
+                    )
             final = (
                 self._check(executable, current, context, provider_config)
                 if provider_config.get("check", True)
