@@ -35,6 +35,8 @@ class Config:
         self.provider_configs: Dict[str, Dict[str, Any]] = {}
         self.providers_to_enable: List[str] = []
         self.providers_to_disable: List[str] = []
+        self.batch_manifest: Optional[str] = None
+        self.batch_output: Optional[str] = None
 
 def load_config(args_list: Optional[List[str]] = None) -> Config:
     # 1. Parse CLI arguments first to check for config path, flags, and targets
@@ -75,6 +77,14 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     parser.add_argument("--provider-dir", action="append", help="Directory containing external provider modules")
     parser.add_argument("--enable-provider", help="Comma-separated provider IDs to enable")
     parser.add_argument("--disable-provider", help="Comma-separated provider IDs to disable")
+    parser.add_argument(
+        "--batch-manifest",
+        help="Format staged snapshots described by a JSON-lines exchange manifest",
+    )
+    parser.add_argument(
+        "--batch-output",
+        help="Directory for batch-formatted snapshots and the result manifest",
+    )
     
     parsed_args = parser.parse_args(args_list)
     
@@ -295,6 +305,8 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
 
     config.staged = parsed_args.staged
     config.profile = parsed_args.profile or os.environ.get("IR_PROFILE") or file_config.get("profile")
+    config.batch_manifest = parsed_args.batch_manifest
+    config.batch_output = parsed_args.batch_output
 
     if config.staged and config.content is not None:
         parser.error("--staged cannot be combined with --content")
@@ -302,6 +314,10 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
         parser.error("--staged derives per-file line ranges and cannot be combined with --lines")
     if config.lines and len(config.paths) > 1:
         parser.error("--lines can only be used with one file path or stdin")
+    if bool(config.batch_manifest) != bool(config.batch_output):
+        parser.error("--batch-manifest and --batch-output must be used together")
+    if config.batch_manifest and (config.staged or config.content is not None or config.lines):
+        parser.error("batch mode cannot be combined with --staged, --content, or --lines")
         
     # 5. Handle rule help AFTER config resolution so that include_dirs and rule_mode are resolved
     if parsed_args.help is not None:

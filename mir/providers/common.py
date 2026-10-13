@@ -77,6 +77,8 @@ def resolve_executable(
         )
     if project_local:
         return find_project_executable(path, name)
+    if os.environ.get("MIR_CONTAINERIZED") == "1":
+        return shutil.which(name)
     current = Path(path).resolve().parent
     for parent in (current, *current.parents):
         candidate = parent / ".venv" / "bin" / name

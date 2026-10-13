@@ -46,8 +46,13 @@ def _changed_lines(root: Path, path: str) -> frozenset[int]:
         ["git", "diff", "--cached", "--unified=0", "--no-color", "--", path],
         cwd=root,
     )
+    return changed_lines_from_diff(result.stdout.decode("utf-8", "replace"))
+
+
+def changed_lines_from_diff(diff_text: str) -> frozenset[int]:
+    """Extract staged-side changed lines from a zero-context unified diff."""
     lines: set[int] = set()
-    for raw_line in result.stdout.decode("utf-8", "replace").splitlines():
+    for raw_line in diff_text.splitlines():
         match = _HUNK.match(raw_line)
         if not match:
             continue

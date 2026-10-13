@@ -865,6 +865,13 @@ def _run_staged(config: Config) -> int:
 
 
 def run_linter(config: Config) -> int:
+    if config.batch_manifest:
+        from mir.engine.batch import run_batch
+
+        if not config.profile:
+            config.profile = "commit"
+        return run_batch(config)
+
     if config.staged:
         if not config.profile:
             config.profile = "commit"

@@ -67,6 +67,34 @@ class TestConfig(unittest.TestCase):
         self.assertTrue(config.fix)
         self.assertEqual(config.profile, "commit")
 
+    def test_batch_exchange_requires_both_paths(self):
+        with self.assertRaises(SystemExit):
+            load_config(["--batch-manifest", "/exchange/request.jsonl"])
+
+        config = load_config(
+            [
+                "--batch-manifest",
+                "/exchange/request.jsonl",
+                "--batch-output",
+                "/exchange/result",
+                "--fix",
+            ]
+        )
+        self.assertEqual(config.batch_manifest, "/exchange/request.jsonl")
+        self.assertEqual(config.batch_output, "/exchange/result")
+
+    def test_batch_exchange_rejects_staged_mode(self):
+        with self.assertRaises(SystemExit):
+            load_config(
+                [
+                    "--batch-manifest",
+                    "/exchange/request.jsonl",
+                    "--batch-output",
+                    "/exchange/result",
+                    "--staged",
+                ]
+            )
+
     def test_lines_reject_multiple_paths(self):
         with self.assertRaises(SystemExit):
             load_config(["--lines", "2-3", "first.sql", "second.sql"])

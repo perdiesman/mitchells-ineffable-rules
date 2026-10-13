@@ -21,6 +21,7 @@ from mir.engine.providers_loader import (
     validate_provider_class,
 )
 from mir.engine.runner import find_files, process_document, run_linter
+from mir.providers.common import resolve_executable
 from mir.providers.eslint import EslintProvider
 from mir.providers.node_bridge import project_root_for_executable
 from mir.providers.prettier import PrettierProvider
@@ -31,6 +32,28 @@ if not Path(RUFF).is_file():
 
 
 class TestProviders(unittest.TestCase):
+    def test_containerized_provider_ignores_mounted_host_virtualenv(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "src" / "sample.py"
+            source.parent.mkdir()
+            source.write_text("value = 1\n", encoding="utf-8")
+            host_ruff = root / ".venv" / "bin" / "ruff"
+            host_ruff.parent.mkdir(parents=True)
+            host_ruff.write_text("#!/bin/sh\n", encoding="utf-8")
+            host_ruff.chmod(0o755)
+
+            with (
+                patch.dict("os.environ", {"MIR_CONTAINERIZED": "1"}),
+                patch(
+                    "mir.providers.common.shutil.which",
+                    return_value="/usr/local/bin/ruff",
+                ),
+            ):
+                resolved = resolve_executable(str(source), "ruff", "auto")
+
+            self.assertEqual(resolved, "/usr/local/bin/ruff")
+
     def test_builtin_provider_languages_and_extensions(self):
         providers = {provider.provider_id: provider for provider in load_providers()}
         self.assertEqual(set(providers), {"ruff", "eslint", "prettier"})
