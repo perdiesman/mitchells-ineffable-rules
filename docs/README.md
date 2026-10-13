@@ -37,6 +37,7 @@ Categories:
 - [Queries Rules](xml/README.md#queries-rules)
 
 ## Additional Guides
+- [External Tool Providers](providers/README.md)
 - [Staged Commit Hook](commit-hook.md)
 - [Custom Rules Guide](custom_rules.md)
 - [PyPI Publishing Guide](publishing.md)

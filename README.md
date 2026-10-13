@@ -1,12 +1,13 @@
 # Mitchell's Ineffable Rules (IR) Linter
 
-A modular, configurable linter and formatter for **SQL, XML, MyBatis, Trellis, and Java**. MIR can run on files, standard input, or the exact snapshots staged in Git.
+A modular, configurable linter and formatter for **SQL, XML, MyBatis, Trellis, Java, Python, and web source**. MIR can run native rules or coordinate Ruff, ESLint, and Prettier on files, standard input, or the exact snapshots staged in Git.
 
 ---
 
 ## Features
 
 - **Extensible Rules Architecture**: Add language rules simply by adding Python rule modules under `mir/rules/<language>/`.
+- **External Tool Providers**: Reuse Ruff, ESLint, and Prettier through a validated provider API instead of reimplementing their mature language engines.
 - **User Styling Guides**: Detailed style guides explaining each rule, its configuration parameters, auto-fixability, and clean vs. violating examples under `docs/`.
 - **Precedence-Aware Configuration**: Merges CLI flags, environment variables, and YAML config file settings:
   $$\text{CLI arguments} > \text{Environment variables} > \text{Config file} > \text{Defaults}$$
@@ -71,7 +72,7 @@ A modular, configurable linter and formatter for **SQL, XML, MyBatis, Trellis, a
 
 ## Setup & Local Usage
 
-MIR requires Python 3.9 or newer. Ensure you have [uv](https://github.com/astral-sh/uv) or a compatible Python installed. Java parsing uses the compiled `tree-sitter` and `tree-sitter-java` wheels declared by the project; it does not invoke a JVM compiler during formatting.
+MIR requires Python 3.9 or newer. Ensure you have [uv](https://github.com/astral-sh/uv) or a compatible Python installed. Java parsing uses the compiled `tree-sitter` and `tree-sitter-java` wheels declared by the project; it does not invoke a JVM compiler during formatting. Install `mir-linter[python]` for Ruff support. Prettier and ESLint are resolved from the target project's `node_modules/.bin` unless an explicit executable is configured; MIR never downloads tools during a lint run.
 
 ### 1. Running Tests
 You can run the full test suite using `uv`:
@@ -223,6 +224,30 @@ languages:
 
 Every Java rule supplies generic executable cases used by both the generated [Java guide](docs/java/README.md) and the metadata-driven tests. Declaration-level suppressions use the same one-line and block comment syntax shown above. External Java rules still extend or replace the built-ins through `BaseRule` and the validated loader.
 
+## Ruff, ESLint, and Prettier
+
+External providers use the same file, stdin, line-selection, dry-run, and staged-index workflow as native MIR rules. Python runs Ruff lint fixes before Ruff formatting. JavaScript and TypeScript run ESLint fixes before Prettier; CSS, SCSS, and HTML use Prettier. JSON, YAML, Markdown, and Jupyter notebooks are intentionally outside the initial default scope.
+
+MIR respects the nearest native tool configuration. Ruff discovers `pyproject.toml`, `ruff.toml`, and `.ruff.toml`; Prettier and ESLint use their project configuration and locally locked plugins. In `auto` mode an unavailable provider is skipped. An explicitly enabled provider without a usable executable is an error.
+
+```yaml
+providers:
+  ruff:
+    enabled: auto
+    unsafe_fixes: false
+  eslint:
+    enabled: auto
+    fix: true
+  prettier:
+    enabled: auto
+
+languages:
+  typescript:
+    providers: [eslint, prettier]
+```
+
+Provider-level and native suppressions may coexist. `# IR-ruff:F401`, `// IR-start-prettier` / `// IR-end-prettier`, and `IR-all` are understood by MIR, while `noqa`, `ruff: disable`, `prettier-ignore`, and ESLint disable comments remain owned by their tools. See the [external provider guide](docs/external-providers.md) and generated [provider catalog](docs/providers/README.md).
+
 ## MyBatis and Trellis
 
 MyBatis mapper elements (`select`, `insert`, `update`, `delete`, and reusable `sql` fragments) are expanded into source-mapped SQL. Safe edits map back into text nodes without touching XML tags, including SQL text beside inline MyBatis tags. MyBatis `#{value}` and `${identifier}` placeholders are opaque SQL parameters.
@@ -264,6 +289,19 @@ include_dirs:
 
 # Rule mode for common languages: "extend" (default, built-in + custom) or "replace" (custom only)
 rule_mode: extend
+
+# External provider modules and tool orchestration
+provider_dirs:
+  - /path/to/my/providers
+providers:
+  ruff:
+    enabled: auto
+    unsafe_fixes: false
+  prettier:
+    enabled: auto
+  eslint:
+    enabled: auto
+    fix: true
 
 # Individual rule configuration
 rules:

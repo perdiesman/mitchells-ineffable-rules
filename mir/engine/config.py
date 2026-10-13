@@ -39,7 +39,7 @@ class Config:
 def load_config(args_list: Optional[List[str]] = None) -> Config:
     # 1. Parse CLI arguments first to check for config path, flags, and targets
     parser = argparse.ArgumentParser(
-        description="Mitchell's Ineffable Rules (IR) Linter - Java, XML, SQL",
+        description="Mitchell's Ineffable Rules (MIR) - native rules and external tool providers",
         add_help=False  # Disable default help to use custom rule help logic
     )
     parser.add_argument(
@@ -305,7 +305,13 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
         
     # 5. Handle rule help AFTER config resolution so that include_dirs and rule_mode are resolved
     if parsed_args.help is not None:
-        handle_rule_help(parsed_args.help, parser, config.include_dirs, config.rule_mode)
+        handle_rule_help(
+            parsed_args.help,
+            parser,
+            config.include_dirs,
+            config.rule_mode,
+            config.provider_dirs,
+        )
         
     return config
 

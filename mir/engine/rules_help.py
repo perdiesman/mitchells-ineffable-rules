@@ -83,7 +83,8 @@ def get_category_title(cat: str, lang: str, include_dirs: Optional[List[str]] = 
 def generate_docs_to_path(
     target_path: str,
     include_dirs: Optional[List[str]] = None,
-    rule_mode: str = "extend"
+    rule_mode: str = "extend",
+    provider_dirs: Optional[List[str]] = None,
 ) -> None:
     """
     Generates markdown style guide documentation files inside the specified target_path directory
@@ -121,6 +122,7 @@ def generate_docs_to_path(
         root_md.append("")
         
     root_md.append("## Additional Guides")
+    root_md.append("- [External Tool Providers](providers/README.md)")
     root_md.append("- [Staged Commit Hook](commit-hook.md)")
     root_md.append("- [Custom Rules Guide](custom_rules.md)")
     root_md.append("- [PyPI Publishing Guide](publishing.md)\n")
@@ -346,11 +348,63 @@ def generate_docs_to_path(
             except Exception as e:
                 print(f"Warning: could not remove legacy file '{legacy_file}': {e}")
 
+    from mir.engine.providers_loader import load_providers
+
+    providers = load_providers(provider_dirs or [])
+    providers_dir = os.path.join(target_path, "providers")
+    os.makedirs(providers_dir, exist_ok=True)
+    provider_index = [
+        "# External Tool Providers\n",
+        "MIR delegates mature language tooling while retaining one configuration, reporting, and staged-index safety layer.\n",
+        "| Provider | Languages | Check | Fix | Format | Details |",
+        "| :--- | :--- | :---: | :---: | :---: | :---: |",
+    ]
+    for provider in providers:
+        caps = provider.capabilities
+        provider_index.append(
+            f"| `{provider.provider_id}` | {', '.join(provider.languages)} | "
+            f"{'Yes' if caps.check else 'No'} | {'Yes' if caps.fix else 'No'} | "
+            f"{'Yes' if caps.format else 'No'} | [{provider.description}]({provider.provider_id}.md) |"
+        )
+        page = [
+            f"# {provider.provider_id}\n",
+            f"{provider.description}\n",
+            f"- **Languages**: {', '.join(provider.languages)}",
+            f"- **Extensions**: {', '.join(provider.extensions)}",
+            f"- **Check**: {'Yes' if caps.check else 'No'}",
+            f"- **Fix**: {'Yes' if caps.fix else 'No'}",
+            f"- **Format**: {'Yes' if caps.format else 'No'}",
+            f"- **Range formatting**: {'Yes' if caps.range_format else 'No'}",
+            f"- **Batch execution**: {'Yes' if caps.batch else 'No'}",
+        ]
+        if provider.documentation_url:
+            page.append(f"- **Upstream documentation**: {provider.documentation_url}")
+        page.append("\n## Default configuration\n")
+        page.append("```yaml")
+        page.append("providers:")
+        page.append(f"  {provider.provider_id}:")
+        for key, value in provider.default_config.items():
+            rendered = str(value).lower() if isinstance(value, bool) else str(value)
+            page.append(f"    {key}: {rendered}")
+        page.append("```\n")
+        if provider.cases:
+            page.append("## Executable examples\n")
+            for case in provider.cases:
+                page.extend([f"### {case.name}", "```", case.source, "```"])
+                if case.fixed is not None:
+                    page.extend(["Expected output:", "```", case.fixed, "```"])
+        with open(os.path.join(providers_dir, f"{provider.provider_id}.md"), "w", encoding="utf-8") as stream:
+            stream.write("\n".join(page))
+    with open(os.path.join(providers_dir, "README.md"), "w", encoding="utf-8") as stream:
+        stream.write("\n".join(provider_index) + "\n")
+    print(f"Generated provider docs -> {providers_dir}")
+
 def handle_rule_help(
     help_arg: str,
     parser: argparse.ArgumentParser,
     include_dirs: Optional[List[str]] = None,
-    rule_mode: str = "extend"
+    rule_mode: str = "extend",
+    provider_dirs: Optional[List[str]] = None,
 ) -> None:
     """
     Handles custom rule help arguments, resolving dynamic languages and rules.
@@ -362,7 +416,7 @@ def handle_rule_help(
         sys.exit(0)
         
     if help_arg == "docs":
-        generate_docs_to_path("docs", include_dirs, rule_mode)
+        generate_docs_to_path("docs", include_dirs, rule_mode, provider_dirs)
         sys.exit(0)
         
     if help_arg.startswith("docs:"):
@@ -370,7 +424,7 @@ def handle_rule_help(
         if not target_path:
             print("Error: Specify a target directory name (e.g., '--help docs:custom_docs').")
             sys.exit(1)
-        generate_docs_to_path(target_path, include_dirs, rule_mode)
+        generate_docs_to_path(target_path, include_dirs, rule_mode, provider_dirs)
         sys.exit(0)
         
     if help_arg == "rules":
