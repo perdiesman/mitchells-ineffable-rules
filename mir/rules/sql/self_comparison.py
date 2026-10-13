@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class SelfComparisonRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-self-comparison"
     description = "Detect redundant self-comparisons where a column/identifier is compared to itself (e.g. x = x)."
     category = "queries"

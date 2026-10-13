@@ -1,8 +1,11 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, find_datatype_token_groups
+from mir.rules.sql.sql_utils import find_datatype_token_groups, tokenize_sql
 
 class DataTypeCaseRule(BaseRule):
+    commit_profile = True
+    embedded_safe = True
+    trellis_safe = True
     rule_id = "IR-datatype-case"
     description = "Standardize SQL data types to be uppercase."
     category = "queries"

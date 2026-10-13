@@ -3,6 +3,10 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class BooleanComparisonRule(BaseRule):
+    commit_profile = True
+    commit_semantic_rewrite = True
+    embedded_safe = True
+    trellis_safe = True
     rule_id = "IR-boolean-comparison"
     description = "Standardize boolean comparison predicates to use idiomatic boolean predicates."
     category = "queries"
@@ -20,89 +24,140 @@ class BooleanComparisonRule(BaseRule):
         {
             "violating": "SELECT * FROM users WHERE active != true OR blocked <> false;",
             "correct": "SELECT * FROM users WHERE NOT active OR blocked;"
+        },
+        {
+            "violating": "SELECT id FROM sample WHERE coalesce(enabled, false) = false AND #{includeHidden} = true;",
+            "correct": "SELECT id FROM sample WHERE NOT coalesce(enabled, false) AND #{includeHidden};"
+        },
+        {
+            "violating": "SELECT id FROM sample WHERE (#{scope} = 'all') IS TRUE;",
+            "correct": "SELECT id FROM sample WHERE (#{scope} = 'all');"
         }
     ]
-    additional_validations = []
+    additional_validations = [
+        "SELECT enabled = TRUE AS is_enabled FROM sample;",
+        "UPDATE sample SET enabled = FALSE WHERE id = 1;",
+        "SELECT id FROM sample WHERE FALSE = ANY(flags);",
+    ]
 
     def _find_violations(self, content: str) -> List[dict]:
         tokens = tokenize_sql(content)
         violations = []
-        n = len(tokens)
-        
-        active = []
-        for idx, t in enumerate(tokens):
-            if t["type"] not in ("WHITESPACE", "COMMENT"):
-                active.append(t)
-                
-        num_active = len(active)
-        
-        def parse_operand(idx: int) -> tuple:
-            if idx >= len(active):
-                return None, None
-            if active[idx]["type"] == "OPERATOR" and active[idx]["value"] in ("-", "+"):
-                if idx + 1 < len(active) and active[idx+1]["type"] == "NUMBER":
-                    return f"{active[idx]['value']}{active[idx+1]['value']}", idx + 2
-            if active[idx]["type"] == "IDENTIFIER":
-                if idx + 2 < len(active) and active[idx+1]["type"] == "DOT" and active[idx+2]["type"] == "IDENTIFIER":
-                    return f"{active[idx]['value']}.{active[idx+2]['value']}", idx + 3
-                return active[idx]["value"], idx + 1
-            if active[idx]["type"] in ("NUMBER", "STRING", "KEYWORD"):
-                return active[idx]["value"], idx + 1
-            return None, None
+        active = [
+            token for token in tokens if token["type"] not in ("WHITESPACE", "COMMENT")
+        ]
 
-        i = 0
-        in_update = False
-        in_update_set = False
-        while i < num_active:
-            tok_val_up = active[i]["value"].upper()
-            if tok_val_up == "UPDATE":
-                in_update = True
-                in_update_set = False
-            elif tok_val_up == "SET" and in_update:
-                in_update_set = True
-            elif tok_val_up in (";", "WHERE", "RETURNING", "FROM"):
-                in_update = False
-                in_update_set = False
-                
-            is_assignment = False
-            if i == 0 or active[i - 1]["value"].upper() in (";", "BEGIN", "THEN", "ELSE", "LOOP"):
-                is_assignment = True
-                
-            if is_assignment or in_update_set:
-                _, next_idx = parse_operand(i)
-                i = next_idx if next_idx is not None else i + 1
+        def matching_open(close_position: int) -> int | None:
+            depth = 0
+            for position in range(close_position, -1, -1):
+                token = active[position]
+                if token["type"] != "PAREN":
+                    continue
+                if token["value"] == ")":
+                    depth += 1
+                elif token["value"] == "(":
+                    depth -= 1
+                    if depth == 0:
+                        return position
+            return None
+
+        def operand_start(end_position: int) -> int | None:
+            if end_position < 0:
+                return None
+            token = active[end_position]
+            if token["type"] == "PAREN" and token["value"] == ")":
+                start = matching_open(end_position)
+                if start is None:
+                    return None
+                # Include a qualified function name, but retain grouping
+                # parentheses when they are the expression itself.
+                if start > 0 and active[start - 1]["type"] in {"IDENTIFIER", "KEYWORD"}:
+                    start -= 1
+                    while (
+                        start >= 2
+                        and active[start - 1]["type"] == "DOT"
+                        and active[start - 2]["type"] in {"IDENTIFIER", "KEYWORD"}
+                    ):
+                        start -= 2
+                return start
+            if token["type"] not in {"IDENTIFIER", "KEYWORD", "PARAM"}:
+                return None
+            start = end_position
+            while (
+                start >= 2
+                and active[start - 1]["type"] == "DOT"
+                and active[start - 2]["type"] in {"IDENTIFIER", "KEYWORD"}
+            ):
+                start -= 2
+            return start
+
+        def in_predicate_context(start_position: int) -> bool:
+            predicate_markers = {"WHERE", "HAVING", "ON", "WHEN", "AND", "OR"}
+            boundaries = {
+                "SELECT", "FROM", "GROUP", "ORDER", "LIMIT", "SET", "VALUES",
+                "RETURNING", "THEN", "ELSE", ";",
+            }
+            depth = 0
+            for position in range(start_position - 1, -1, -1):
+                token = active[position]
+                if token["type"] == "PAREN":
+                    depth += 1 if token["value"] == ")" else -1
+                    continue
+                if depth > 0:
+                    continue
+                value = token["value"].upper()
+                if value in predicate_markers:
+                    return True
+                if value in boundaries:
+                    return False
+            return False
+
+        position = 0
+        while position < len(active) - 1:
+            operator = active[position]
+            value_token = active[position + 1]
+            value = value_token["value"].upper()
+            is_boolean = value_token["type"] in {"KEYWORD", "IDENTIFIER"} and value in {
+                "TRUE", "FALSE",
+            }
+            comparison = operator["type"] == "OPERATOR" and operator["value"] in {
+                "=", "!=", "<>",
+            }
+            is_predicate = operator["value"].upper() == "IS"
+            if not is_boolean or not (comparison or is_predicate):
+                position += 1
                 continue
-                
-            op_str, next_idx = parse_operand(i)
-            if op_str and next_idx < num_active:
-                t_op = active[next_idx]
-                if t_op["type"] == "OPERATOR" and t_op["value"] in ("=", "!=", "<>"):
-                    if next_idx + 1 < num_active:
-                        val_tok = active[next_idx + 1]
-                        if val_tok["type"] in ("KEYWORD", "IDENTIFIER") and val_tok["value"].upper() in ("TRUE", "FALSE"):
-                            val_upper = val_tok["value"].upper()
-                            op_val = t_op["value"]
-                            
-                            if val_upper == "TRUE":
-                                if op_val == "=":
-                                    replacement = op_str
-                                else:
-                                    replacement = f"NOT {op_str}"
-                            else:
-                                if op_val == "=":
-                                    replacement = f"NOT {op_str}"
-                                else:
-                                    replacement = op_str
-                                    
-                            violations.append({
-                                "start_offset": active[i]["start"],
-                                "end_offset": val_tok["end"],
-                                "line": active[i]["line"],
-                                "replacement": replacement
-                            })
-                            i = next_idx + 2
-                            continue
-            i += 1
+
+            if is_predicate and value == "TRUE" and in_predicate_context(position):
+                # Removing the suffix works for an arbitrarily complex
+                # predicate, including ``parameter = value IS TRUE``.
+                violations.append({
+                    "start_offset": active[position - 1]["end"],
+                    "end_offset": value_token["end"],
+                    "line": operator["line"],
+                    "replacement": "",
+                })
+                position += 2
+                continue
+
+            start_position = operand_start(position - 1)
+            if start_position is None or not in_predicate_context(start_position):
+                position += 1
+                continue
+
+            expression_start = active[start_position]["start"]
+            expression_end = active[position - 1]["end"]
+            expression = content[expression_start:expression_end].strip()
+            positive = operator["value"] in {"=", "IS"}
+            retain_expression = (value == "TRUE") == positive
+            replacement = expression if retain_expression else f"NOT {expression}"
+            violations.append({
+                "start_offset": expression_start,
+                "end_offset": value_token["end"],
+                "line": active[start_position]["line"],
+                "replacement": replacement,
+            })
+            position += 2
             
         return violations
 

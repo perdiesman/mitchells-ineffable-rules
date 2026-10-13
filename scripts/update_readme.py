@@ -5,13 +5,30 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+
+def cumulative_hours(timestamps):
+    if not timestamps:
+        return 0.0
+    timestamps = sorted(timestamps)
+    sessions = []
+    current_session = [timestamps[0]]
+    for timestamp in timestamps[1:]:
+        if timestamp - current_session[-1] > 7200:
+            sessions.append(current_session)
+            current_session = [timestamp]
+        else:
+            current_session.append(timestamp)
+    sessions.append(current_session)
+    return sum(session[-1] - session[0] + 1800 for session in sessions) / 3600
+
+
 def main():
     readme_path = Path(__file__).parent.parent / "README.md"
     if not readme_path.exists():
         print(f"Error: README.md not found at {readme_path}", file=sys.stderr)
         sys.exit(1)
 
-    is_push = "--push" in sys.argv
+    check_only = "--check" in sys.argv or "--push" in sys.argv
 
     # 1. Get latest commit timestamp
     try:
@@ -27,7 +44,7 @@ def main():
         sys.exit(1)
 
     # 2. Get target timestamp to write to README
-    if is_push:
+    if check_only:
         target_ts = latest_commit_ts
     else:
         target_ts = int(datetime.now(timezone.utc).timestamp())
@@ -47,26 +64,9 @@ def main():
         print(f"Error reading git log: {e}", file=sys.stderr)
         sys.exit(1)
 
-    if timestamps:
-        sessions = []
-        current_session = [timestamps[0]]
-        # Gaps of more than 2 hours (7200 seconds) start a new session
-        for ts in timestamps[1:]:
-            if ts - current_session[-1] > 7200:
-                sessions.append(current_session)
-                current_session = [ts]
-            else:
-                current_session.append(ts)
-        sessions.append(current_session)
-
-        total_seconds = 0
-        for session in sessions:
-            duration = session[-1] - session[0]
-            # Add 30 minutes (1800 seconds) overhead per session
-            total_seconds += duration + 1800
-        total_hours = total_seconds / 3600
-    else:
-        total_hours = 0.0
+    if not check_only:
+        timestamps.append(target_ts)
+    total_hours = cumulative_hours(timestamps)
 
     content = readme_path.read_text(encoding="utf-8")
     
@@ -83,26 +83,28 @@ def main():
     except Exception:
         readme_ts = 0
 
-    # If it is a push check, only update if the difference is more than 60 seconds
-    if is_push and abs(latest_commit_ts - readme_ts) <= 60:
-        print("README.md timestamp is already up to date (within threshold).")
-        sys.exit(0)
+    hours_pattern = r"\*Total Cumulative Development Time: ~([^\*]+) hours\*"
+    hours_match = re.search(hours_pattern, content)
+
+    if check_only:
+        timestamp_current = abs(latest_commit_ts - readme_ts) <= 60
+        hours_current = bool(hours_match and hours_match.group(1) == f"{total_hours:.1f}")
+        if timestamp_current and hours_current:
+            print("README.md development time is up to date.")
+            return
+        print("README.md development time is stale; run scripts/update_readme.py and commit it.", file=sys.stderr)
+        sys.exit(1)
 
     # Perform updates
     time_replacement = f"*Last Developer Session: {target_time_str}*"
     content = re.sub(time_pattern, time_replacement, content)
     
-    hours_pattern = r"\*Total Cumulative Development Time: [^\*]+\*"
     hours_replacement = f"*Total Cumulative Development Time: ~{total_hours:.1f} hours*"
-    content = re.sub(hours_pattern, hours_replacement, content)
+    content = re.sub(r"\*Total Cumulative Development Time: [^\*]+\*", hours_replacement, content)
     
     readme_path.write_text(content, encoding="utf-8")
     print(f"Updated README.md Last Developer Session to: {target_time_str}")
     print(f"Updated README.md Total Cumulative Development Time to: ~{total_hours:.1f} hours")
     
-    if is_push:
-        # Exit with 1 on push to force commit of the updated timestamp
-        sys.exit(1)
-
 if __name__ == "__main__":
     main()

@@ -1,8 +1,13 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren
+from mir.rules.sql.sql_utils import (
+    find_matching_paren,
+    get_token_depths,
+    tokenize_sql,
+)
 
 class DistinctParenthesesRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-distinct-parentheses"
     description = "Remove redundant parentheses around DISTINCT arguments, preserving DISTINCT ON (col) syntax."
     category = "queries"
@@ -19,7 +24,8 @@ class DistinctParenthesesRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT DISTINCT ON (company_id) id, name FROM users;"
+        "SELECT DISTINCT ON (company_id) id, name FROM users;",
+        "SELECT count(DISTINCT (state_id, utility_id)) FROM users;",
     ]
 
     def _find_violations(self, content: str) -> List[dict]:
@@ -50,6 +56,18 @@ class DistinctParenthesesRule(BaseRule):
                         # Extract the content inside the parentheses
                         open_tok = tokens[open_paren_idx]
                         close_tok = tokens[close_paren_idx]
+                        inner_tokens = tokens[open_paren_idx + 1:close_paren_idx]
+                        inner_depths = get_token_depths(inner_tokens)
+                        if any(
+                            token["type"] == "COMMA" and depth == 0
+                            for token, depth in zip(inner_tokens, inner_depths)
+                        ):
+                            # In an aggregate this is a PostgreSQL row value,
+                            # not function-call decoration. Removing these
+                            # parentheses changes ``count(DISTINCT (a, b))``
+                            # into invalid multi-argument DISTINCT syntax.
+                            i += 2
+                            continue
                         inner_text = content[open_tok["end"]:close_tok["start"]]
                         
                         violations.append({

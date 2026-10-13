@@ -5,6 +5,9 @@ Enforce that every SQL file ends with exactly one newline character.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: No
 - **Category**: General Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `false`
 

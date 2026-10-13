@@ -5,6 +5,9 @@ Enforce that all top-level statements end with a trailing semicolon.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: General Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 
@@ -24,4 +27,8 @@ CREATE TRIGGER trig2 BEFORE INSERT ON t2 FOR EACH ROW EXECUTE FUNCTION f2();
 ```sql
 ALTER FUNCTION my_func OWNER TO eiadmin;
 CREATE TRIGGER trig1 BEFORE INSERT ON t1 FOR EACH ROW EXECUTE FUNCTION f1();
+```
+
+```sql
+SELECT item_id FROM sample_table
 ```

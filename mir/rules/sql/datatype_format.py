@@ -3,8 +3,11 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, find_datatype_token_groups
 
 class DataTypeFormatRule(BaseRule):
+    commit_profile = True
+    commit_semantic_rewrite = True
+    embedded_safe = True
     rule_id = "IR-datatype-format"
-    description = "Standardize SQL data types to use their long format (character varying instead of varchar, timestamp with time zone instead of timestamptz)."
+    description = "Standardize PostgreSQL data type aliases to their canonical long forms."
     category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
@@ -14,8 +17,8 @@ class DataTypeFormatRule(BaseRule):
     
     examples = [
         {
-            "violating": "SELECT 1::varchar, '2026-07-11'::timestamptz;",
-            "correct": "SELECT 1::character varying, '2026-07-11'::timestamp with time zone;"
+            "violating": "SELECT 1::varchar, '2026-07-11'::timestamptz, 1::int;",
+            "correct": "SELECT 1::character varying, '2026-07-11'::timestamp with time zone, 1::integer;"
         }
     ]
     additional_validations = [
@@ -31,13 +34,23 @@ class DataTypeFormatRule(BaseRule):
             first_tok = g[0]
             val_lower = first_tok["value"].lower()
             
-            if val_lower in ("varchar", "timestamptz"):
-                # Determine correct long format casing matching the original
+            aliases = {
+                "bool": "boolean",
+                "float4": "real",
+                "float8": "double precision",
+                "int": "integer",
+                "int2": "smallint",
+                "int4": "integer",
+                "int8": "bigint",
+                "timetz": "time with time zone",
+                "timestamptz": "timestamp with time zone",
+                "varchar": "character varying",
+            }
+            if val_lower in aliases:
                 is_upper = first_tok["value"].isupper()
-                if val_lower == "varchar":
-                    replacement = "CHARACTER VARYING" if is_upper else "character varying"
-                else:
-                    replacement = "TIMESTAMP WITH TIME ZONE" if is_upper else "timestamp with time zone"
+                replacement = aliases[val_lower]
+                if is_upper:
+                    replacement = replacement.upper()
                     
                 violations.append({
                     "start_offset": first_tok["start"],

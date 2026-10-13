@@ -5,6 +5,9 @@ Use standard COALESCE instead of dialect-specific null-handling functions like N
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: Yes
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 

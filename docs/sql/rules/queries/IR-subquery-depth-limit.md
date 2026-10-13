@@ -5,6 +5,9 @@ Subquery nesting depth should not exceed the configured limit (default: 3). When
 - **Auto-Fixable**: No
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: Yes
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `max_depth` (Default: `3`): Maximum allowed subquery nesting depth.

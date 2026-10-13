@@ -5,6 +5,9 @@ Ensure INSERT statements explicitly list target columns.
 - **Auto-Fixable**: No
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: Yes
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 

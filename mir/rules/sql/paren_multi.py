@@ -1,10 +1,17 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths, find_matching_paren
+from mir.rules.sql.sql_utils import (
+    find_boolean_operator_indices,
+    find_matching_paren,
+    get_token_depths,
+    source_text_length,
+    tokenize_sql,
+)
 
 class ParenMultiRule(BaseRule):
+    commit_profile = True
     rule_id = "IR-paren-multi"
-    description = "Parentheses wrapping multiple logical conditions in WHERE/ON clauses must format contents on separate lines, indented 4 spaces."
+    description = "Parenthesized logical conditions stay inline when they fit; longer groups put each condition on its own indented line."
     category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
@@ -14,13 +21,27 @@ class ParenMultiRule(BaseRule):
     
     examples = [
         {
-            "violating": "SELECT * FROM users WHERE active AND (enabled OR not blocked);",
-            "correct": "SELECT * FROM users WHERE active AND (\n    enabled\n    OR not blocked\n);"
+            "violating": "SELECT * FROM users WHERE active AND (\n    enabled\n    OR not blocked\n);",
+            "correct": "SELECT * FROM users WHERE active AND (enabled OR not blocked);"
         }
     ]
-    additional_validations = []
+    additional_validations = [
+        "SELECT item_id FROM sample_item WHERE NOT EXISTS (SELECT 1 FROM sample_child);",
+        "SELECT item_id FROM sample_item WHERE (created_at BETWEEN :start AND :end);",
+    ]
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _find_violations(
+        self, content: str, rule_config: Dict[str, Any] | None = None
+    ) -> List[dict]:
+        rule_config = rule_config or {}
+        from mir.rules.sql.line_length import LineLengthRule
+
+        max_length = self.get_config_value(
+            rule_config,
+            "max_line_length",
+            100,
+            fallbacks=[(LineLengthRule, "max_length")],
+        )
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
         violations = []
@@ -35,13 +56,15 @@ class ParenMultiRule(BaseRule):
         for i, tok in enumerate(tokens):
             if tok["type"] == "PAREN" and tok["value"] == "(":
                 in_where_or_on = False
+                owning_clause = None
                 for idx in range(i - 1, -1, -1):
                     t = tokens[idx]
-                    if depths[idx] == depths[i]:
+                    if depths[idx] <= depths[i]:
                         if t["type"] == "SEMI" or t["value"] == ";":
                             break
                         if t["type"] == "KEYWORD" and t["value"].upper() in ("WHERE", "ON"):
                             in_where_or_on = True
+                            owning_clause = t["value"].upper()
                             break
                         if t["type"] == "KEYWORD" and t["value"].upper() in ("SELECT", "FROM", "GROUP", "ORDER", "LIMIT", "WITH"):
                             break
@@ -52,17 +75,20 @@ class ParenMultiRule(BaseRule):
                 close_idx = find_matching_paren(tokens, i)
                 if close_idx is None:
                     continue
+
+                first_inner_idx = next_active(i + 1)
+                if (
+                    first_inner_idx < close_idx
+                    and tokens[first_inner_idx]["type"] == "KEYWORD"
+                    and tokens[first_inner_idx]["value"].upper() == "SELECT"
+                ):
+                    continue
                     
-                has_logical_check = False
-                inner_keywords = []
-                for idx in range(i + 1, close_idx):
-                    t = tokens[idx]
-                    d = depths[idx]
-                    if d == depths[i] + 1 and t["type"] == "KEYWORD":
-                        val_upper = t["value"].upper()
-                        if val_upper in ("AND", "OR"):
-                            has_logical_check = True
-                            inner_keywords.append((t, idx))
+                boolean_indices = find_boolean_operator_indices(
+                    tokens, depths, depths[i] + 1, i + 1, close_idx
+                )
+                has_logical_check = bool(boolean_indices)
+                inner_keywords = [(tokens[index], index) for index in boolean_indices]
                             
                 if not has_logical_check:
                     continue
@@ -75,9 +101,73 @@ class ParenMultiRule(BaseRule):
                         paren_indent += char
                     else:
                         break
+
+                previous_active_idx = next(
+                    (
+                        index
+                        for index in range(i - 1, -1, -1)
+                        if tokens[index]["type"]
+                        not in {"WHITESPACE", "COMMENT"}
+                    ),
+                    None,
+                )
+                if (
+                    not line_prefix.strip()
+                    and previous_active_idx is not None
+                    and tokens[previous_active_idx]["type"] == "KEYWORD"
+                    and tokens[previous_active_idx]["value"].upper()
+                    in {"AND", "OR"}
+                ):
+                    boolean_line_start = content.rfind(
+                        "\n", 0, tokens[previous_active_idx]["start"]
+                    ) + 1
+                    boolean_prefix = content[
+                        boolean_line_start:tokens[previous_active_idx]["start"]
+                    ]
+                    paren_indent = boolean_prefix[
+                        : len(boolean_prefix)
+                        - len(boolean_prefix.lstrip(" \t"))
+                    ]
                         
                 expected_content_indent = paren_indent + "    "
                 expected_close_indent = paren_indent
+
+                group_single = "".join(
+                    " " if item["type"] == "WHITESPACE" else item["value"]
+                    for item in tokens[i:close_idx + 1]
+                )
+                if (
+                    owning_clause != "ON"
+                    and not any(
+                        item["type"] == "COMMENT"
+                        for item in tokens[i:close_idx + 1]
+                    )
+                    and source_text_length(
+                        content[line_start:tok["start"]] + group_single,
+                        rule_config,
+                    ) <= max_length
+                ):
+                    for index in range(i + 1, close_idx):
+                        item = tokens[index]
+                        if (
+                            item["type"] == "WHITESPACE"
+                            and item["value"]
+                            != (
+                                ""
+                                if index in {i + 1, close_idx - 1}
+                                else " "
+                            )
+                        ):
+                            replacement = (
+                                "" if index in {i + 1, close_idx - 1} else " "
+                            )
+                            violations.append({
+                                "token": item,
+                                "ws_start": item["start"],
+                                "ws_end": item["end"],
+                                "replacement": replacement,
+                            })
+                    continue
                 
                 # Check first active token inside parenthesis
                 first_tok_idx = next_active(i + 1)
@@ -108,6 +198,78 @@ class ParenMultiRule(BaseRule):
                             "ws_end": kw["start"],
                             "replacement": expected_ws
                         })
+
+                    next_boolean = min(
+                        (index for index in boolean_indices if index > kw_idx),
+                        default=close_idx,
+                    )
+                    arm_tokens = tokens[kw_idx:next_boolean]
+                    if not any(
+                        item["type"] == "COMMENT" for item in arm_tokens
+                    ):
+                        arm_single = "".join(
+                            " " if item["type"] == "WHITESPACE" else item["value"]
+                            for item in arm_tokens
+                        ).strip()
+                        if source_text_length(
+                            expected_content_indent + arm_single,
+                            rule_config,
+                        ) <= max_length:
+                            last_active = next(
+                                (
+                                    index
+                                    for index in range(next_boolean - 1, kw_idx, -1)
+                                    if tokens[index]["type"]
+                                    not in {"WHITESPACE", "COMMENT"}
+                                ),
+                                None,
+                            )
+                            if last_active is not None:
+                                for index in range(kw_idx + 1, last_active):
+                                    item = tokens[index]
+                                    if (
+                                        item["type"] == "WHITESPACE"
+                                        and item["value"] != " "
+                                    ):
+                                        violations.append({
+                                            "token": item,
+                                            "ws_start": item["start"],
+                                            "ws_end": item["end"],
+                                            "replacement": " ",
+                                        })
+
+                # A long comparison inside the group may wrap after its
+                # operator. Its operand is a single continuation level from
+                # the comparison, never column-aligned to legacy source text.
+                for token_index in range(i + 1, close_idx - 1):
+                    operator = tokens[token_index]
+                    whitespace = tokens[token_index + 1]
+                    if (
+                        operator["type"] != "OPERATOR"
+                        or operator["value"]
+                        not in {"=", "!=", "<>", "<", ">", "<=", ">="}
+                        or whitespace["type"] != "WHITESPACE"
+                        or "\n" not in whitespace["value"]
+                    ):
+                        continue
+                    operator_line_start = content.rfind(
+                        "\n", 0, operator["start"]
+                    ) + 1
+                    operator_prefix = content[
+                        operator_line_start:operator["start"]
+                    ]
+                    operator_indent = operator_prefix[
+                        : len(operator_prefix)
+                        - len(operator_prefix.lstrip(" \t"))
+                    ]
+                    expected_operand_ws = "\n" + operator_indent + "    "
+                    if whitespace["value"] != expected_operand_ws:
+                        violations.append({
+                            "token": operator,
+                            "ws_start": whitespace["start"],
+                            "ws_end": whitespace["end"],
+                            "replacement": expected_operand_ws,
+                        })
                         
                 # Check closing parenthesis
                 ws_before_close = None
@@ -127,7 +289,7 @@ class ParenMultiRule(BaseRule):
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         
         for item in offending:
             tok = item["token"]
@@ -143,17 +305,19 @@ class ParenMultiRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         if not offending:
             return content
             
-        edits = []
+        edits = {}
         for item in offending:
-            edits.append((item["ws_start"], item["ws_end"], item["replacement"]))
+            edits[(item["ws_start"], item["ws_end"])] = item["replacement"]
             
-        edits.sort(key=lambda x: x[0], reverse=True)
+        edits = sorted(
+            edits.items(), key=lambda item: item[0][0], reverse=True
+        )
         chars = list(content)
-        for start, end, new_text in edits:
+        for (start, end), new_text in edits:
             chars[start:end] = list(new_text)
             
         return "".join(chars)

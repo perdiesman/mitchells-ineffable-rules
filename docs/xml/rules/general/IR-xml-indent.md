@@ -1,10 +1,11 @@
 # IR-xml-indent
 
-Enforce correct tag nesting indentation in XML files.
+Enforce correct tag nesting indentation in XML files, format reusable MyBatis projection fragments according to their SELECT include sites, align physical predicates beneath static MyBatis WHERE clauses, indent SELECT and ORDER BY lists containing nested dynamic branches, and keep a SQL statement terminator attached to its preceding foreach closing tag.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: General Rules
+- **Commit Profile**: Yes
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `indent_size` (Default: `4`): Number of spaces for nesting indentation.

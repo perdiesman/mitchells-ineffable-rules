@@ -5,6 +5,9 @@ Remove redundant parentheses around DISTINCT arguments, preserving DISTINCT ON (
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: Yes
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 
@@ -21,4 +24,8 @@ SELECT DISTINCT id, name FROM users;
 #### Additional Validations
 ```sql
 SELECT DISTINCT ON (company_id) id, name FROM users;
+```
+
+```sql
+SELECT count(DISTINCT (state_id, utility_id)) FROM users;
 ```

@@ -5,6 +5,10 @@ Unnecessary parentheses around homogeneous logical conditions should be removed.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
+- **Commit Profile**: Yes
+- **Intentional Semantic Rewrite**: Yes
+- **MyBatis Safe**: Yes
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 
@@ -29,4 +33,12 @@ SELECT id FROM users WHERE active = true AND (type = 'admin' OR age > 21);
 
 ```sql
 SELECT id FROM users WHERE (active = true);
+```
+
+```sql
+SELECT count(*) FILTER (WHERE active AND visible) FROM users;
+```
+
+```sql
+SELECT id FROM users WHERE NOT (active AND visible);
 ```

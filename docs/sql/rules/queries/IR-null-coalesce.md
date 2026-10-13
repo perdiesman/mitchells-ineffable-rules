@@ -5,6 +5,10 @@ Standardize nullable equality predicates to COALESCE(x, -1) form.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
+- **Commit Profile**: Yes
+- **Intentional Semantic Rewrite**: Yes
+- **MyBatis Safe**: Yes
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 

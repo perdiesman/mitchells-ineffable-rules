@@ -5,6 +5,9 @@ Main query clause keywords (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIM
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
+- **Commit Profile**: Yes
+- **MyBatis Safe**: Yes
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 
@@ -46,4 +49,10 @@ WHERE id IN (
 #### Additional Validations
 ```sql
 SELECT id, name FROM users WHERE active = true;
+```
+
+```sql
+SELECT item_id
+FROM sample_item
+WHERE parent_id IS NOT DISTINCT FROM :parent_id;
 ```

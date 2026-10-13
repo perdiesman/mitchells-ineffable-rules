@@ -4,6 +4,7 @@ import yaml
 from typing import List, Dict, Any, Optional, Set
 
 from mir.engine.rules_help import handle_rule_help
+from mir import __version__
 
 DEFAULT_CONFIG_FILES = [".ir-config.yaml", ".ir-config.yml"]
 
@@ -15,6 +16,7 @@ class Config:
         self.verbose: bool = False
         self.paths: List[str] = []
         self.rule_configs: Dict[str, Any] = {}
+        self.language_configs: Dict[str, Dict[str, Any]] = {}
         self.config_file_path: Optional[str] = None
         self.include_dirs: List[str] = []
         self.rule_mode: str = "extend"
@@ -27,11 +29,17 @@ class Config:
         self.no_warnings: bool = False
         self.lines: Set[int] = set()
         self.lines_spec: Optional[str] = None
+        self.staged: bool = False
+        self.profile: Optional[str] = None
+        self.provider_dirs: List[str] = []
+        self.provider_configs: Dict[str, Dict[str, Any]] = {}
+        self.providers_to_enable: List[str] = []
+        self.providers_to_disable: List[str] = []
 
 def load_config(args_list: Optional[List[str]] = None) -> Config:
     # 1. Parse CLI arguments first to check for config path, flags, and targets
     parser = argparse.ArgumentParser(
-        description="Mitchell's Ineffable Rules (IR) Linter - Java, XML, SQL",
+        description="Mitchell's Ineffable Rules (MIR) - native rules and external tool providers",
         add_help=False  # Disable default help to use custom rule help logic
     )
     parser.add_argument(
@@ -43,7 +51,7 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     parser.add_argument(
         "--version",
         action="version",
-        version="mir-linter 0.1.0a3",
+        version=f"mir-linter {__version__}",
         help="Show version information"
     )
     parser.add_argument("paths", nargs="*", help="Files or directories to lint")
@@ -62,6 +70,11 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     parser.add_argument("--warnings-only", action="store_true", default=None, help="Only show warnings")
     parser.add_argument("--no-warnings", action="store_true", default=None, help="Hide all warnings")
     parser.add_argument("--lines", help="Only lint/fix specified line numbers or line ranges (e.g. '10', '10-20', '10-20,30,40-50')")
+    parser.add_argument("--staged", action="store_true", help="Lint or fix staged Git content using staged changed-line scopes")
+    parser.add_argument("--profile", choices=["commit"], help="Use a built-in rule profile (normal CLI defaults are unchanged)")
+    parser.add_argument("--provider-dir", action="append", help="Directory containing external provider modules")
+    parser.add_argument("--enable-provider", help="Comma-separated provider IDs to enable")
+    parser.add_argument("--disable-provider", help="Comma-separated provider IDs to disable")
     
     parsed_args = parser.parse_args(args_list)
     
@@ -185,6 +198,42 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     config.rule_configs = file_config.get("rules", {})
     if not isinstance(config.rule_configs, dict):
         config.rule_configs = {}
+
+    language_configs = file_config.get("languages", {})
+    if isinstance(language_configs, dict):
+        config.language_configs = {
+            str(language).lower(): value
+            for language, value in language_configs.items()
+            if isinstance(value, dict)
+        }
+
+    provider_configs = file_config.get("providers", {})
+    if isinstance(provider_configs, dict):
+        config.provider_configs = {
+            str(provider).lower(): value
+            for provider, value in provider_configs.items()
+            if isinstance(value, dict)
+        }
+    file_provider_dirs = file_config.get("provider_dirs", [])
+    env_provider_dirs = os.environ.get("IR_PROVIDER_DIRS")
+    configured_provider_dirs = parsed_args.provider_dir or (
+        env_provider_dirs.split(",") if env_provider_dirs else file_provider_dirs
+    )
+    if isinstance(configured_provider_dirs, list):
+        config.provider_dirs = [str(path).strip() for path in configured_provider_dirs if str(path).strip()]
+
+    def provider_ids(cli_value: Optional[str], env_name: str, key: str) -> List[str]:
+        value: Any = cli_value
+        if value is None:
+            value = os.environ.get(env_name)
+        if value is None:
+            value = file_config.get(key, [])
+        if isinstance(value, str):
+            value = value.split(",")
+        return sorted({str(item).strip().lower() for item in value if str(item).strip()}) if isinstance(value, list) else []
+
+    config.providers_to_enable = provider_ids(parsed_args.enable_provider, "IR_ENABLE_PROVIDERS", "enable_providers")
+    config.providers_to_disable = provider_ids(parsed_args.disable_provider, "IR_DISABLE_PROVIDERS", "disable_providers")
         
     # -- content and lang --
     config.content = parsed_args.content
@@ -243,10 +292,26 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     if parsed_args.lines:
         config.lines_spec = parsed_args.lines
         config.lines = parse_line_ranges(parsed_args.lines)
+
+    config.staged = parsed_args.staged
+    config.profile = parsed_args.profile or os.environ.get("IR_PROFILE") or file_config.get("profile")
+
+    if config.staged and config.content is not None:
+        parser.error("--staged cannot be combined with --content")
+    if config.staged and config.lines:
+        parser.error("--staged derives per-file line ranges and cannot be combined with --lines")
+    if config.lines and len(config.paths) > 1:
+        parser.error("--lines can only be used with one file path or stdin")
         
     # 5. Handle rule help AFTER config resolution so that include_dirs and rule_mode are resolved
     if parsed_args.help is not None:
-        handle_rule_help(parsed_args.help, parser, config.include_dirs, config.rule_mode)
+        handle_rule_help(
+            parsed_args.help,
+            parser,
+            config.include_dirs,
+            config.rule_mode,
+            config.provider_dirs,
+        )
         
     return config
 

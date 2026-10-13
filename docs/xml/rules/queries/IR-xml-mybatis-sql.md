@@ -5,10 +5,11 @@ Format embedded SQL inside MyBatis XML mapper files using SQL rules.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Queries Rules
+- **Commit Profile**: Yes
 - **Configuration Options**:
   - `enabled`: `true`
 
-#### ❌ Violating Example
+#### ❌ Violating Example #1
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
@@ -19,13 +20,46 @@ Format embedded SQL inside MyBatis XML mapper files using SQL rules.
 </mapper>
 ```
 
-####  Correct Example
+####  Correct Example #1
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="my_namespace.MyMapper">
     <select id="selectListByQuery">
         SELECT my_column FROM my_schema.my_table t
+    </select>
+</mapper>
+```
+
+#### ❌ Violating Example #2
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="my_namespace.MyMapper">
+    <select id="selectListByQuery">
+        SELECT id
+            , name
+        FROM users
+        <if test="distinct">
+            , distinct_val
+        </if>
+    </select>
+</mapper>
+```
+
+####  Correct Example #2
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="my_namespace.MyMapper">
+    <select id="selectListByQuery">
+        SELECT
+            id,
+            name
+        FROM users
+        <if test="distinct">
+            , distinct_val
+        </if>
     </select>
 </mapper>
 ```
@@ -37,6 +71,22 @@ Format embedded SQL inside MyBatis XML mapper files using SQL rules.
 <mapper namespace="my_namespace.MyMapper">
     <select id="selectListByQuery">
         SELECT my_column FROM my_schema.my_table t
+    </select>
+</mapper>
+```
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="my_namespace.MyMapper">
+    <select id="selectListByQuery">
+        SELECT
+            id,
+            name
+        FROM users
+        <if test="distinct">
+            , distinct_val
+        </if>
     </select>
 </mapper>
 ```

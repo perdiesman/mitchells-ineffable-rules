@@ -1,7 +1,11 @@
+from bisect import bisect_right
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
+from mir.rules.sql.sql_utils import tokenize_sql
 
 class ClauseAlignmentRule(BaseRule):
+    commit_profile = True
+    embedded_safe = True
     rule_id = "IR-clause-alignment"
     description = "Main query clause keywords (SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT) must have the exact same indentation within the same query block when the query spans multiple lines."
     category = "queries"
@@ -22,146 +26,132 @@ class ClauseAlignmentRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT id, name FROM users WHERE active = true;"
+        "SELECT id, name FROM users WHERE active = true;",
+        "SELECT item_id\nFROM sample_item\nWHERE parent_id IS NOT DISTINCT FROM :parent_id;",
     ]
 
-    def _parse_clauses(self, content: str) -> List[dict]:
-        n = len(content)
-        i = 0
-        in_string = False
-        string_char = None
-        in_single_comment = False
-        in_multi_comment = False
-        paren_stack = []
-        line_number = 1
-        line_start_idx = 0
-        
+    def _parse_clauses(
+        self,
+        content: str,
+        rule_config: Dict[str, Any] | None = None,
+    ) -> List[dict]:
+        tokens = tokenize_sql(content)
+        dynamic_boundaries = sorted(
+            (rule_config or {}).get("mybatis_boundary_offsets", set())
+        )
+        dynamic_offsets = (rule_config or {}).get("mybatis_dynamic_offsets", set())
+        paren_stack: List[int] = []
+        statement_number = 0
+        insert_indents = {}
         clauses = []
-        
-        while i < n:
-            c = content[i]
-            
-            if c == '\n':
-                line_number += 1
-                line_start_idx = i + 1
-                i += 1
+        active_indices: List[int] = []
+
+        for index, token in enumerate(tokens):
+            if token["type"] in ("WHITESPACE", "COMMENT"):
                 continue
-                
-            # String / comment states
-            if in_string:
-                if c == string_char:
-                    if i + 1 < n and content[i + 1] == string_char:
-                        i += 2
-                        continue
-                    in_string = False
-                i += 1
-                continue
-                
-            if in_single_comment:
-                i += 1
-                continue
-                
-            if in_multi_comment:
-                if c == '*' and i + 1 < n and content[i + 1] == '/':
-                    in_multi_comment = False
-                    i += 2
-                    continue
-                i += 1
-                continue
-                
-            if c in ("'", '"'):
-                in_string = True
-                string_char = c
-                i += 1
-                continue
-                
-            if c == '-' and i + 1 < n and content[i + 1] == '-':
-                in_single_comment = True
-                i += 2
-                continue
-                
-            if c == '/' and i + 1 < n and content[i + 1] == '*':
-                in_multi_comment = True
-                i += 2
-                continue
-                
-            # Whitespace handling
-            if c.isspace():
-                i += 1
-                continue
-                
-            # Parenthesis tracking
-            if c == '(':
-                paren_stack.append(i)
-                i += 1
-                continue
-            if c == ')':
-                if paren_stack:
+            if token["type"] == "PAREN":
+                if token["value"] == "(":
+                    paren_stack.append(index)
+                elif paren_stack:
                     paren_stack.pop()
-                i += 1
+                active_indices.append(index)
                 continue
-                
-            # Match keywords
-            if c.isalpha() or c == '_':
-                w_start = i
-                while i < n and (content[i].isalnum() or content[i] == '_'):
-                    i += 1
-                word = content[w_start:i]
-                word_lower = word.lower()
-                
-                keyword = None
-                keyword_end = i
-                
-                if word_lower in ("select", "from", "where", "having", "limit"):
-                    keyword = word_lower.upper()
-                elif word_lower in ("group", "order"):
-                    next_idx = i
-                    while next_idx < n and content[next_idx].isspace():
-                        next_idx += 1
-                    w2_start = next_idx
-                    while next_idx < n and (content[next_idx].isalnum() or content[next_idx] == '_'):
-                        next_idx += 1
-                    word2 = content[w2_start:next_idx]
-                    if word2.lower() == "by":
-                        keyword = f"{word_lower.upper()} BY"
-                        keyword_end = next_idx
-                        i = next_idx
-                
-                if keyword:
-                    # Check if it is the first token on its line
-                    line_text = content[line_start_idx:w_start]
-                    is_first_on_line = (line_text.strip() == "")
-                    
-                    if is_first_on_line:
-                        indentation = line_text
-                        space_start = w_start
-                    else:
-                        indentation = ""
-                        # Find preceding whitespace index range to replace if we need to put it on a new line
-                        space_start = w_start
-                        while space_start > line_start_idx and content[space_start - 1].isspace():
-                            space_start -= 1
-                            
-                    clauses.append({
-                        "keyword": keyword,
-                        "line_number": line_number,
-                        "line_start_idx": line_start_idx,
-                        "keyword_start": w_start,
-                        "keyword_end": keyword_end,
-                        "space_start": space_start,
-                        "indentation": indentation,
-                        "is_first_on_line": is_first_on_line,
-                        "scope": tuple(paren_stack)
-                    })
+            if token["type"] == "SEMI" and not paren_stack:
+                statement_number += 1
+                active_indices.append(index)
                 continue
-                
-            i += 1
-            
+            if token["type"] != "KEYWORD":
+                active_indices.append(index)
+                continue
+
+            word = token["value"].upper()
+            if word == "INSERT":
+                insert_line_start = content.rfind(
+                    "\n", 0, token["start"]
+                ) + 1
+                insert_prefix = content[
+                    insert_line_start:token["start"]
+                ]
+                if not insert_prefix.strip():
+                    insert_indents[
+                        (statement_number, tuple(paren_stack))
+                    ] = insert_prefix
+            keyword = None
+            keyword_end = token["end"]
+            if word == "FROM":
+                previous_words = [
+                    tokens[active_index]["value"].upper()
+                    for active_index in active_indices[-3:]
+                ]
+                if (
+                    previous_words[-1:] == ["DELETE"]
+                    or previous_words[-2:] == ["IS", "DISTINCT"]
+                    or previous_words[-3:] == ["IS", "NOT", "DISTINCT"]
+                ):
+                    active_indices.append(index)
+                    continue
+                keyword = word
+            elif word in ("SELECT", "WHERE", "HAVING", "LIMIT"):
+                keyword = word
+            elif word in ("GROUP", "ORDER"):
+                next_index = index + 1
+                while next_index < len(tokens) and tokens[next_index]["type"] in (
+                    "WHITESPACE", "COMMENT"
+                ):
+                    next_index += 1
+                if (
+                    next_index < len(tokens)
+                    and tokens[next_index]["type"] == "KEYWORD"
+                    and tokens[next_index]["value"].upper() == "BY"
+                ):
+                    keyword = f"{word} BY"
+                    keyword_end = tokens[next_index]["end"]
+
+            if keyword:
+                line_start_idx = content.rfind("\n", 0, token["start"]) + 1
+                line_text = content[line_start_idx : token["start"]]
+                is_first_on_line = line_text.strip() == ""
+                indentation = line_text if is_first_on_line else ""
+                space_start = token["start"]
+                if not is_first_on_line:
+                    while (
+                        space_start > line_start_idx
+                        and content[space_start - 1].isspace()
+                    ):
+                        space_start -= 1
+                clauses.append({
+                    "keyword": keyword,
+                    "line_number": content.count("\n", 0, token["start"]) + 1,
+                    "line_start_idx": line_start_idx,
+                    "keyword_start": token["start"],
+                    "keyword_end": keyword_end,
+                    "space_start": space_start,
+                    "indentation": indentation,
+                    "is_first_on_line": is_first_on_line,
+                    "is_dynamic": token["start"] in dynamic_offsets,
+                    # XML tags are absent from the expanded SQL. Without a
+                    # boundary component, clauses in separate MyBatis
+                    # branches appear to share a query scope and a static
+                    # UNION branch can pull a nested dynamic SELECT out to
+                    # its own indentation. Clauses within one text node still
+                    # share a segment and align normally.
+                    "scope": (
+                        statement_number,
+                        *paren_stack,
+                        bisect_right(dynamic_boundaries, token["start"]),
+                        token["start"] in dynamic_offsets,
+                    ),
+                    "insert_indent": insert_indents.get(
+                        (statement_number, tuple(paren_stack))
+                    ),
+                })
+            active_indices.append(index)
+
         return clauses
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
-        clauses = self._parse_clauses(content)
+        clauses = self._parse_clauses(content, rule_config)
         lines = content.splitlines()
         
         scope_groups = {}
@@ -188,7 +178,13 @@ class ClauseAlignmentRule(BaseRule):
             if not ref_clause:
                 continue
                 
-            expected_indent = ref_clause["indentation"]
+            expected_indent = (
+                ref_clause.get("insert_indent") + "    "
+                if ref_clause["keyword"] == "SELECT"
+                and ref_clause.get("insert_indent") is not None
+                and not ref_clause["is_dynamic"]
+                else ref_clause["indentation"]
+            )
             
             for cl in group:
                 if cl == ref_clause:
@@ -221,7 +217,7 @@ class ClauseAlignmentRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        clauses = self._parse_clauses(content)
+        clauses = self._parse_clauses(content, rule_config)
         if not clauses:
             return content
             
@@ -249,10 +245,22 @@ class ClauseAlignmentRule(BaseRule):
             if not ref_clause:
                 continue
                 
-            expected_indent = ref_clause["indentation"]
+            expected_indent = (
+                ref_clause.get("insert_indent") + "    "
+                if ref_clause["keyword"] == "SELECT"
+                and ref_clause.get("insert_indent") is not None
+                and not ref_clause["is_dynamic"]
+                else ref_clause["indentation"]
+            )
             
             for cl in group:
                 if cl == ref_clause:
+                    if cl["indentation"] != expected_indent:
+                        replacements.append((
+                            cl["line_start_idx"],
+                            cl["line_start_idx"] + len(cl["indentation"]),
+                            expected_indent,
+                        ))
                     continue
                 if not cl["is_first_on_line"]:
                     replacements.append((

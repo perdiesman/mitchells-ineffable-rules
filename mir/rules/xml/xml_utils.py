@@ -163,7 +163,7 @@ def _tokenize_xml_impl(content: str) -> List[dict]:
                 continue
                 
             # Attribute names
-            match = re.match(r'^[a-zA-Z0-9_:-]+', content[i:])
+            match = re.match(r'^[A-Za-z_:][\w:.-]*', content[i:])
             if match:
                 val = match.group(0)
                 tokens.append({
@@ -189,7 +189,7 @@ def _tokenize_xml_impl(content: str) -> List[dict]:
             # Outside tags, we parse text, close tags, and open tags
             if content[i:i+2] == "</":
                 # Close tag start
-                match = re.match(r'^</[a-zA-Z0-9_:-]+', content[i:])
+                match = re.match(r'^</[A-Za-z_:][\w:.-]*', content[i:])
                 if match:
                     val = match.group(0)
                     tokens.append({
@@ -205,7 +205,7 @@ def _tokenize_xml_impl(content: str) -> List[dict]:
             
             if c == "<":
                 # Open tag start
-                match = re.match(r'^<[a-zA-Z0-9_:-]+', content[i:])
+                match = re.match(r'^<[A-Za-z_:][\w:.-]*', content[i:])
                 if match:
                     val = match.group(0)
                     tokens.append({

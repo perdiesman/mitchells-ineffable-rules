@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class TruncateTableRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-truncate-table"
     description = "Prefer TRUNCATE table_name over DELETE FROM table_name with no conditions."
     category = "data-modification"

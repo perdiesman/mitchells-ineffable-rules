@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren
 
 class BooleanDefaultRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-boolean-default"
     description = "Enforce that boolean columns in table definitions explicitly define a DEFAULT constraint."
     category = "schema-definition"

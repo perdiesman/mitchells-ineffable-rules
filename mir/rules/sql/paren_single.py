@@ -1,10 +1,21 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren, get_token_depths
+from mir.rules.sql.sql_utils import (
+    find_boolean_operator_indices,
+    find_matching_paren,
+    get_token_depths,
+    tokenize_sql,
+)
 
 class ParenSingleRule(BaseRule):
+    commit_profile = True
+    commit_semantic_rewrite = True
+    embedded_safe = True
     rule_id = "IR-paren-single"
-    description = "Unnecessary parentheses around a single condition should be removed."
+    description = (
+        "Unnecessary parentheses around a single condition or a safely "
+        "ungrouped multiplicative operand should be removed."
+    )
     category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
@@ -20,18 +31,43 @@ class ParenSingleRule(BaseRule):
         {
             "violating": "SELECT (id)::integer FROM users;",
             "correct": "SELECT id::integer FROM users;"
+        },
+        {
+            "violating": "SELECT (((current_count - prior_count)::numeric / total_count) - (adjustment / total_count));",
+            "correct": "SELECT ((current_count - prior_count)::numeric / total_count - adjustment / total_count);"
         }
     ]
     additional_validations = [
         "SELECT (a + b)::integer FROM users;",
         "SELECT COALESCE(id, 0) FROM users;",
-        "SELECT id FROM users WHERE (active = true AND type = 'admin');"
+        "SELECT id FROM users WHERE (active = true AND type = 'admin');",
+        "SELECT max(value) FILTER (WHERE active), ANY(:item_ids) FROM sample_item;",
+        "SELECT item_id FROM sample_item WHERE EXISTS (SELECT 1 FROM sample_child);",
+        "SELECT item_id FROM sample_item ORDER BY (rank <= :maximum_rank) DESC;",
+        "SELECT CAST(item_id AS TEXT) FROM sample_item;",
+        "SELECT item_id FROM sample_item WHERE item_id IN (:item_id);",
+        "SELECT item_id FROM sample_item JOIN sample_owner USING (owner_id);",
+        "SELECT (covered_count::NUMERIC / total_count) - 1 FROM sample_item;",
+        "INSERT INTO sample_item (item_id) VALUES (:item_id) ON CONFLICT (item_id) DO NOTHING;",
+        "SELECT item_id FROM sample_item WHERE NOT (enabled AND visible);",
+        "SELECT CASE WHEN (sum(item_count) IS NULL) THEN false ELSE true END FROM sample_item;",
+        "SELECT (payload ->> 'itemId')::INTEGER FROM sample_item;",
     ]
 
     def _is_simple_atom(self, tokens: List[dict]) -> bool:
         depths = get_token_depths(tokens)
-        for tok, d in zip(tokens, depths):
-            if d == 0 and tok["type"] in ("OPERATOR", "KEYWORD") and tok["value"].upper() in ("AND", "OR", "+", "-", "*", "/", "%", "=", "<>", "<=", ">=", "!=", "<", ">", "||"):
+        boolean_indices = set(find_boolean_operator_indices(tokens, depths, 0))
+        for index, (tok, d) in enumerate(zip(tokens, depths)):
+            if d == 0 and (
+                index in boolean_indices
+                or (
+                    tok["type"] == "OPERATOR"
+                    and tok["value"] in (
+                        "+", "-", "*", "/", "%", "=", "<>", "<=", ">=",
+                        "!=", "<", ">", "||", "->", "->>", "#>", "#>>",
+                    )
+                )
+            ):
                 return False
         return True
 
@@ -76,11 +112,17 @@ class ParenSingleRule(BaseRule):
                                 break
                         if prev_prev and prev_prev["value"].upper() == "DISTINCT":
                             is_special = True
-                    elif val_upper == "OVER":
+                    elif val_upper in {"OVER", "NOT"}:
                         is_special = True
                     elif prev_active["type"] == "IDENTIFIER":
                         is_special = True
-                    elif prev_active["type"] == "KEYWORD" and val_upper in ("COUNT", "COALESCE", "SUM", "AVG", "MIN", "MAX", "CONCAT", "SUBSTR", "DATE_PART", "NOW", "STRING_AGG", "DATE"):
+                    elif prev_active["type"] == "KEYWORD" and val_upper in (
+                        "COUNT", "COALESCE", "SUM", "AVG", "MIN", "MAX",
+                        "CONCAT", "SUBSTR", "DATE_PART", "NOW", "STRING_AGG",
+                        "DATE", "FILTER", "ANY", "SOME", "EXISTS", "LATERAL",
+                        "CAST", "EXTRACT", "IN", "VALUES", "USING", "ROW",
+                        "CONFLICT", "KEY", "UNIQUE", "CHECK", "INCLUDE",
+                    ):
                         is_special = True
                         
                 if is_special:
@@ -91,24 +133,98 @@ class ParenSingleRule(BaseRule):
                 inner_active = [t for t in inner_tokens if t["type"] != "WHITESPACE"]
                 if not inner_active:
                     continue
-                    
-                # Check for comma, AND, OR, SELECT at depth 0 inside the paren
-                inner_depths = get_token_depths(inner_tokens)
-                has_multi = False
-                for t, d in zip(inner_tokens, inner_depths):
-                    if d == 0:
-                        if t["type"] in ("COMMA", "KEYWORD") and t["value"].upper() in ("AND", "OR", "SELECT", ","):
-                            has_multi = True
-                            break
-                if has_multi:
+
+                if (
+                    prev_active is not None
+                    and prev_active["type"] == "KEYWORD"
+                    and prev_active["value"].upper() == "WHEN"
+                    and len(inner_active) >= 5
+                    and inner_active[0]["type"] in {"IDENTIFIER", "KEYWORD"}
+                    and inner_active[1]["type"] == "PAREN"
+                    and inner_active[1]["value"] == "("
+                    and (
+                        [token["value"].upper() for token in inner_active[-2:]]
+                        == ["IS", "NULL"]
+                        or [token["value"].upper() for token in inner_active[-3:]]
+                        == ["IS", "NOT", "NULL"]
+                    )
+                ):
+                    # A function NULL predicate is intentionally grouped as
+                    # the atomic condition of a CASE arm.
                     continue
-                    
-                # Check next token for CAST
+
                 next_after_close = None
                 for idx in range(close_idx + 1, n):
                     if tokens[idx]["type"] != "WHITESPACE":
                         next_after_close = tokens[idx]
                         break
+                if next_after_close and next_after_close["value"].upper() in ("ASC", "DESC"):
+                    continue
+                    
+                # Check for comma, AND, OR, SELECT at depth 0 inside the paren
+                inner_depths = get_token_depths(inner_tokens)
+                boolean_indices = set(find_boolean_operator_indices(
+                    inner_tokens, inner_depths, 0
+                ))
+                has_multi = False
+                for inner_index, (t, d) in enumerate(zip(inner_tokens, inner_depths)):
+                    if d == 0:
+                        if (
+                            inner_index in boolean_indices
+                            or t["type"] == "COMMA"
+                            or (t["type"] == "KEYWORD" and t["value"].upper() == "SELECT")
+                        ):
+                            has_multi = True
+                            break
+                if has_multi:
+                    continue
+
+                # Parentheses around arithmetic may document or control the
+                # operand that a following operator applies to. A purely
+                # multiplicative expression is the safe exception when it is
+                # itself an operand of an additive expression: ``(a / b) -
+                # (c / d)`` does not need the two inner grouping layers.
+                arithmetic_operators = [
+                    inner_token["value"]
+                    for inner_token, depth in zip(inner_tokens, inner_depths)
+                    if (
+                        depth == 0
+                        and inner_token["type"] == "OPERATOR"
+                        and inner_token["value"]
+                        in {"+", "-", "*", "/", "%", "||"}
+                    )
+                ]
+                if arithmetic_operators:
+                    left_is_additive_boundary = bool(
+                        prev_active is None
+                        or (
+                            prev_active["type"] == "PAREN"
+                            and prev_active["value"] == "("
+                        )
+                        or (
+                            prev_active["type"] == "OPERATOR"
+                            and prev_active["value"] in {"+", "-"}
+                        )
+                    )
+                    right_is_additive_boundary = bool(
+                        next_after_close is None
+                        or (
+                            next_after_close["type"] == "PAREN"
+                            and next_after_close["value"] == ")"
+                        )
+                        or (
+                            next_after_close["type"] == "OPERATOR"
+                            and next_after_close["value"] in {"+", "-"}
+                        )
+                    )
+                    if not (
+                        set(arithmetic_operators) <= {"*", "/", "%"}
+                        and left_is_additive_boundary
+                        and right_is_additive_boundary
+                    ):
+                        continue
+                    
+                # Check next token for CAST
                 if next_after_close and next_after_close["type"] == "CAST":
                     if not self._is_simple_atom(inner_tokens):
                         continue

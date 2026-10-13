@@ -1,8 +1,16 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren, get_token_depths
+from mir.rules.sql.sql_utils import (
+    find_boolean_operator_indices,
+    find_matching_paren,
+    get_token_depths,
+    tokenize_sql,
+)
 
 class ParenSameOpRule(BaseRule):
+    commit_profile = True
+    commit_semantic_rewrite = True
+    embedded_safe = True
     rule_id = "IR-paren-same-op"
     description = "Unnecessary parentheses around homogeneous logical conditions should be removed."
     category = "queries"
@@ -21,10 +29,16 @@ class ParenSameOpRule(BaseRule):
     additional_validations = [
         "SELECT id FROM users WHERE (active = true AND type = 'admin') OR age > 21;",
         "SELECT id FROM users WHERE active = true AND (type = 'admin' OR age > 21);",
-        "SELECT id FROM users WHERE (active = true);"  # Checked by IR-paren-single, skip here
+        "SELECT id FROM users WHERE (active = true);",  # Checked by IR-paren-single, skip here
+        "SELECT count(*) FILTER (WHERE active AND visible) FROM users;",
+        "SELECT id FROM users WHERE NOT (active AND visible);",
     ]
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _find_violations(
+        self, content: str, rule_config: Dict[str, Any] | None = None
+    ) -> List[dict]:
+        if (rule_config or {}).get("mybatis_element_tag") == "sql":
+            return []
         tokens = tokenize_sql(content)
         violations = []
         n = len(tokens)
@@ -66,11 +80,15 @@ class ParenSameOpRule(BaseRule):
                                 break
                         if prev_prev and prev_prev["value"].upper() == "DISTINCT":
                             is_special = True
-                    elif val_upper == "OVER":
+                    elif val_upper in {"OVER", "NOT"}:
                         is_special = True
                     elif prev_active["type"] == "IDENTIFIER":
                         is_special = True
-                    elif prev_active["type"] == "KEYWORD" and val_upper in ("COUNT", "COALESCE", "SUM", "AVG", "MIN", "MAX", "CONCAT", "SUBSTR", "DATE_PART", "NOW", "STRING_AGG", "DATE"):
+                    elif prev_active["type"] == "KEYWORD" and val_upper in (
+                        "COUNT", "COALESCE", "SUM", "AVG", "MIN", "MAX",
+                        "CONCAT", "SUBSTR", "DATE_PART", "NOW", "STRING_AGG",
+                        "DATE", "FILTER", "ANY", "SOME", "EXISTS", "LATERAL",
+                    ):
                         is_special = True
                         
                 if is_special:
@@ -82,11 +100,14 @@ class ParenSameOpRule(BaseRule):
                 base_depth = depths[i] + 1
                 
                 # Check logical operators at depth 0
+                boolean_indices = set(find_boolean_operator_indices(
+                    tokens, depths, base_depth, i + 1, close_idx
+                ))
                 ops_seen = set()
                 has_sub_select_or_comma = False
-                for t, d in zip(inner_tokens, inner_depths):
+                for inner_index, (t, d) in enumerate(zip(inner_tokens, inner_depths), start=i + 1):
                     if d == base_depth:
-                        if t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
+                        if inner_index in boolean_indices:
                             ops_seen.add(t["value"].upper())
                         elif t["type"] in ("COMMA", "KEYWORD") and t["value"].upper() in ("SELECT", ","):
                             has_sub_select_or_comma = True
@@ -107,7 +128,11 @@ class ParenSameOpRule(BaseRule):
                     t = tokens[idx]
                     d = depths[idx]
                     if d == outer_depth:
-                        if t["type"] == "KEYWORD" and t["value"].upper() in ("SELECT", "FROM", "WHERE", "HAVING", "LIMIT", "ORDER", "GROUP"):
+                        if t["type"] == "KEYWORD" and t["value"].upper() in (
+                            "SELECT", "FROM", "WHERE", "HAVING", "LIMIT",
+                            "ORDER", "GROUP", "CASE", "WHEN", "THEN",
+                            "ELSE", "END",
+                        ):
                             break
                         if t["type"] == "KEYWORD" and t["value"].upper() == opposite_op:
                             has_opposite = True
@@ -121,7 +146,11 @@ class ParenSameOpRule(BaseRule):
                         t = tokens[idx]
                         d = depths[idx]
                         if d == outer_depth:
-                            if t["type"] == "KEYWORD" and t["value"].upper() in ("SELECT", "FROM", "WHERE", "HAVING", "LIMIT", "ORDER", "GROUP"):
+                            if t["type"] == "KEYWORD" and t["value"].upper() in (
+                                "SELECT", "FROM", "WHERE", "HAVING", "LIMIT",
+                                "ORDER", "GROUP", "CASE", "WHEN", "THEN",
+                                "ELSE", "END",
+                            ):
                                 break
                             if t["type"] == "KEYWORD" and t["value"].upper() == opposite_op:
                                 has_opposite = True
@@ -151,7 +180,7 @@ class ParenSameOpRule(BaseRule):
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending_pairs = self._find_violations(content)
+        offending_pairs = self._find_violations(content, rule_config)
         
         for pair in offending_pairs:
             tok = pair["open_tok"]
@@ -167,7 +196,7 @@ class ParenSameOpRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        offending_pairs = self._find_violations(content)
+        offending_pairs = self._find_violations(content, rule_config)
         if not offending_pairs:
             return content
             

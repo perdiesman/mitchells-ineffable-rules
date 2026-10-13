@@ -3,8 +3,13 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 
 class FromSingleRule(BaseRule):
+    commit_profile = True
+    embedded_safe = True
     rule_id = "IR-from-single"
-    description = "Single FROM entry should be on the same line as the FROM keyword."
+    description = (
+        "Single FROM entries should be on the same line as FROM; DELETE, FROM, "
+        "and its target should share one line."
+    )
     category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
@@ -16,13 +21,20 @@ class FromSingleRule(BaseRule):
         {
             "violating": "SELECT id\nFROM\n    users;",
             "correct": "SELECT id\nFROM users;"
+        },
+        {
+            "violating": "DELETE\nFROM users\nWHERE user_id = :user_id;",
+            "correct": "DELETE FROM users\nWHERE user_id = :user_id;",
         }
     ]
     additional_validations = [
         'SELECT id\nFROM (SELECT * FROM raw_users) AS sub;'
     ]
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _find_violations(
+        self, content: str, rule_config: Dict[str, Any] | None = None
+    ) -> List[dict]:
+        rule_config = rule_config or {}
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
         violations = []
@@ -31,6 +43,24 @@ class FromSingleRule(BaseRule):
         for i, tok in enumerate(tokens):
             if tok["type"] == "KEYWORD" and tok["value"].upper() == "FROM":
                 outer_depth = depths[i]
+                previous_active_index = next(
+                    (
+                        index
+                        for index in range(i - 1, -1, -1)
+                        if tokens[index]["type"] not in ("WHITESPACE", "COMMENT")
+                    ),
+                    None,
+                )
+                previous_active = (
+                    tokens[previous_active_index]
+                    if previous_active_index is not None
+                    else None
+                )
+                is_delete_from = bool(
+                    previous_active
+                    and previous_active["type"] == "KEYWORD"
+                    and previous_active["value"].upper() == "DELETE"
+                )
                 
                 # Find end of FROM clause
                 clause_end = n
@@ -77,12 +107,35 @@ class FromSingleRule(BaseRule):
                         
                 if first_table_tok and not has_join and not has_comma and not has_subquery:
                     # Single table entry! Verify line numbers
-                    if first_table_tok["line"] != tok["line"]:
+                    if is_delete_from:
+                        intervening_tokens = tokens[
+                            previous_active_index + 1:
+                            i + 1 + len(whitespace_before_table)
+                        ]
+                        current_gap = content[
+                            previous_active["end"]:first_table_tok["start"]
+                        ]
+                        if (
+                            not any(
+                                item["type"] == "COMMENT"
+                                for item in intervening_tokens
+                            )
+                            and current_gap != " FROM "
+                        ):
+                            violations.append({
+                                "from_tok": tok,
+                                "table_tok": first_table_tok,
+                                "ws_start": previous_active["end"],
+                                "ws_end": first_table_tok["start"],
+                                "replacement": " FROM ",
+                            })
+                    elif first_table_tok["line"] != tok["line"]:
                         violations.append({
                             "from_tok": tok,
                             "table_tok": first_table_tok,
                             "ws_start": tok["end"],
-                            "ws_end": first_table_tok["start"]
+                            "ws_end": first_table_tok["start"],
+                            "replacement": " ",
                         })
                         
         return violations
@@ -90,7 +143,7 @@ class FromSingleRule(BaseRule):
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         
         for item in offending:
             tok = item["from_tok"]
@@ -106,7 +159,7 @@ class FromSingleRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         if not offending:
             return content
             
@@ -114,7 +167,7 @@ class FromSingleRule(BaseRule):
         edits = []
         for item in offending:
             # Replace all whitespace between FROM and the table token with a single space
-            edits.append((item["ws_start"], item["ws_end"], " "))
+            edits.append((item["ws_start"], item["ws_end"], item["replacement"]))
             
         edits.sort(key=lambda x: x[0], reverse=True)
         chars = list(content)

@@ -11,16 +11,19 @@ EXCLUDED_FUNCTIONS = {
     "UNNEST", "ARRAY_CAT", "ARRAY_APPEND", "ARRAY_PREPEND", "ARRAY_TO_STRING",
     "STRING_TO_ARRAY", "REGEXP_REPLACE", "REGEXP_MATCH", "REGEXP_SPLIT_TO_ARRAY",
     "REGEXP_SPLIT_TO_TABLE", "SPLIT_PART", "DATE_PART", "DATE_TRUNC",
-    "AGE", "CLOCK_TIMESTAMP", "STATEMENT_TIMESTAMP", "TRANSACTION_TIMESTAMP"
+    "AGE", "CLOCK_TIMESTAMP", "STATEMENT_TIMESTAMP", "TRANSACTION_TIMESTAMP",
+    "GENERATE_SERIES"
 }
 
 RESERVED_WORDS = {
     "SELECT", "FROM", "WHERE", "AND", "OR", "ON", "IN", "NOT", "INSERT", "UPDATE",
     "DELETE", "CREATE", "ALTER", "DROP", "WITH", "IF", "WHILE", "LOOP", "FOR",
-    "RETURN", "RAISE", "CASE", "WHEN", "THEN", "ELSE", "END", "DECLARE", "BEGIN"
+    "RETURN", "RAISE", "CASE", "WHEN", "THEN", "ELSE", "END", "DECLARE", "BEGIN",
+    "AS", "LATERAL",
 }
 
 class NamedParametersRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-named-parameters"
     description = "Enforce named parameter notation (:= or =>) in function calls with 3 or more arguments."
     category = "routines"
@@ -39,7 +42,10 @@ class NamedParametersRule(BaseRule):
     additional_validations = [
         "SELECT my_func(1, 2);",
         "SELECT coalesce(a, b, c, d);",
-        "SELECT my_func(a := 1, b := 2, c := 3);"
+        "SELECT my_func(a := 1, b := 2, c := 3);",
+        "WITH sample_rows AS (SELECT item_id FROM sample_item) SELECT item_id FROM sample_rows;",
+        "SELECT * FROM LATERAL (SELECT item_id FROM sample_item) sample_rows;",
+        "SELECT generate_series(:start, :end, :step);",
     ]
 
     def _find_violations(self, content: str) -> List[dict]:

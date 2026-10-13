@@ -2,20 +2,176 @@ import re
 from typing import List, Dict, Optional
 from functools import lru_cache
 
+
+def source_text_length(text: str, rule_config: dict | None = None) -> int:
+    """Measure text as it will appear in its source container.
+
+    Embedded MyBatis SQL is decoded before SQL rules run, so XML entities
+    occupy more source columns than their SQL characters.
+    """
+    if rule_config and "original_xml" in rule_config:
+        text = (
+            text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+    return len(text)
+
 SQL_KEYWORDS = {
     "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "BY", "HAVING", "LIMIT", "OFFSET",
     "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "FULL", "CROSS", "NATURAL", "ON", "USING",
     "UNION", "INTERSECT", "EXCEPT", "AND", "OR", "NOT", "IN", "EXISTS", "IS", "NULL",
-    "AS", "CREATE", "VIEW", "MATERIALIZED", "TABLE", "INSERT", "INTO", "VALUES", "UPDATE",
+    "BETWEEN", "SYMMETRIC",
+    "AS", "CAST", "CREATE", "VIEW", "MATERIALIZED", "TABLE", "INSERT", "INTO", "VALUES", "UPDATE",
     "SET", "DELETE", "WITH", "CASE", "WHEN", "THEN", "ELSE", "END", "COALESCE",
-    "RECURSIVE", "ASC", "DESC", "DISTINCT"
+    "RECURSIVE", "ASC", "DESC", "DISTINCT", "FILTER", "CONFLICT",
+    "PRIMARY", "FOREIGN", "KEY", "UNIQUE", "CHECK", "DEFAULT", "REFERENCES",
+    "CONSTRAINT", "DO", "NOTHING", "RETURNING", "LATERAL", "OVERLAPS", "ENUM",
+    "OPTIONS", "INCLUDE", "WINDOW", "OVER", "PARTITION", "RANGE", "ROWS",
+    "CURRENT", "ROW", "FETCH", "NEXT", "ONLY",
+    # TO must not be mistaken for a function name in constructs such as
+    # IMPORT FOREIGN SCHEMA ... LIMIT TO (...).
+    "TO"
 }
 
 OPERATORS = {
-    "=", "<>", "<=", ">=", "!=", "<", ">", "+", "-", "*", "/", "%", "||", "~*"
+    # Keep PostgreSQL's multi-character operators atomic. Splitting these into
+    # overlapping one-character tokens lets spacing edits overwrite operator
+    # characters (especially after XML entities have been decoded).
+    "->>", "#>>", "!~*", "?|", "?&", "#>", "#-", "->", "@>", "<@",
+    "=>", ":=", "<=", ">=", "!=", "<>", "||", "&&", "!~", "~*", "@?",
+    "@@", "<<", ">>", "=", "<", ">", "+", "-", "*", "/", "%", "~",
+    "?", "&", "|", "#", "^"
 }
 
-@lru_cache(maxsize=1024)
+
+def _classify_predicate_operator_indices(
+    tokens: List[dict],
+    depths: List[int],
+    target_depth: int,
+    start: int = 0,
+    end: Optional[int] = None,
+) -> tuple[List[int], List[int]]:
+    """Return boolean operators and BETWEEN delimiter AND tokens.
+
+    CASE expressions are opaque at this level because boolean operators inside
+    their WHEN clauses do not separate the surrounding predicate.
+    """
+    end = len(tokens) if end is None else end
+    boolean_operators = []
+    between_delimiters = []
+    case_depth = 0
+    between_pending = False
+    for index in range(start, end):
+        token = tokens[index]
+        if token["type"] not in {"KEYWORD", "IDENTIFIER"}:
+            continue
+        value = token["value"].upper()
+        if value == "CASE":
+            case_depth += 1
+            continue
+        if value == "END" and case_depth:
+            case_depth -= 1
+            continue
+        if case_depth or depths[index] != target_depth:
+            continue
+        if value == "BETWEEN":
+            between_pending = True
+        elif value == "AND" and between_pending:
+            between_pending = False
+            between_delimiters.append(index)
+        elif value in {"AND", "OR"}:
+            boolean_operators.append(index)
+    return boolean_operators, between_delimiters
+
+
+def find_boolean_operator_indices(
+    tokens: List[dict],
+    depths: List[int],
+    target_depth: int,
+    start: int = 0,
+    end: Optional[int] = None,
+) -> List[int]:
+    """Return boolean AND/OR tokens, excluding BETWEEN's delimiter AND."""
+    return _classify_predicate_operator_indices(
+        tokens, depths, target_depth, start, end
+    )[0]
+
+
+def find_between_delimiter_indices(
+    tokens: List[dict],
+    depths: List[int],
+    target_depth: int,
+    start: int = 0,
+    end: Optional[int] = None,
+) -> List[int]:
+    """Return AND tokens that delimit BETWEEN's lower and upper bounds."""
+    return _classify_predicate_operator_indices(
+        tokens, depths, target_depth, start, end
+    )[1]
+
+
+def protected_sql_signature(content: str) -> tuple[tuple[str, str], ...]:
+    """Return syntax that conservative fixes must preserve byte-for-byte."""
+    protected = []
+    tokens = tokenize_sql(content)
+    cast_target_offsets = {
+        (token["start"], token["end"])
+        for group in find_cast_target_token_groups(tokens, content)
+        for token in group
+    }
+    for token in tokens:
+        token_type = token["type"]
+        value = token["value"]
+        if token_type == "STRING" and value.startswith("$"):
+            delimiter_end = value.find("$", 1)
+            delimiter = value[:delimiter_end + 1] if delimiter_end != -1 else value
+            protected.append(("DOLLAR_DELIMITER", delimiter))
+        elif token_type in {"PARAM", "STRING", "OPERATOR", "CAST"}:
+            protected.append((token_type, value))
+        elif token_type == "IDENTIFIER" and value.startswith('"'):
+            protected.append(("QUOTED_IDENTIFIER", value))
+        elif (
+            token_type in {"KEYWORD", "IDENTIFIER"}
+            and (token["start"], token["end"]) not in cast_target_offsets
+        ):
+            # Case-only rules may change either token class without changing
+            # SQL meaning.  Preserve the normalized word itself so a
+            # source-mapping error cannot silently turn ``AND`` into a new
+            # identifier such as ``ANDnd``.
+            protected.append(("WORD", value.lower()))
+    for group in find_cast_target_token_groups(tokens, content):
+        normalized_target = "".join(
+            token["value"].lower()
+            if token["type"] in {"IDENTIFIER", "KEYWORD"}
+            else token["value"]
+            for token in group
+        )
+        # PostgreSQL aliases expanded by IR-datatype-format are the same cast
+        # targets semantically. The commit guard must distinguish type changes
+        # without rejecting those documented canonical spellings.
+        cast_suffix = ""
+        while normalized_target.endswith("[]"):
+            cast_suffix += "[]"
+            normalized_target = normalized_target[:-2]
+        normalized_target = {
+            "bool": "boolean",
+            "float4": "real",
+            "float8": "doubleprecision",
+            "int": "integer",
+            "int2": "smallint",
+            "int4": "integer",
+            "int8": "bigint",
+            "timetz": "timewithtimezone",
+            "timestamptz": "timestampwithtimezone",
+            "varchar": "charactervarying",
+        }.get(normalized_target, normalized_target) + cast_suffix
+        protected.append(
+            ("CAST_TARGET", normalized_target)
+        )
+    return tuple(protected)
+
+@lru_cache(maxsize=32)
 def _tokenize_sql_impl(content: str) -> List[dict]:
     n = len(content)
     i = 0
@@ -121,6 +277,27 @@ def _tokenize_sql_impl(content: str) -> List[dict]:
                 "line": line_number
             })
             continue
+
+        # Template parameters are opaque SQL values. Recognize them before
+        # dollar-quoted strings and punctuation so embedded SQL rules do not
+        # interpret names inside a MyBatis placeholder as identifiers.
+        if c in ("#", "$") and i + 1 < n and content[i + 1] == "{":
+            start = i
+            i += 2
+            while i < n and content[i] != "}":
+                if content[i] == "\n":
+                    line_number += 1
+                i += 1
+            if i < n:
+                i += 1
+            tokens.append({
+                "type": "PARAM",
+                "value": content[start:i],
+                "start": start,
+                "end": i,
+                "line": line_number
+            })
+            continue
             
         # Dollar-quoted string
         if c == '$':
@@ -155,6 +332,26 @@ def _tokenize_sql_impl(content: str) -> List[dict]:
                 "line": line_number
             })
             i += 2
+            continue
+
+        # Trellis and conventional named binds. Dotted paths are one opaque
+        # parameter, while PostgreSQL's :: cast remains a distinct token.
+        if c == ':' and i + 1 < n and (content[i + 1].isalpha() or content[i + 1] == '_'):
+            start = i
+            i += 2
+            while i < n and (content[i].isalnum() or content[i] == '_'):
+                i += 1
+            while i + 1 < n and content[i] == '.' and (content[i + 1].isalpha() or content[i + 1] == '_'):
+                i += 2
+                while i < n and (content[i].isalnum() or content[i] == '_'):
+                    i += 1
+            tokens.append({
+                "type": "PARAM",
+                "value": content[start:i],
+                "start": start,
+                "end": i,
+                "line": line_number
+            })
             continue
             
         # Paren
@@ -372,6 +569,7 @@ def find_datatype_token_groups(tokens: List[dict], content: str) -> List[List[di
         # Match single-word types
         single_types = {
             "timestamp", "timestamptz", "time", "timetz", "varchar", "integer", "int",
+            "int2", "int4", "int8", "float4", "float8",
             "bigint", "smallint", "text", "boolean", "bool", "numeric", "decimal",
             "json", "jsonb", "uuid", "date", "geometry", "real", "char", "character"
         }
@@ -644,6 +842,86 @@ def find_datatype_token_groups(tokens: List[dict], content: str) -> List[List[di
     return type_groups
 
 
+def find_cast_target_token_groups(tokens: List[dict], content: str) -> List[List[dict]]:
+    """Return token groups that are targets of SQL cast syntax."""
+    active_tokens = [
+        token for token in tokens if token["type"] not in ("WHITESPACE", "COMMENT")
+    ]
+    active_index_by_id = {id(token): index for index, token in enumerate(active_tokens)}
+    groups_by_start = {
+        id(group[0]): group for group in find_datatype_token_groups(tokens, content)
+    }
+    cast_groups: list[list[dict]] = []
+
+    def postgres_target(start_index: int) -> list[dict]:
+        recognized = groups_by_start.get(id(active_tokens[start_index]))
+        if recognized is not None:
+            target = list(recognized)
+            end_index = active_index_by_id[id(recognized[-1])] + 1
+        else:
+            target = [active_tokens[start_index]]
+            end_index = start_index + 1
+            while (
+                end_index + 1 < len(active_tokens)
+                and active_tokens[end_index]["type"] == "DOT"
+                and active_tokens[end_index + 1]["type"] in {"IDENTIFIER", "KEYWORD"}
+            ):
+                target.extend(active_tokens[end_index : end_index + 2])
+                end_index += 2
+        while (
+            end_index + 1 < len(active_tokens)
+            and active_tokens[end_index]["value"] == "["
+            and active_tokens[end_index + 1]["value"] == "]"
+        ):
+            target.extend(active_tokens[end_index : end_index + 2])
+            end_index += 2
+        return target
+
+    for index, token in enumerate(active_tokens):
+        if token["type"] == "CAST" and index + 1 < len(active_tokens):
+            cast_groups.append(postgres_target(index + 1))
+            continue
+
+        if token["type"] != "KEYWORD" or token["value"].upper() != "CAST":
+            continue
+        if index + 1 >= len(active_tokens) or active_tokens[index + 1]["value"] != "(":
+            continue
+
+        depth = 0
+        for cast_index in range(index + 1, len(active_tokens)):
+            cast_token = active_tokens[cast_index]
+            if cast_token["type"] == "PAREN":
+                if cast_token["value"] == "(":
+                    depth += 1
+                else:
+                    depth -= 1
+                    if depth == 0:
+                        break
+            elif (
+                depth == 1
+                and cast_token["type"] == "KEYWORD"
+                and cast_token["value"].upper() == "AS"
+                and cast_index + 1 < len(active_tokens)
+            ):
+                target_end = cast_index + 1
+                target_depth = depth
+                while target_end < len(active_tokens):
+                    target_token = active_tokens[target_end]
+                    if target_token["type"] == "PAREN":
+                        if target_token["value"] == "(":
+                            target_depth += 1
+                        else:
+                            target_depth -= 1
+                            if target_depth == 0:
+                                break
+                    target_end += 1
+                if target_end > cast_index + 1:
+                    cast_groups.append(active_tokens[cast_index + 1 : target_end])
+                break
+
+    return cast_groups
+
+
 def is_values_multi(tokens: List[dict], open_idx: int) -> bool:
     # Check if the preceding active token is VALUES
     prev_tok = None
@@ -668,11 +946,5 @@ def is_values_multi(tokens: List[dict], open_idx: int) -> bool:
         return True
     return False
 
-import functools
-
-@functools.lru_cache(maxsize=4096)
-def _tokenize_sql_cached(content: str) -> List[dict]:
-    return _tokenize_sql_impl(content)
-
 def tokenize_sql(content: str) -> List[dict]:
-    return _tokenize_sql_cached(content)
+    return _tokenize_sql_impl(content)

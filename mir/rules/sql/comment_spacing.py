@@ -3,6 +3,9 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class CommentSpacingRule(BaseRule):
+    commit_profile = True
+    embedded_safe = True
+    trellis_safe = True
     rule_id = "IR-comment-spacing"
     description = "Enforce a single space after the double-dash comment prefix."
     category = "general"

@@ -1,10 +1,16 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths, find_matching_paren, is_values_multi
+from mir.rules.sql.sql_utils import (
+    find_boolean_operator_indices,
+    get_token_depths,
+    is_values_multi,
+    tokenize_sql,
+)
 from mir.rules.sql.line_length import LineLengthRule
 from mir.rules.sql.indent import IndentRule
 
 class ExpressionSplitRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-expression-split"
     description = "Long lines should split on function/expression parentheses, and optionally on additive/logical operators if still too long."
     category = "queries"
@@ -52,12 +58,61 @@ class ExpressionSplitRule(BaseRule):
         depths = get_token_depths(tokens)
         lines = content.splitlines()
         edits = []
+
+        # Index document-wide token relationships once. Bulk migrations can
+        # contain tens of thousands of independent statements; rescanning the
+        # complete token stream for every physical line made this rule
+        # quadratic on otherwise simple INSERT data.
+        tokens_by_line: Dict[int, List[dict]] = {}
+        matching_parens: Dict[int, int] = {}
+        enclosing_open_by_index: List[int | None] = [None] * len(tokens)
+        open_stack: List[int] = []
+        for token_index, token in enumerate(tokens):
+            tokens_by_line.setdefault(token["line"], []).append(token)
+            if token["type"] == "PAREN" and token["value"] == ")":
+                if open_stack:
+                    opening_index = open_stack.pop()
+                    matching_parens[opening_index] = token_index
+                enclosing_open_by_index[token_index] = (
+                    open_stack[-1] if open_stack else None
+                )
+                continue
+            enclosing_open_by_index[token_index] = (
+                open_stack[-1] if open_stack else None
+            )
+            if token["type"] == "PAREN" and token["value"] == "(":
+                open_stack.append(token_index)
+
+        boolean_indices_by_depth: Dict[int, set[int]] = {}
+
+        def boolean_indices_at_depth(depth: int) -> set[int]:
+            if depth not in boolean_indices_by_depth:
+                boolean_indices_by_depth[depth] = set(
+                    find_boolean_operator_indices(tokens, depths, depth)
+                )
+            return boolean_indices_by_depth[depth]
         
         for line_no in range(1, len(lines) + 1):
             line = lines[line_no - 1]
-            line_tokens = [t for t in tokens if t["line"] == line_no]
+            line_tokens = tokens_by_line.get(line_no, [])
             active_tokens = [t for t in line_tokens if t["type"] not in ("WHITESPACE", "COMMENT")]
             if not active_tokens:
+                continue
+            case_when_depths = {
+                depths[get_index(token)]
+                for token in active_tokens
+                if token["type"] == "KEYWORD"
+                and token["value"].upper() == "WHEN"
+            }
+            if any(
+                token["type"] == "KEYWORD"
+                and token["value"].upper() == "THEN"
+                and depths[get_index(token)] in case_when_depths
+                for token in active_tokens
+            ):
+                # CASE layout owns WHEN/THEN arms. Splitting a grouping or
+                # function parenthesis first prevents that rule from choosing
+                # the compact form after surrounding alignment is removed.
                 continue
                 
             is_line_val_multi = False
@@ -79,13 +134,9 @@ class ExpressionSplitRule(BaseRule):
             # Find enclosing parenthesis active at this line
             enclosing_open = None
             first_tok_idx = get_index(active_tokens[0])
-            for idx in range(first_tok_idx - 1, -1, -1):
-                t = tokens[idx]
-                if t["type"] == "PAREN" and t["value"] == "(":
-                    c_idx = find_matching_paren(tokens, idx)
-                    if c_idx is not None and tokens[c_idx]["line"] >= line_no:
-                        enclosing_open = t
-                        break
+            enclosing_open_index = enclosing_open_by_index[first_tok_idx]
+            if enclosing_open_index is not None:
+                enclosing_open = tokens[enclosing_open_index]
                         
             if enclosing_open:
                 eo_idx = get_index(enclosing_open)
@@ -120,12 +171,16 @@ class ExpressionSplitRule(BaseRule):
             keywords = []
             commas = []
             operators = []
+            boolean_indices = boolean_indices_at_depth(base_depth)
             for t in active_tokens[:-1]:
                 t_idx = get_index(t)
                 if depths[t_idx] == base_depth:
                     if t["type"] == "OPERATOR" and t["value"] in ("+", "-", "||", "*", "/"):
                         operators.append(t)
-                    elif t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR", "ORDER", "PARTITION", "BY"):
+                    elif (
+                        t_idx in boolean_indices
+                        or (t["type"] == "KEYWORD" and t["value"].upper() in ("ORDER", "PARTITION", "BY"))
+                    ):
                         if t["value"].upper() == "BY":
                             prev_active = None
                             for prev_idx in range(t_idx - 1, -1, -1):
@@ -204,12 +259,66 @@ class ExpressionSplitRule(BaseRule):
 
             def get_case1_edits():
                 case1_edits = []
+                # A long JOIN line may become valid simply by moving ON to its
+                # continuation indent. Preserve a compact scalar subquery in
+                # that predicate so JoinOnMultiRule can make that higher-level
+                # split instead of expanding the parentheses first.
+                on_token = next(
+                    (
+                        token
+                        for token in active_tokens
+                        if token["type"] == "KEYWORD"
+                        and token["value"].upper() == "ON"
+                    ),
+                    None,
+                )
+                if on_token is not None:
+                    for candidate_open in active_tokens:
+                        if (
+                            candidate_open["type"] != "PAREN"
+                            or candidate_open["value"] != "("
+                            or candidate_open["start"] < on_token["end"]
+                        ):
+                            continue
+                        candidate_open_index = get_index(candidate_open)
+                        candidate_close_index = matching_parens.get(
+                            candidate_open_index
+                        )
+                        if candidate_close_index is None:
+                            continue
+                        first_inner = next(
+                            (
+                                tokens[index]
+                                for index in range(
+                                    candidate_open_index + 1,
+                                    candidate_close_index,
+                                )
+                                if tokens[index]["type"]
+                                not in ("WHITESPACE", "COMMENT")
+                            ),
+                            None,
+                        )
+                        if not (
+                            first_inner
+                            and first_inner["type"] == "KEYWORD"
+                            and first_inner["value"].upper() == "SELECT"
+                        ):
+                            continue
+                        on_expression = "".join(
+                            " " if token["type"] == "WHITESPACE" else token["value"]
+                            for token in tokens[
+                                get_index(on_token):candidate_close_index + 1
+                            ]
+                        ).strip()
+                        if len(base_indent) + 4 + len(on_expression) <= max_len:
+                            return []
+
                 # Fallback to Case 1: Split on first non-empty open parenthesis on this line
                 open_tok = None
                 for t_before in active_tokens:
                     if t_before["type"] == "PAREN" and t_before["value"] == "(":
                         idx_before = get_index(t_before)
-                        close_idx_before = find_matching_paren(tokens, idx_before)
+                        close_idx_before = matching_parens.get(idx_before)
                         if close_idx_before is not None:
                             active_between_before = [
                                 tokens[k_before] for k_before in range(idx_before + 1, close_idx_before)
@@ -240,7 +349,7 @@ class ExpressionSplitRule(BaseRule):
                                     
                 if open_tok:
                     open_idx = get_index(open_tok)
-                    close_idx = find_matching_paren(tokens, open_idx)
+                    close_idx = matching_parens.get(open_idx)
                     if close_idx is not None:
                         # Detect if the parenthesis is function-like
                         prev_tok = None
@@ -337,12 +446,18 @@ class ExpressionSplitRule(BaseRule):
                                 keywords_c1 = []
                                 commas_c1 = []
                                 operators_c1 = []
+                                boolean_indices_c1 = set(find_boolean_operator_indices(
+                                    tokens, depths, base_depth_c1, open_idx + 1, close_idx
+                                ))
                                 for idx_in in range(open_idx + 1, close_idx):
                                     t_in = tokens[idx_in]
                                     if depths[idx_in] == base_depth_c1:
                                         if t_in["type"] == "OPERATOR" and t_in["value"] in ("+", "-", "||", "*", "/"):
                                             operators_c1.append(t_in)
-                                        elif t_in["type"] == "KEYWORD" and t_in["value"].upper() in ("AND", "OR", "ORDER", "PARTITION", "BY"):
+                                        elif (
+                                            idx_in in boolean_indices_c1
+                                            or (t_in["type"] == "KEYWORD" and t_in["value"].upper() in ("ORDER", "PARTITION", "BY"))
+                                        ):
                                             if t_in["value"].upper() == "BY":
                                                 prev_active = None
                                                 for p_idx in range(idx_in - 1, open_idx, -1):

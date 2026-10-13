@@ -1,10 +1,20 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
+from mir.rules.sql.sql_utils import (
+    find_between_delimiter_indices,
+    find_boolean_operator_indices,
+    get_token_depths,
+    source_text_length,
+    tokenize_sql,
+)
 
 class WhereMultiRule(BaseRule):
+    commit_profile = True
+    embedded_safe = True
+    embedded_dynamic_indent_safe = True
+    trellis_safe = True
     rule_id = "IR-where-multi"
-    description = "Each AND/OR clause in a multi-condition WHERE clause should start on its own line, indented at 4 spaces."
+    description = "Keep a multi-condition WHERE clause inline when it fits; otherwise put each condition on its own indented line."
     category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
@@ -15,11 +25,17 @@ class WhereMultiRule(BaseRule):
     examples = [
         {
             "violating": "SELECT id FROM users WHERE some_long_column_identifier_active = true AND another_long_column_identifier_type = 'admin' OR age_greater_than_limit > 21;",
-            "correct": "SELECT id FROM users WHERE\n    some_long_column_identifier_active = true\n    AND another_long_column_identifier_type = 'admin'\n    OR age_greater_than_limit > 21;"
+            "correct": "SELECT id FROM users\nWHERE\n    some_long_column_identifier_active = true\n    AND another_long_column_identifier_type = 'admin'\n    OR age_greater_than_limit > 21;"
+        },
+        {
+            "violating": "SELECT item_id FROM sample_item WHERE recorded_at BETWEEN :start\n    AND :end AND owning_organization_identifier = :owning_organization_identifier AND processing_status = :processing_status;",
+            "correct": "SELECT item_id FROM sample_item\nWHERE\n    recorded_at BETWEEN :start AND :end\n    AND owning_organization_identifier = :owning_organization_identifier\n    AND processing_status = :processing_status;"
         }
     ]
     additional_validations = [
-        "SELECT id FROM users WHERE active = true;"
+        "SELECT id FROM users WHERE active = true;",
+        "SELECT id FROM users WHERE active = true AND retired = false;",
+        "SELECT id FROM users WHERE created_at BETWEEN :start AND :end;",
     ]
 
     def _find_violations(self, content: str, rule_config: Dict[str, Any] = None) -> List[dict]:
@@ -29,9 +45,32 @@ class WhereMultiRule(BaseRule):
         depths = get_token_depths(tokens)
         violations = []
         n = len(tokens)
+        trellis_ranges = []
+        mybatis_dynamic_offsets = rule_config.get("mybatis_dynamic_offsets", set())
+        mybatis_nested_dynamic_offsets = rule_config.get(
+            "mybatis_nested_dynamic_offsets", mybatis_dynamic_offsets
+        )
+        if rule_config.get("_template_dialect") == "trellis":
+            from mir.rules.sql.trellis_utils import analyze_trellis
+
+            _, _, trellis_ranges = analyze_trellis(content)
+
+        def is_trellis_controlled(token: dict) -> bool:
+            return any(start < token["line"] < end for start, end in trellis_ranges)
         
         for i, tok in enumerate(tokens):
             if tok["type"] == "KEYWORD" and tok["value"].upper() == "WHERE":
+                previous_active = [
+                    index
+                    for index in range(i - 1, -1, -1)
+                    if tokens[index]["type"] not in {"WHITESPACE", "COMMENT"}
+                ][:2]
+                is_filter_where = (
+                    len(previous_active) == 2
+                    and tokens[previous_active[0]]["type"] == "PAREN"
+                    and tokens[previous_active[0]]["value"] == "("
+                    and tokens[previous_active[1]]["value"].upper() == "FILTER"
+                )
                 outer_depth = depths[i]
                 
                 line_start = content.rfind("\n", 0, tok["start"]) + 1
@@ -42,7 +81,15 @@ class WhereMultiRule(BaseRule):
                         where_indent += char
                     else:
                         break
-                        
+
+                base_indent = rule_config.get("base_indent")
+                if (
+                    "mybatis_dynamic_offsets" in rule_config
+                    and isinstance(base_indent, str)
+                    and len(where_indent) < len(base_indent)
+                ):
+                    where_indent = base_indent
+
                 expected_indent = where_indent + "    "
                 
                 clause_end = n
@@ -54,7 +101,8 @@ class WhereMultiRule(BaseRule):
                         break
                     if d == outer_depth:
                         if t["type"] == "KEYWORD" and t["value"].upper() in (
-                            "GROUP", "ORDER", "LIMIT", "HAVING", "OFFSET", "UNION", "INTERSECT", "EXCEPT"
+                            "GROUP", "ORDER", "LIMIT", "HAVING", "OFFSET", "RETURNING",
+                            "UNION", "INTERSECT", "EXCEPT"
                         ):
                             clause_end = idx
                             break
@@ -64,32 +112,308 @@ class WhereMultiRule(BaseRule):
                             
                 clause_tokens = tokens[i + 1:clause_end]
                 clause_depths = depths[i + 1:clause_end]
+                case_owned_indices = set()
+                case_nesting = 0
+                for token_index in range(i + 1, clause_end):
+                    item = tokens[token_index]
+                    if (
+                        item["type"] == "KEYWORD"
+                        and item["value"].upper() == "CASE"
+                    ):
+                        case_nesting += 1
+                    if case_nesting:
+                        case_owned_indices.add(token_index)
+                    if (
+                        item["type"] == "KEYWORD"
+                        and item["value"].upper() == "END"
+                        and case_nesting
+                    ):
+                        case_nesting -= 1
                 
-                has_multi = False
-                case_depth = 0
-                for t, d in zip(clause_tokens, clause_depths):
-                    if t["type"] == "KEYWORD":
-                        val_up = t["value"].upper()
-                        if val_up == "CASE":
-                            case_depth += 1
-                        elif val_up == "END" and case_depth > 0:
-                            case_depth -= 1
-                    if case_depth == 0 and d == outer_depth and t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
-                        has_multi = True
-                        break
+                boolean_indices = find_boolean_operator_indices(
+                    tokens, depths, outer_depth, i + 1, clause_end
+                )
+                boolean_indices = [
+                    index
+                    for index in boolean_indices
+                    if index not in case_owned_indices
+                    and not is_trellis_controlled(tokens[index])
+                ]
+                dynamic_boolean_indices = {
+                    index
+                    for index in boolean_indices
+                    if tokens[index]["start"] in mybatis_dynamic_offsets
+                }
+                mybatis_foreach_offsets = rule_config.get(
+                    "mybatis_foreach_offsets", set()
+                )
+                has_mybatis_foreach = any(
+                    token["start"] in mybatis_foreach_offsets
+                    for token in clause_tokens
+                    if token["type"] not in {"WHITESPACE", "COMMENT"}
+                )
+                where_is_dynamic = tok["start"] in mybatis_dynamic_offsets
+                from mir.rules.sql.line_length import LineLengthRule
+                max_len = self.get_config_value(
+                    rule_config,
+                    "max_line_length",
+                    100,
+                    fallbacks=[(LineLengthRule, "max_length")],
+                )
+                if is_filter_where:
+                    filter_token = tokens[previous_active[1]]
+                    filter_open_idx = previous_active[0]
+                    filter_line_start = content.rfind(
+                        "\n", 0, filter_token["start"]
+                    ) + 1
+                    filter_line = content[filter_line_start:filter_token["start"]]
+                    filter_indent = len(filter_line) - len(filter_line.lstrip())
+                    filter_inner_indent = " " * (filter_indent + 4)
+                    filter_where_single = "".join(
+                        " " if token["type"] == "WHITESPACE" else token["value"]
+                        for token in tokens[i:clause_end]
+                    ).strip()
+                    filter_group_single = f"FILTER ({filter_where_single})"
+                    if (
+                        "\n" not in content[
+                            tokens[filter_open_idx]["start"]:
+                            tokens[clause_end]["end"]
+                        ]
+                        and not any(
+                            token["type"] == "COMMENT"
+                            for token in tokens[filter_open_idx:clause_end]
+                        )
+                        and source_text_length(
+                            filter_line + filter_group_single,
+                            rule_config,
+                        ) <= max_len
+                    ):
+                        for index in range(filter_open_idx + 1, clause_end):
+                            item = tokens[index]
+                            if item["type"] != "WHITESPACE":
+                                continue
+                            replacement = (
+                                ""
+                                if index in {filter_open_idx + 1, clause_end - 1}
+                                else " "
+                            )
+                            if item["value"] != replacement:
+                                violations.append({
+                                    "token": item,
+                                    "ws_start": item["start"],
+                                    "ws_end": item["end"],
+                                    "replacement": replacement,
+                                })
+                        continue
+                    where_whitespace = (
+                        tokens[i - 1]
+                        if i > 0 and tokens[i - 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    expected_where_whitespace = "\n" + filter_inner_indent
+                    if (
+                        where_whitespace is None
+                        or where_whitespace["value"]
+                        != expected_where_whitespace
+                    ):
+                        violations.append({
+                            "token": tok,
+                            "ws_start": (
+                                where_whitespace["start"]
+                                if where_whitespace
+                                else tok["start"]
+                            ),
+                            "ws_end": tok["start"],
+                            "replacement": expected_where_whitespace,
+                        })
+                    if (
+                        clause_end < n
+                        and tokens[clause_end]["type"] == "PAREN"
+                        and tokens[clause_end]["value"] == ")"
+                    ):
+                        close_whitespace = (
+                            tokens[clause_end - 1]
+                            if tokens[clause_end - 1]["type"]
+                            == "WHITESPACE"
+                            else None
+                        )
+                        expected_close_whitespace = (
+                            "\n" + " " * filter_indent
+                        )
+                        if (
+                            close_whitespace is None
+                            or close_whitespace["value"]
+                            != expected_close_whitespace
+                        ):
+                            violations.append({
+                                "token": tokens[clause_end],
+                                "ws_start": (
+                                    close_whitespace["start"]
+                                    if close_whitespace
+                                    else tokens[clause_end]["start"]
+                                ),
+                                "ws_end": tokens[clause_end]["start"],
+                                "replacement": expected_close_whitespace,
+                            })
+                    if (
+                        filter_indent + 4
+                        + source_text_length(filter_where_single, rule_config)
+                        <= max_len
+                    ):
+                        # FILTER owns its required WHERE parentheses. When its
+                        # predicate fits on the indented inner line, give it one
+                        # canonical compact form rather than preserving legacy
+                        # continuation alignment inside the function call.
+                        last_active_idx = next(
+                            (
+                                index
+                                for index in range(clause_end - 1, i, -1)
+                                if tokens[index]["type"]
+                                not in {"WHITESPACE", "COMMENT"}
+                            ),
+                            None,
+                        )
+                        if last_active_idx is not None:
+                            for index in range(i + 1, last_active_idx):
+                                item = tokens[index]
+                                if (
+                                    item["type"] == "WHITESPACE"
+                                    and item["value"] != " "
+                                ):
+                                    violations.append({
+                                        "token": item,
+                                        "ws_start": item["start"],
+                                        "ws_end": item["end"],
+                                        "replacement": " ",
+                                    })
+                        continue
+                for delimiter_idx in find_between_delimiter_indices(
+                    tokens, depths, outer_depth, i + 1, clause_end
+                ):
+                    delimiter = tokens[delimiter_idx]
+                    if is_trellis_controlled(delimiter):
+                        continue
+                    ws_before = (
+                        tokens[delimiter_idx - 1]
+                        if delimiter_idx and tokens[delimiter_idx - 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    condition_start = max(
+                        (index + 1 for index in boolean_indices if index < delimiter_idx),
+                        default=i + 1,
+                    )
+                    condition_end = min(
+                        (index for index in boolean_indices if index > delimiter_idx),
+                        default=clause_end,
+                    )
+                    condition_single = "".join(
+                        " " if token["type"] == "WHITESPACE" else token["value"]
+                        for token in tokens[condition_start:condition_end]
+                    ).strip()
+                    expected_delimiter_ws = (
+                        " "
+                        if len(expected_indent) + len(condition_single) <= max_len
+                        else "\n" + expected_indent + "    "
+                    )
+                    if not ws_before or ws_before["value"] != expected_delimiter_ws:
+                        violations.append({
+                            "token": delimiter,
+                            "ws_start": ws_before["start"] if ws_before else delimiter["start"],
+                            "ws_end": delimiter["start"],
+                            "replacement": expected_delimiter_ws,
+                        })
+                has_multi = bool(boolean_indices)
                         
                 if has_multi:
                     where_clause_tokens = tokens[i : clause_end]
-                    where_clause_str = "".join(t["value"] for t in where_clause_tokens)
-                    import re
-                    where_clause_single = re.sub(r'\s+', ' ', where_clause_str)
-                    estimated_line_len = len(where_indent) + len(where_clause_single)
-                    
-                    from mir.rules.sql.line_length import LineLengthRule
-                    max_len = self.get_config_value(rule_config, "max_line_length", 100, fallbacks=[(LineLengthRule, "max_length")])
-                    
-                    if estimated_line_len <= max_len:
+                    where_clause_single = "".join(
+                        " " if t["type"] == "WHITESPACE" else t["value"]
+                        for t in where_clause_tokens
+                    )
+                    prefix_before_where = line_prefix.rstrip()
+                    inline_where = (
+                        prefix_before_where + " " + where_clause_single
+                        if prefix_before_where.strip()
+                        else where_indent + where_clause_single
+                    )
+                    estimated_line_len = source_text_length(
+                        inline_where, rule_config
+                    )
+                    if not prefix_before_where.strip() and line_start > 0:
+                        previous_line_end = line_start - 1
+                        previous_line_start = content.rfind(
+                            "\n", 0, previous_line_end
+                        ) + 1
+                        previous_line = content[
+                            previous_line_start:previous_line_end
+                        ].rstrip()
+                        previous_upper = previous_line.lstrip().upper()
+                        if (
+                            previous_upper.startswith("DELETE ")
+                            or (
+                                previous_upper.startswith("FROM ")
+                                and estimated_line_len > min(max_len, 100)
+                            )
+                        ):
+                            estimated_line_len = max(
+                                estimated_line_len,
+                                source_text_length(
+                                    previous_line + " " + where_clause_single,
+                                    rule_config,
+                                ),
+                            )
+                    if (
+                        estimated_line_len <= max_len
+                        and not dynamic_boolean_indices
+                        and not has_mybatis_foreach
+                    ):
+                        # A short predicate has one canonical compact form. Only
+                        # edit whitespace tokens so strings and parameters stay
+                        # byte-for-byte intact, and leave the separator before
+                        # the following clause alone.
+                        if any(t["type"] == "COMMENT" for t in clause_tokens):
+                            continue
+                        last_active_idx = None
+                        for idx in range(clause_end - 1, i, -1):
+                            if tokens[idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                                last_active_idx = idx
+                                break
+                        if last_active_idx is not None:
+                            for idx in range(i + 1, last_active_idx):
+                                t = tokens[idx]
+                                if t["type"] == "WHITESPACE" and t["value"] != " ":
+                                    violations.append({
+                                        "token": t,
+                                        "ws_start": t["start"],
+                                        "ws_end": t["end"],
+                                        "replacement": " ",
+                                    })
                         continue
+                    if prefix_before_where.strip():
+                        ws_before_where = (
+                            tokens[i - 1]
+                            if i > 0 and tokens[i - 1]["type"] == "WHITESPACE"
+                            else None
+                        )
+                        expected_before_where = "\n" + where_indent
+                        actual_before_where = (
+                            ws_before_where["value"] if ws_before_where else ""
+                        )
+                        if actual_before_where != expected_before_where:
+                            violations.append({
+                                "token": tok,
+                                "ws_start": (
+                                    ws_before_where["start"]
+                                    if ws_before_where
+                                    else tok["start"]
+                                ),
+                                "ws_end": (
+                                    ws_before_where["end"]
+                                    if ws_before_where
+                                    else tok["start"]
+                                ),
+                                "replacement": expected_before_where,
+                            })
                     # 1. Format the first condition after WHERE onto its own line
                     first_cond_idx = None
                     for idx in range(i + 1, clause_end):
@@ -103,7 +427,13 @@ class WhereMultiRule(BaseRule):
                         if first_cond_idx - 1 >= 0 and tokens[first_cond_idx - 1]["type"] == "WHITESPACE":
                             ws_before = tokens[first_cond_idx - 1]
                             
-                        expected_replacement = "\n" + expected_indent
+                        first_condition_indent = expected_indent
+                        if (
+                            fc_tok["start"] in mybatis_nested_dynamic_offsets
+                            and not where_is_dynamic
+                        ):
+                            first_condition_indent += "    "
+                        expected_replacement = "\n" + first_condition_indent
                         if not ws_before or ws_before["value"] != expected_replacement:
                             violations.append({
                                 "token": fc_tok,
@@ -113,30 +443,234 @@ class WhereMultiRule(BaseRule):
                             })
                             
                     # 2. Format subsequent AND/OR keywords onto their own lines
-                    case_depth = 0
-                    for j_idx, (t, d) in enumerate(zip(clause_tokens, clause_depths)):
-                        if t["type"] == "KEYWORD":
-                            val_up = t["value"].upper()
-                            if val_up == "CASE":
-                                case_depth += 1
-                            elif val_up == "END" and case_depth > 0:
-                                case_depth -= 1
-                        if case_depth == 0 and d == outer_depth and t["type"] == "KEYWORD":
-                            val_upper = t["value"].upper()
-                            if val_upper in ("AND", "OR"):
-                                actual_idx = i + 1 + j_idx
-                                ws_tok = None
-                                if actual_idx - 1 >= 0 and tokens[actual_idx - 1]["type"] == "WHITESPACE":
-                                    ws_tok = tokens[actual_idx - 1]
-                                    
-                                expected_replacement = "\n" + expected_indent
-                                if not ws_tok or ws_tok["value"] != expected_replacement:
-                                    violations.append({
-                                        "token": t,
-                                        "ws_start": ws_tok["start"] if ws_tok else t["start"],
-                                        "ws_end": t["start"],
-                                        "replacement": expected_replacement
-                                    })
+                    for actual_idx in boolean_indices:
+                        t = tokens[actual_idx]
+                        ws_tok = None
+                        if actual_idx - 1 >= 0 and tokens[actual_idx - 1]["type"] == "WHITESPACE":
+                            ws_tok = tokens[actual_idx - 1]
+
+                        boolean_indent = expected_indent
+                        if (
+                            t["start"] in mybatis_nested_dynamic_offsets
+                            and not where_is_dynamic
+                        ):
+                            boolean_indent += "    "
+                        expected_replacement = "\n" + boolean_indent
+                        whitespace_matches = bool(
+                            ws_tok
+                            and (
+                                ws_tok["value"] == expected_replacement
+                                or (
+                                    actual_idx in dynamic_boolean_indices
+                                    and not where_is_dynamic
+                                    and ws_tok["value"].endswith(expected_replacement)
+                                )
+                            )
+                        )
+                        if not whitespace_matches:
+                            violations.append({
+                                "token": t,
+                                "ws_start": ws_tok["start"] if ws_tok else t["start"],
+                                "ws_end": t["start"],
+                                "replacement": expected_replacement
+                            })
+
+                        next_active_idx = next(
+                            (
+                                index
+                                for index in range(actual_idx + 1, clause_end)
+                                if tokens[index]["type"]
+                                not in {"WHITESPACE", "COMMENT"}
+                            ),
+                            None,
+                        )
+                        if (
+                            next_active_idx is not None
+                            and tokens[next_active_idx]["type"] == "PAREN"
+                            and tokens[next_active_idx]["value"] == "("
+                        ):
+                            whitespace_after = (
+                                tokens[next_active_idx - 1]
+                                if tokens[next_active_idx - 1]["type"]
+                                == "WHITESPACE"
+                                else None
+                            )
+                            if (
+                                whitespace_after is not None
+                                and whitespace_after["value"] != " "
+                            ):
+                                violations.append({
+                                    "token": tokens[next_active_idx],
+                                    "ws_start": whitespace_after["start"],
+                                    "ws_end": whitespace_after["end"],
+                                    "replacement": " ",
+                                })
+
+                        next_boolean = min(
+                            (index for index in boolean_indices if index > actual_idx),
+                            default=clause_end,
+                        )
+                        condition_tokens = tokens[actual_idx:next_boolean]
+                        if any(
+                            item["type"] == "COMMENT"
+                            or (
+                                item["type"] == "KEYWORD"
+                                and item["value"].upper() in {"SELECT", "WITH"}
+                            )
+                            for item in condition_tokens
+                        ) or actual_idx in dynamic_boolean_indices:
+                            continue
+                        condition_single = "".join(
+                            " " if item["type"] == "WHITESPACE" else item["value"]
+                            for item in condition_tokens
+                        ).strip()
+                        if (
+                            source_text_length(
+                                boolean_indent + condition_single,
+                                rule_config,
+                            )
+                            <= max_len
+                        ):
+                            last_active = next(
+                                (
+                                    index
+                                    for index in range(next_boolean - 1, actual_idx, -1)
+                                    if tokens[index]["type"]
+                                    not in {"WHITESPACE", "COMMENT"}
+                                ),
+                                None,
+                            )
+                            if last_active is not None:
+                                for index in range(actual_idx + 1, last_active):
+                                    item = tokens[index]
+                                    if (
+                                        item["type"] == "WHITESPACE"
+                                        and item["value"] != " "
+                                    ):
+                                        violations.append({
+                                            "token": item,
+                                            "ws_start": item["start"],
+                                            "ws_end": item["end"],
+                                            "replacement": " ",
+                                        })
+
+                    # Split a condition that is still wider than the source
+                    # line limit after the clause layout is established. In
+                    # embedded XML the encoded comparison operator can be
+                    # several columns wider than the decoded SQL token, so use
+                    # the source-container measurement here as well.
+                    condition_starts = [i + 1] + boolean_indices
+                    condition_ends = boolean_indices + [clause_end]
+                    for condition_start, condition_end in zip(
+                        condition_starts, condition_ends
+                    ):
+                        active_start = next(
+                            (
+                                index
+                                for index in range(condition_start, condition_end)
+                                if tokens[index]["type"]
+                                not in {"WHITESPACE", "COMMENT"}
+                            ),
+                            None,
+                        )
+                        if active_start is None:
+                            continue
+                        condition_single = "".join(
+                            " " if item["type"] == "WHITESPACE" else item["value"]
+                            for item in tokens[active_start:condition_end]
+                        ).strip()
+                        condition_indent = (
+                            expected_indent
+                            + (
+                                "    "
+                                if tokens[active_start]["start"]
+                                in mybatis_dynamic_offsets
+                                and not where_is_dynamic
+                                else ""
+                            )
+                        )
+                        if (
+                            source_text_length(
+                                condition_indent + condition_single,
+                                rule_config,
+                            )
+                            <= max_len
+                        ):
+                            continue
+                        comparison_index = next(
+                            (
+                                index
+                                for index in range(active_start, condition_end - 1)
+                                if tokens[index]["type"] == "OPERATOR"
+                                and tokens[index]["value"]
+                                in {"=", "!=", "<>", "<", ">", "<=", ">="}
+                                and index not in case_owned_indices
+                                and depths[index] == outer_depth
+                                and tokens[index + 1]["type"] == "WHITESPACE"
+                            ),
+                            None,
+                        )
+                        if comparison_index is None:
+                            continue
+                        whitespace = tokens[comparison_index + 1]
+                        comparison = tokens[comparison_index]
+                        comparison_line_start = content.rfind(
+                            "\n", 0, comparison["start"]
+                        ) + 1
+                        comparison_prefix = content[
+                            comparison_line_start:comparison["start"]
+                        ]
+                        comparison_indent = comparison_prefix[
+                            : len(comparison_prefix)
+                            - len(comparison_prefix.lstrip(" \t"))
+                        ]
+                        expected_operand_ws = (
+                            "\n" + comparison_indent + "    "
+                        )
+                        if whitespace["value"] != expected_operand_ws:
+                            violations.append({
+                                "token": tokens[comparison_index],
+                                "ws_start": whitespace["start"],
+                                "ws_end": whitespace["end"],
+                                "replacement": expected_operand_ws,
+                            })
+
+                    # A condition that is too long may split after its binary
+                    # operator. Keep the operand exactly one indentation level
+                    # beyond the line containing that operator instead of
+                    # preserving column-aligned legacy whitespace.
+                    for token_index in range(i + 1, clause_end - 1):
+                        operator = tokens[token_index]
+                        whitespace = tokens[token_index + 1]
+                        if (
+                            operator["type"] != "OPERATOR"
+                            or operator["value"]
+                            not in {"=", "!=", "<>", "<", ">", "<=", ">="}
+                            or token_index in case_owned_indices
+                            or whitespace["type"] != "WHITESPACE"
+                            or "\n" not in whitespace["value"]
+                        ):
+                            continue
+                        operator_line_start = content.rfind(
+                            "\n", 0, operator["start"]
+                        ) + 1
+                        operator_prefix = content[
+                            operator_line_start:operator["start"]
+                        ]
+                        operator_indent = operator_prefix[
+                            : len(operator_prefix)
+                            - len(operator_prefix.lstrip(" \t"))
+                        ]
+                        expected_operand_ws = (
+                            "\n" + operator_indent + "    "
+                        )
+                        if whitespace["value"] != expected_operand_ws:
+                            violations.append({
+                                "token": operator,
+                                "ws_start": whitespace["start"],
+                                "ws_end": whitespace["end"],
+                                "replacement": expected_operand_ws,
+                            })
                                 
         return violations
 
@@ -163,13 +697,20 @@ class WhereMultiRule(BaseRule):
         if not offending:
             return content
             
-        edits = []
+        edits = {}
         for item in offending:
-            edits.append((item["ws_start"], item["ws_end"], item["replacement"]))
+            edits[(item["ws_start"], item["ws_end"])] = item["replacement"]
             
-        edits.sort(key=lambda x: x[0], reverse=True)
+        ordered_edits = sorted(edits.items(), key=lambda item: item[0][0], reverse=True)
         chars = list(content)
-        for start, end, new_text in edits:
+        for (start, end), new_text in ordered_edits:
             chars[start:end] = list(new_text)
             
-        return "".join(chars)
+        fixed = "".join(chars)
+
+        # Multiline WHERE owns logical groups nested inside its conditions.
+        # Reuse the standalone group layout without enabling that older rule
+        # broadly for every embedded MyBatis fragment.
+        from mir.rules.sql.paren_multi import ParenMultiRule
+
+        return ParenMultiRule().fix(fixed, file_path, rule_config)

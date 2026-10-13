@@ -1,10 +1,10 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql
+from mir.rules.sql.sql_utils import get_token_depths, tokenize_sql
 
 class TrailingSemicolonRule(BaseRule):
     rule_id = "IR-trailing-semicolon"
-    description = "Enforce that the last SQL statement ends with a trailing semicolon, placed immediately after the statement text."
+    description = "Place semicolons immediately after statement text and require a final semicolon only in multi-statement files."
     category = "general"
     is_fixable = "yes"
     enabled_by_default = True
@@ -15,20 +15,18 @@ class TrailingSemicolonRule(BaseRule):
     
     examples = [
         {
-            "violating": "SELECT * FROM users",
-            "correct": "SELECT * FROM users;"
-        },
-        {
             "violating": "SELECT * FROM users\n    ;",
             "correct": "SELECT * FROM users;"
         }
     ]
     additional_validations = [
-        'SELECT * FROM users; -- comment at end'
+        'SELECT * FROM users; -- comment at end',
+        'SELECT * FROM users'
     ]
 
     def _find_violations(self, content: str) -> List[dict]:
         tokens = tokenize_sql(content)
+        depths = get_token_depths(tokens)
         violations = []
         
         # 1. Enforce trailing semicolon for the entire file
@@ -38,7 +36,11 @@ class TrailingSemicolonRule(BaseRule):
                 last_active = t
                 break
                 
-        if last_active and last_active["value"] != ";":
+        has_top_level_semicolon = any(
+            token["type"] == "SEMI" and depths[index] == 0
+            for index, token in enumerate(tokens)
+        )
+        if last_active and last_active["value"] != ";" and has_top_level_semicolon:
             violations.append({
                 "type": "missing",
                 "token": last_active,

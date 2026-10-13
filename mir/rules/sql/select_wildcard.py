@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class SelectWildcardRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-select-wildcard"
     description = "Avoid wildcard SELECT * in query headers and subqueries; explicitly list columns instead."
     category = "queries"

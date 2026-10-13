@@ -3,8 +3,10 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class CommaStyleRule(BaseRule):
+    commit_profile = True
+    embedded_safe = True
     rule_id = "IR-comma-style"
-    description = "Enforce trailing commas in multiline listings and forbid leading commas."
+    description = "Enforce trailing commas in multiline listings and forbid whitespace before commas."
     category = "general"
     is_fixable = "yes"
     enabled_by_default = True
@@ -16,6 +18,10 @@ class CommaStyleRule(BaseRule):
         {
             "violating": "SELECT id\n    , name\nFROM users;",
             "correct": "SELECT id,\n     name\nFROM users;"
+        },
+        {
+            "violating": "SELECT coalesce(item_count , 0) FROM users;",
+            "correct": "SELECT coalesce(item_count, 0) FROM users;"
         }
     ]
     additional_validations = [
@@ -67,6 +73,17 @@ class CommaStyleRule(BaseRule):
                             "end_offset": end_offset,
                             "replacement": replacement,
                             "message": f"Leading comma on line {t['line']} should be trailing."
+                        })
+                    elif between and all(
+                        token["type"] == "WHITESPACE" for token in between
+                    ):
+                        violations.append({
+                            "token": t,
+                            "line": t["line"],
+                            "start_offset": prev_active["end"],
+                            "end_offset": t["start"],
+                            "replacement": "",
+                            "message": f"Whitespace before comma on line {t['line']} should be removed.",
                         })
 
         return violations

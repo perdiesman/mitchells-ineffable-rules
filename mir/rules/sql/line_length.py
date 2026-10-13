@@ -1,6 +1,31 @@
+import re
+from bisect import bisect_right
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.indent import IndentRule
+from mir.rules.sql.sql_utils import tokenize_sql
+
+
+_BULK_INSERT_LINE = re.compile(
+    r"^\s*INSERT\s+INTO\b.+\bVALUES\s*\(", re.IGNORECASE
+)
+_OPAQUE_STRING_ASSIGNMENT = re.compile(
+    r"^\s*(?:SET\s+)?[A-Za-z_][\w.]*\s*=\s*'(?:''|[^'])*'[,;]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def bulk_insert_lines(content: str, threshold: int) -> set[int]:
+    """Return repeated one-row data statements exempt from layout expansion."""
+    if threshold <= 0:
+        return set()
+    candidates = {
+        line_number
+        for line_number, line in enumerate(content.splitlines(), start=1)
+        if _BULK_INSERT_LINE.match(line)
+    }
+    return candidates if len(candidates) >= threshold else set()
+
 
 def wrap_comment_line(line: str, max_length: int) -> List[str]:
     # Find leading indentation
@@ -51,15 +76,25 @@ def wrap_comment_line(line: str, max_length: int) -> List[str]:
     return wrapped_lines
 
 class LineLengthRule(BaseRule):
+    commit_profile = True
+    embedded_safe = True
     rule_id = "IR-line-length"
-    description = "Lines must not exceed the configured maximum length."
+    description = (
+        "Lines must not exceed the configured maximum length. Overlong "
+        "keyword-owned IN, VALUES, and TABLE lists wrap one item per line, "
+        "OPTIONS and LIMIT TO lists expand, and long constraints and indexes "
+        "wrap at schema-clause boundaries. "
+        "Large repeated one-row INSERT data dumps remain compact. Literal "
+        "data that cannot be wrapped without changing its value is reported "
+        "as nonfixable."
+    )
     category = "general"
     is_fixable = "sometimes"
-    exclude_recursive = True
     
     default_config = {
         "max_length": 120,
-        "base_indent": 0
+        "base_indent": 0,
+        "bulk_insert_threshold": 100,
     }
     config_options = {
         "max_length": {
@@ -70,7 +105,14 @@ class LineLengthRule(BaseRule):
             "default": 0,
             "description": "Base indentation offset (in spaces or leading space string) to subtract before checking line lengths.",
             "fallback": "IR-indent:base_indent"
-        }
+        },
+        "bulk_insert_threshold": {
+            "default": 100,
+            "description": (
+                "Number of repeated one-row INSERT statements that marks a "
+                "file as a bulk data dump; use 0 to disable the exemption."
+            ),
+        },
     }
     
     examples = [
@@ -82,6 +124,13 @@ class LineLengthRule(BaseRule):
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         max_length = rule_config.get("max_length", self.default_config["max_length"])
+        bulk_lines = bulk_insert_lines(
+            content,
+            rule_config.get(
+                "bulk_insert_threshold",
+                self.default_config["bulk_insert_threshold"],
+            ),
+        )
         base_indent_opt = self.get_config_value(
             rule_config,
             "base_indent",
@@ -102,19 +151,62 @@ class LineLengthRule(BaseRule):
             base_indent_spaces = base_indent_opt
         else:
             base_indent_spaces = 0
+        if "original_xml" in rule_config:
+            # MyBatis review uses the physical XML line width. The mapper's
+            # statement indent is real horizontal space, not a display-only
+            # wrapper that should be discounted.
+            base_indent_spaces = 0
             
+        line_starts = []
+        offset = 0
+        for physical_line in content.splitlines(keepends=True):
+            line_starts.append(offset)
+            offset += len(physical_line)
+        if not line_starts and content:
+            line_starts.append(0)
+
+        opaque_lines = set()
+        dollar_quote_lines = set()
+        for token in tokenize_sql(content):
+            if token["type"] != "STRING":
+                continue
+            start_line = bisect_right(line_starts, token["start"]) - 1
+            end_line = bisect_right(
+                line_starts,
+                max(token["start"], token["end"] - 1),
+            ) - 1
+            if token["value"].startswith("$"):
+                if not rule_config.get("_recursive"):
+                    dollar_quote_lines.update(
+                        range(start_line + 1, end_line + 2)
+                    )
+                continue
+            if "\n" in token["value"]:
+                # Physical lines wholly inside a conventional SQL string are
+                # data, including dynamic SQL text, and cannot be reformatted
+                # without changing the literal value.
+                opaque_lines.update(range(start_line + 1, end_line + 2))
+            elif len(token["value"]) > max_length:
+                opaque_lines.add(start_line + 1)
+
         violations = []
         lines = content.splitlines()
         for idx, line in enumerate(lines, start=1):
+            if idx in bulk_lines or idx in dollar_quote_lines:
+                continue
             effective_len = len(line) - base_indent_spaces
             if effective_len > max_length:
+                is_opaque = (
+                    idx in opaque_lines
+                    or _OPAQUE_STRING_ASSIGNMENT.match(line) is not None
+                )
                 violations.append(
                     Violation(
                         rule_id=self.rule_id,
                         line_number=idx,
                         message=f"Line exceeds maximum length of {max_length} characters (actual effective length: {effective_len}, total length: {len(line)}).",
                         offending_lines=[line],
-                        is_fixable=True
+                        is_fixable=not is_opaque
                     )
                 )
                 
@@ -122,45 +214,474 @@ class LineLengthRule(BaseRule):
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
         max_length = rule_config.get("max_length", self.default_config["max_length"])
+        if bulk_insert_lines(
+            content,
+            rule_config.get(
+                "bulk_insert_threshold",
+                self.default_config["bulk_insert_threshold"],
+            ),
+        ):
+            return content
+
+        # Collapse a simple one-argument call when its surrounding expression
+        # fits after compaction. This also repairs calls expanded during an
+        # earlier pass before their enclosing SELECT layout had stabilized.
+        from mir.rules.sql.sql_utils import find_matching_paren
+        from mir.rules.sql.table_function_indent import table_function_parens
+
+        # Constraint declarations are schema clauses, not function calls.
+        # Keep the constraint name on its owning line and wrap its FOREIGN KEY
+        # and REFERENCES details at one continuation level.
+        constraint_tokens = tokenize_sql(content)
+        constraint_edits = []
+        constraint_lines = content.splitlines()
+        active_by_line = {}
+        for token_index, token in enumerate(constraint_tokens):
+            if token["type"] not in ("WHITESPACE", "COMMENT"):
+                active_by_line.setdefault(token["line"], []).append(token_index)
+        for line_number, indices in active_by_line.items():
+            if (
+                line_number > len(constraint_lines)
+                or len(constraint_lines[line_number - 1]) <= max_length
+            ):
+                continue
+            values = [constraint_tokens[index]["value"].upper() for index in indices]
+            physical_line = constraint_lines[line_number - 1]
+            base_indent = physical_line[:
+                len(physical_line) - len(physical_line.lstrip(" \t"))
+            ]
+            index_position = next(
+                (
+                    position
+                    for position, value in enumerate(values)
+                    if value == "INDEX"
+                ),
+                None,
+            )
+            on_position = next(
+                (
+                    position
+                    for position, value in enumerate(values)
+                    if value == "ON"
+                ),
+                None,
+            )
+            if (
+                values
+                and values[0] == "CREATE"
+                and index_position is not None
+                and on_position is not None
+                and on_position > index_position
+            ):
+                token_index = indices[on_position]
+                previous = constraint_tokens[token_index - 1]
+                if (
+                    previous["type"] == "WHITESPACE"
+                    and "\n" not in previous["value"]
+                ):
+                    constraint_edits.append(
+                        (
+                            previous["start"],
+                            previous["end"],
+                            "\n" + base_indent + "    ",
+                        )
+                    )
+            if "CONSTRAINT" not in values:
+                continue
+            constraint_position = values.index("CONSTRAINT")
+            detail_positions = [
+                position
+                for position in range(constraint_position + 1, len(indices))
+                if values[position]
+                in {
+                    "CHECK", "EXCLUDE", "FOREIGN", "PRIMARY",
+                    "REFERENCES", "UNIQUE",
+                }
+            ]
+            if not detail_positions:
+                continue
+            detail_indent = base_indent + "    "
+            for position in detail_positions:
+                token_index = indices[position]
+                previous = (
+                    constraint_tokens[token_index - 1]
+                    if token_index > 0
+                    else None
+                )
+                if (
+                    previous is not None
+                    and previous["type"] == "WHITESPACE"
+                    and "\n" not in previous["value"]
+                ):
+                    constraint_edits.append(
+                        (
+                            previous["start"],
+                            previous["end"],
+                            "\n" + detail_indent,
+                        )
+                    )
+        if constraint_edits:
+            chars = list(content)
+            for start, end, replacement in sorted(
+                set(constraint_edits), reverse=True
+            ):
+                chars[start:end] = list(replacement)
+            content = "".join(chars)
+
+        compact_tokens = tokenize_sql(content)
+        table_function_openings = table_function_parens(compact_tokens)
+        compact_edits = []
+        for index, token in enumerate(compact_tokens):
+            if token["type"] not in ("IDENTIFIER", "KEYWORD"):
+                continue
+            if (
+                token["type"] == "KEYWORD"
+                and token["value"].upper()
+                not in {
+                    "ANY", "CAST", "COALESCE", "EXTRACT", "FILTER",
+                    "GREATEST", "LEAST", "LEFT", "NULLIF", "RIGHT",
+                    "ROW_NUMBER", "SOME",
+                }
+            ):
+                continue
+            open_index = next(
+                (
+                    candidate
+                    for candidate in range(index + 1, len(compact_tokens))
+                    if compact_tokens[candidate]["type"]
+                    not in ("WHITESPACE", "COMMENT")
+                ),
+                None,
+            )
+            if (
+                open_index is None
+                or open_index in table_function_openings
+                or compact_tokens[open_index]["type"] != "PAREN"
+                or compact_tokens[open_index]["value"] != "("
+            ):
+                continue
+            close_index = find_matching_paren(compact_tokens, open_index)
+            if close_index is None:
+                continue
+            open_token = compact_tokens[open_index]
+            close_token = compact_tokens[close_index]
+            call_text = content[open_token["start"]:close_token["end"]]
+            if "\n" not in call_text:
+                continue
+            inner_tokens = compact_tokens[open_index + 1:close_index]
+            active_inner = [
+                item
+                for item in inner_tokens
+                if item["type"] not in ("WHITESPACE", "COMMENT")
+            ]
+            if (
+                token["type"] == "KEYWORD"
+                and token["value"].upper() == "IN"
+                and active_inner
+                and active_inner[0]["type"] == "KEYWORD"
+                and active_inner[0]["value"].upper() == "SELECT"
+            ):
+                # IN (SELECT ...) is a predicate subquery, not a function
+                # call. Preserve its deliberate multiline layout, especially
+                # when a MyBatis tag supplies part of the inner predicate.
+                continue
+            if (
+                not active_inner
+                or any(item["type"] == "COMMENT" for item in inner_tokens)
+                or any(item["type"] in ("COMMA", "PAREN") for item in active_inner)
+            ):
+                continue
+            compact_call = "(" + "".join(
+                " " if item["type"] == "WHITESPACE" else item["value"]
+                for item in inner_tokens
+            ).strip() + ")"
+            line_start = content.rfind("\n", 0, token["start"]) + 1
+            line_end = content.find("\n", close_token["end"])
+            if line_end == -1:
+                line_end = len(content)
+            candidate_line = (
+                content[line_start:open_token["start"]]
+                + compact_call
+                + content[close_token["end"]:line_end]
+            )
+            if "\n" not in candidate_line and len(candidate_line) <= max_length:
+                compact_edits.append(
+                    (open_token["start"], close_token["end"], compact_call)
+                )
+        if compact_edits:
+            chars = list(content)
+            for start, end, replacement in sorted(compact_edits, reverse=True):
+                chars[start:end] = list(replacement)
+            content = "".join(chars)
+
+        # Prefer a semantic range boundary over splitting the function calls
+        # used as BETWEEN bounds. Only take the break when both resulting
+        # physical lines fit the configured limit.
+        from mir.rules.sql.sql_utils import (
+            find_between_delimiter_indices,
+            get_token_depths,
+        )
+        range_tokens = tokenize_sql(content)
+        range_depths = get_token_depths(range_tokens)
+        range_edits = []
+        content_lines = content.splitlines()
+        delimiter_indices = sorted({
+            index
+            for depth in set(range_depths)
+            for index in find_between_delimiter_indices(
+                range_tokens, range_depths, depth
+            )
+        })
+        for delimiter_index in delimiter_indices:
+            delimiter = range_tokens[delimiter_index]
+            line_index = delimiter["line"] - 1
+            if line_index >= len(content_lines):
+                continue
+            line = content_lines[line_index]
+            if len(line) <= max_length:
+                continue
+            whitespace = (
+                range_tokens[delimiter_index - 1]
+                if delimiter_index > 0
+                and range_tokens[delimiter_index - 1]["type"] == "WHITESPACE"
+                else None
+            )
+            if whitespace is None or "\n" in whitespace["value"]:
+                continue
+            line_start = content.rfind("\n", 0, delimiter["start"]) + 1
+            line_end = content.find("\n", delimiter["start"])
+            if line_end == -1:
+                line_end = len(content)
+            indent = line[: len(line) - len(line.lstrip())]
+            first_line = content[line_start:whitespace["start"]].rstrip()
+            second_line = indent + "    " + content[delimiter["start"]:line_end].lstrip()
+            if len(first_line) <= max_length and len(second_line) <= max_length:
+                range_edits.append(
+                    (
+                        whitespace["start"],
+                        whitespace["end"],
+                        "\n" + indent + "    ",
+                    )
+                )
+        if range_edits:
+            chars = list(content)
+            for start, end, replacement in sorted(range_edits, reverse=True):
+                chars[start:end] = list(replacement)
+            content = "".join(chars)
+
+        # Expand long comma-separated SQL lists whose parentheses have clear
+        # keyword ownership. This covers IN predicates, VALUES rows, and
+        # RETURNS TABLE declarations without guessing at arbitrary grouping
+        # parentheses or changing any list item.
+        list_tokens = tokenize_sql(content)
+        list_edits = []
+        for open_index, opening in enumerate(list_tokens):
+            if opening["type"] != "PAREN" or opening["value"] != "(":
+                continue
+            close_index = find_matching_paren(list_tokens, open_index)
+            if close_index is None or list_tokens[close_index]["line"] != opening["line"]:
+                continue
+            previous_index = next(
+                (
+                    index
+                    for index in range(open_index - 1, -1, -1)
+                    if list_tokens[index]["type"] not in ("WHITESPACE", "COMMENT")
+                ),
+                None,
+            )
+            if previous_index is None:
+                continue
+            owner = list_tokens[previous_index]
+            preceding_active = [
+                list_tokens[index]
+                for index in range(max(0, previous_index - 7), previous_index)
+                if list_tokens[index]["type"] not in ("WHITESPACE", "COMMENT")
+            ]
+            is_insert_target = (
+                owner["type"] in ("IDENTIFIER", "KEYWORD")
+                and any(
+                    item["type"] == "KEYWORD"
+                    and item["value"].upper() == "INTO"
+                    for item in preceding_active
+                )
+            )
+            is_limit_target = (
+                owner["type"] == "KEYWORD"
+                and owner["value"].upper() == "TO"
+                and any(
+                    item["type"] == "KEYWORD"
+                    and item["value"].upper() == "LIMIT"
+                    for item in preceding_active
+                )
+            )
+            if not is_insert_target and (
+                owner["type"] != "KEYWORD"
+                or owner["value"].upper()
+                not in {"IN", "OPTIONS", "TABLE", "VALUES"}
+            ) and not is_limit_target:
+                continue
+            active_inner = [
+                item
+                for item in list_tokens[open_index + 1:close_index]
+                if item["type"] not in ("WHITESPACE", "COMMENT")
+            ]
+            if (
+                not active_inner
+                or active_inner[0]["type"] == "KEYWORD"
+                and active_inner[0]["value"].upper() in {"SELECT", "WITH"}
+                or any(
+                    item["type"] == "COMMENT"
+                    for item in list_tokens[open_index + 1:close_index]
+                )
+            ):
+                continue
+            depth = 0
+            commas = []
+            for index in range(open_index + 1, close_index):
+                item = list_tokens[index]
+                if item["type"] == "PAREN":
+                    depth += 1 if item["value"] == "(" else -1
+                elif item["type"] == "COMMA" and depth == 0:
+                    commas.append(index)
+            if not commas:
+                continue
+            line_start = content.rfind("\n", 0, opening["start"]) + 1
+            line_end = content.find("\n", list_tokens[close_index]["end"])
+            if line_end == -1:
+                line_end = len(content)
+            physical_line = content[line_start:line_end]
+            if len(physical_line) <= max_length:
+                continue
+            indent = physical_line[: len(physical_line) - len(physical_line.lstrip())]
+            item_indent = indent + "    "
+
+            def replace_adjacent_whitespace(token_index, replacement, *, before):
+                adjacent = token_index - 1 if before else token_index + 1
+                if (
+                    0 <= adjacent < len(list_tokens)
+                    and list_tokens[adjacent]["type"] == "WHITESPACE"
+                ):
+                    whitespace = list_tokens[adjacent]
+                    start, end = whitespace["start"], whitespace["end"]
+                else:
+                    token = list_tokens[token_index]
+                    start = end = token["start"] if before else token["end"]
+                if content[start:end] != replacement:
+                    list_edits.append((start, end, replacement))
+
+            replace_adjacent_whitespace(
+                open_index, "\n" + item_indent, before=False
+            )
+            for comma_index in commas:
+                replace_adjacent_whitespace(
+                    comma_index, "\n" + item_indent, before=False
+                )
+            replace_adjacent_whitespace(
+                close_index, "\n" + indent, before=True
+            )
+        if list_edits:
+            chars = list(content)
+            for start, end, replacement in sorted(
+                set(list_edits), reverse=True
+            ):
+                chars[start:end] = list(replacement)
+            content = "".join(chars)
         
         # 1. Run function call splitting on SQL code lines
-        from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren
         try:
             tokens = tokenize_sql(content)
             lines = content.splitlines()
+            token_depths = get_token_depths(tokens)
+            case_arm_lines = set()
+            active_by_line = {}
+            for token_index, token in enumerate(tokens):
+                if token["type"] not in ("WHITESPACE", "COMMENT"):
+                    active_by_line.setdefault(token["line"], []).append(token_index)
+            for line_number, indices in active_by_line.items():
+                when_depths = {
+                    token_depths[index]
+                    for index in indices
+                    if tokens[index]["type"] == "KEYWORD"
+                    and tokens[index]["value"].upper() == "WHEN"
+                }
+                if any(
+                    tokens[index]["type"] == "KEYWORD"
+                    and tokens[index]["value"].upper() == "THEN"
+                    and token_depths[index] in when_depths
+                    for index in indices
+                ):
+                    case_arm_lines.add(line_number)
+
+            next_active_indices = [None] * len(tokens)
+            next_active_index = None
+            for token_index in range(len(tokens) - 1, -1, -1):
+                next_active_indices[token_index] = next_active_index
+                if tokens[token_index]["type"] not in ("WHITESPACE", "COMMENT"):
+                    next_active_index = token_index
+            paren_pairs = {}
+            paren_stack = []
+            for token_index, token in enumerate(tokens):
+                if token["type"] != "PAREN":
+                    continue
+                if token["value"] == "(":
+                    paren_stack.append(token_index)
+                elif token["value"] == ")" and paren_stack:
+                    paren_pairs[paren_stack.pop()] = token_index
             
             # Find all function calls
             all_calls = []
             for i, tok in enumerate(tokens):
                 if tok["type"] in ("IDENTIFIER", "KEYWORD"):
-                    next_act_idx = None
-                    for j in range(i + 1, len(tokens)):
-                        if tokens[j]["type"] not in ("WHITESPACE", "COMMENT"):
-                            next_act_idx = j
-                            break
+                    if tok["line"] in case_arm_lines:
+                        continue
+                    if (
+                        tok["type"] == "KEYWORD"
+                        and tok["value"].upper()
+                        not in {
+                            "ANY", "CAST", "COALESCE", "EXTRACT", "FILTER",
+                            "GREATEST", "LEAST", "LEFT", "NULLIF", "RIGHT",
+                            "ROW_NUMBER", "SOME",
+                        }
+                    ):
+                        continue
+                    next_act_idx = next_active_indices[i]
                     if next_act_idx is not None and tokens[next_act_idx]["type"] == "PAREN" and tokens[next_act_idx]["value"] == "(":
                         open_idx = next_act_idx
-                        close_idx = find_matching_paren(tokens, open_idx)
+                        close_idx = paren_pairs.get(open_idx)
                         if close_idx is not None:
                             all_calls.append({
                                 "start": tokens[open_idx]["start"],
                                 "end": tokens[close_idx]["end"],
+                                "name_idx": i,
                                 "open_idx": open_idx,
                                 "close_idx": close_idx,
                                 "name_token": tok
                             })
                             
-            # Filter out nested calls
+            # Prefer the outer call only when it begins on the same overlong
+            # physical line. A short wrapper on an earlier line must not hide
+            # a nested call whose own argument line needs expansion.
             outer_calls = []
-            for i, call_a in enumerate(all_calls):
-                is_nested = False
-                for j, call_b in enumerate(all_calls):
-                    if i != j:
-                        if call_b["start"] <= call_a["start"] and call_a["end"] <= call_b["end"]:
-                            is_nested = True
-                            break
+            call_stack = []
+            for call in all_calls:
+                while call_stack and call["start"] >= call_stack[-1]["end"]:
+                    call_stack.pop()
+                is_nested = any(
+                    len(lines[parent["name_token"]["line"] - 1]) > max_length
+                    for parent in call_stack
+                    if parent["name_token"]["line"] <= len(lines)
+                )
                 if not is_nested:
-                    outer_calls.append(call_a)
+                    outer_calls.append(call)
+                call_stack.append(call)
+
+            last_call_start_by_line = {}
+            for call in all_calls:
+                line_number = call["name_token"]["line"]
+                last_call_start_by_line[line_number] = max(
+                    last_call_start_by_line.get(line_number, -1),
+                    call["start"],
+                )
                     
             # Generate edits for long lines
             edits = []
@@ -175,6 +696,56 @@ class LineLengthRule(BaseRule):
                 line_idx = call["name_token"]["line"] - 1
                 line = lines[line_idx] if line_idx < len(lines) else ""
                 if len(line) > max_length:
+                    earlier_line_tokens = [
+                        tokens[index]
+                        for index in active_by_line.get(
+                            call["name_token"]["line"], []
+                        )
+                        if tokens[index]["start"] < call["name_token"]["start"]
+                    ]
+                    earlier_keywords = {
+                        item["value"].upper()
+                        for item in earlier_line_tokens
+                        if item["type"] == "KEYWORD"
+                    }
+                    call_depth = token_depths[call["name_idx"]]
+                    select_owns_line = any(
+                        tokens[index]["type"] == "KEYWORD"
+                        and tokens[index]["value"].upper() == "SELECT"
+                        and token_depths[index] == call_depth
+                        for index in active_by_line.get(
+                            call["name_token"]["line"], []
+                        )
+                        if index < call["name_idx"]
+                    ) and any(
+                        tokens[index]["type"] == "COMMA"
+                        and token_depths[index] == call_depth
+                        for index in active_by_line.get(
+                            call["name_token"]["line"], []
+                        )
+                        if index > call["close_idx"]
+                    )
+                    if select_owns_line:
+                        # The SELECT-column layout rule owns this wrapping
+                        # opportunity. Expanding a scalar call first can make
+                        # column compaction and line-length expansion cycle.
+                        continue
+                    if (
+                        "JOIN" in earlier_keywords
+                        and earlier_keywords.intersection({"AND", "OR"})
+                    ):
+                        # JOIN layout owns the earlier boolean boundary. Let
+                        # it move the predicate to a continuation before
+                        # expanding a function that will fit on that line.
+                        continue
+                    if last_call_start_by_line.get(
+                        call["name_token"]["line"], -1
+                    ) > call["end"]:
+                        # Prefer the last call on a physical line. For
+                        # count(*) FILTER (...), expanding count(*) only
+                        # makes noise while the FILTER predicate remains the
+                        # actual wrapping opportunity.
+                        continue
                     # Parse arguments
                     args = []
                     current_arg = []

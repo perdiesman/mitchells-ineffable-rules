@@ -1,24 +1,40 @@
 # IR-from-single
 
-Single FROM entry should be on the same line as the FROM keyword.
+Single FROM entries should be on the same line as FROM; DELETE, FROM, and its target should share one line.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
+- **Commit Profile**: Yes
+- **MyBatis Safe**: Yes
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 
-#### ❌ Violating Example
+#### ❌ Violating Example #1
 ```sql
 SELECT id
 FROM
     users;
 ```
 
-####  Correct Example
+####  Correct Example #1
 ```sql
 SELECT id
 FROM users;
+```
+
+#### ❌ Violating Example #2
+```sql
+DELETE
+FROM users
+WHERE user_id = :user_id;
+```
+
+####  Correct Example #2
+```sql
+DELETE FROM users
+WHERE user_id = :user_id;
 ```
 
 #### Additional Validations

@@ -3,6 +3,10 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
 
 class FromMultiRule(BaseRule):
+    commit_profile = True
+    embedded_safe = True
+    embedded_dynamic_indent_safe = True
+    trellis_safe = True
     rule_id = "IR-from-multi"
     description = "Multi-table or JOINed FROM entries should be formatted with one entry per line, indented at 4 spaces."
     category = "queries"
@@ -20,17 +24,27 @@ class FromMultiRule(BaseRule):
         {
             "violating": "SELECT * FROM t1 LEFT JOIN t2 ON t1.id = t2.id;",
             "correct": "SELECT * FROM\n    t1\n    LEFT JOIN t2 ON t1.id = t2.id;"
+        },
+        {
+            "violating": "SELECT * FROM first_table FULL\n    OUTER JOIN second_table ON first_table.item_id = second_table.item_id;",
+            "correct": "SELECT * FROM\n    first_table\n    FULL OUTER JOIN second_table ON first_table.item_id = second_table.item_id;"
         }
     ]
     additional_validations = [
         'SELECT * FROM t1;'
     ]
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _find_violations(
+        self, content: str, rule_config: Dict[str, Any] | None = None
+    ) -> List[dict]:
+        rule_config = rule_config or {}
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
         violations = []
         n = len(tokens)
+        mybatis_boundary_offsets = sorted(
+            rule_config.get("mybatis_boundary_offsets", set())
+        )
         
         for i, tok in enumerate(tokens):
             if tok["type"] == "KEYWORD" and tok["value"].upper() == "FROM":
@@ -67,15 +81,29 @@ class FromMultiRule(BaseRule):
                 
                 # Find FROM range
                 clause_end = n
+                next_boundary = next(
+                    (
+                        offset
+                        for offset in mybatis_boundary_offsets
+                        if offset > tok["end"]
+                    ),
+                    None,
+                )
                 for idx in range(i + 1, n):
                     t = tokens[idx]
                     d = depths[idx]
+                    if next_boundary is not None and t["end"] > next_boundary:
+                        clause_end = idx
+                        break
                     if d < outer_depth:
                         clause_end = idx
                         break
                     if d == outer_depth:
                         if t["type"] == "KEYWORD" and t["value"].upper() in (
-                            "WHERE", "GROUP", "ORDER", "BY", "HAVING", "LIMIT", "OFFSET", "UNION", "INTERSECT", "EXCEPT"
+                            "WHERE", "GROUP", "ORDER", "BY", "HAVING",
+                            "LIMIT", "OFFSET", "UNION", "INTERSECT",
+                            "EXCEPT", "SELECT", "INSERT", "UPDATE",
+                            "DELETE", "SET", "VALUES", "RETURNING",
                         ):
                             clause_end = idx
                             break
@@ -85,14 +113,18 @@ class FromMultiRule(BaseRule):
                             
                 clause_tokens = tokens[i + 1:clause_end]
                 clause_depths = depths[i + 1:clause_end]
-                
                 has_join = False
                 has_comma = False
                 for t, d in zip(clause_tokens, clause_depths):
                     if d == outer_depth:
                         if t["type"] == "KEYWORD" and t["value"].upper() == "JOIN":
                             has_join = True
-                        elif t["type"] == "COMMA":
+                        elif (
+                            t["type"] == "COMMA"
+                            and t["start"] not in rule_config.get(
+                                "mybatis_dynamic_offsets", set()
+                            )
+                        ):
                             has_comma = True
                             
                 if has_join or has_comma:
@@ -123,17 +155,63 @@ class FromMultiRule(BaseRule):
                         for j_idx, (t, d) in enumerate(zip(clause_tokens, clause_depths)):
                             if d == outer_depth and t["type"] == "KEYWORD":
                                 val_upper = t["value"].upper()
-                                if val_upper in ("JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "NATURAL"):
+                                if val_upper in ("JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "FULL", "CROSS", "NATURAL"):
                                     start_ws = i + 1 + j_idx
-                                    
-                                    if val_upper == "JOIN":
-                                        prev_active = None
-                                        for prev_idx in range(start_ws - 1, -1, -1):
-                                            if tokens[prev_idx]["type"] != "WHITESPACE" and tokens[prev_idx]["type"] != "COMMENT":
-                                                prev_active = tokens[prev_idx]
-                                                break
-                                        if prev_active and prev_active["type"] == "KEYWORD" and prev_active["value"].upper() in ("LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "NATURAL"):
+
+                                    prev_active = None
+                                    prev_active_idx = None
+                                    for prev_idx in range(start_ws - 1, -1, -1):
+                                        if tokens[prev_idx]["type"] not in ("WHITESPACE", "COMMENT"):
+                                            prev_active = tokens[prev_idx]
+                                            prev_active_idx = prev_idx
+                                            break
+                                    prev_upper = (
+                                        prev_active["value"].upper()
+                                        if prev_active and prev_active["type"] == "KEYWORD"
+                                        else None
+                                    )
+                                    # A compound join type is one relation
+                                    # entry. Only its first keyword owns the
+                                    # line break: NATURAL FULL OUTER JOIN,
+                                    # FULL OUTER JOIN, LEFT JOIN, and so on.
+                                    is_compound_continuation = val_upper == "JOIN" and prev_upper in (
+                                        "LEFT", "RIGHT", "INNER", "OUTER", "FULL", "CROSS", "NATURAL"
+                                    )
+                                    is_compound_continuation = is_compound_continuation or (
+                                        val_upper == "OUTER" and prev_upper in ("LEFT", "RIGHT", "FULL")
+                                    )
+                                    is_compound_continuation = is_compound_continuation or (
+                                        val_upper in ("LEFT", "RIGHT", "INNER", "FULL")
+                                        and prev_upper == "NATURAL"
+                                    )
+                                    if is_compound_continuation:
+                                        if t["start"] in rule_config.get(
+                                            "mybatis_dynamic_offsets", set()
+                                        ):
+                                            # The modifier may be emitted by a
+                                            # dynamic XML tag. Preserve the
+                                            # source boundary before JOIN so
+                                            # the tag remains a distinct
+                                            # programming-language step.
                                             continue
+                                        if any(
+                                            token["type"] == "COMMENT"
+                                            for token in tokens[prev_active_idx + 1:start_ws]
+                                        ):
+                                            continue
+                                        ws_tok = (
+                                            tokens[start_ws - 1]
+                                            if tokens[start_ws - 1]["type"] == "WHITESPACE"
+                                            else None
+                                        )
+                                        if not ws_tok or ws_tok["value"] != " ":
+                                            violations.append({
+                                                "token": t,
+                                                "ws_start": ws_tok["start"] if ws_tok else t["start"],
+                                                "ws_end": t["start"],
+                                                "replacement": " ",
+                                            })
+                                        continue
                                             
                                     ws_tok = None
                                     if start_ws - 1 >= 0 and tokens[start_ws - 1]["type"] == "WHITESPACE":
@@ -171,12 +249,22 @@ class FromMultiRule(BaseRule):
                                             "replacement": expected_replacement
                                         })
                                         
+        if mybatis_boundary_offsets:
+            violations = [
+                item
+                for item in violations
+                if not any(
+                    item["ws_start"] <= boundary <= item["ws_end"]
+                    for boundary in mybatis_boundary_offsets
+                )
+            ]
+
         return violations
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         
         for item in offending:
             tok = item["token"]
@@ -192,7 +280,7 @@ class FromMultiRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         if not offending:
             return content
             

@@ -5,6 +5,9 @@ Format and wrap long RAISE statements onto multiple lines.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Routine & Procedure Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `max_length` (Default: `120`): Maximum line length before wrapping RAISE statements.
@@ -17,8 +20,7 @@ RAISE unique_violation USING MESSAGE = 'id: ' || NEW.id::text || ' already exist
 ####  Correct Example
 ```sql
 RAISE unique_violation
-    USING MESSAGE = 'id: '
-        || NEW.id::text
+    USING MESSAGE = 'id: ' || NEW.id::text
         || ' already exists in my_schema.my_very_long_table_name_to_exceed_the_line_length_limit';
 ```
 

@@ -1,51 +1,24 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -u
 
-# git pre-commit hook for Mitchell's Ineffable Rules (IR) Linter
-# To install:
-#   cp pre-commit-hook.sh .git/hooks/pre-commit
-#   chmod +x .git/hooks/pre-commit
+# Portable Git pre-commit hook for Mitchell's Ineffable Rules.
 
-IMAGE_NAME="mitchells-ineffable-rules:latest"
+REPO_ROOT=$(git rev-parse --show-toplevel) || exit 1
+cd "$REPO_ROOT" || exit 1
 
-# 1. Get all staged files that are added (A), copied (C), or modified (M)
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
-
-if [ -z "$STAGED_FILES" ]; then
-    exit 0
+# MIR itself tracks development time in README. This block is skipped when
+# the portable hook is copied into a consumer repository.
+if [[ -f scripts/update_readme.py ]] && grep -q '^name = "mir-linter"' pyproject.toml 2>/dev/null; then
+    python3 scripts/update_readme.py || exit 1
+    git add README.md || exit 1
 fi
 
-# 2. Filter for supported file extensions (.sql, .java, .xml)
-TARGET_FILES=()
-for file in $STAGED_FILES; do
-    if [[ "$file" =~ \.(sql|java|jav|xml)$ ]]; then
-        TARGET_FILES+=("$file")
-    fi
-done
-
-# If no target files are staged, exit early
-if [ ${#TARGET_FILES[@]} -eq 0 ]; then
-    exit 0
-fi
-
-echo "Running Mitchell's Ineffable Rules Linter on staged files..."
-
-# Check if docker image exists. If not, prompt user or build it.
-if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
-    echo "Warning: Docker image '$IMAGE_NAME' not found."
-    echo "Please build it first: docker build -t $IMAGE_NAME ."
+echo "Formatting staged SQL and XML changes with MIR..."
+if [[ -f mir/main.py ]] && grep -q '^name = "mir-linter"' pyproject.toml 2>/dev/null; then
+    python3 -m mir.main --staged --fix
+elif command -v mir >/dev/null 2>&1; then
+    mir --staged --fix
+else
+    echo "MIR is not installed. Install mir-linter or edit pre-commit-hook.sh with the project command." >&2
     exit 1
 fi
-
-# 3. Run the linter via Docker
-# We mount the current working directory to /workspace inside the container.
-# All paths passed from git diff are relative to the repository root.
-docker run --rm -v "$(pwd):/workspace" "$IMAGE_NAME" "${TARGET_FILES[@]}"
-EXIT_CODE=$?
-
-if [ $EXIT_CODE -ne 0 ]; then
-    echo "Linter violations found. Commit aborted."
-    exit 1
-fi
-
-echo "Linter checks passed!"
-exit 0

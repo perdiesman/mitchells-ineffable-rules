@@ -1,6 +1,6 @@
-import re
 from typing import List, Dict, Any, Set
 from mir.engine.rule_interface import BaseRule, Violation
+from mir.rules.sql.sql_utils import tokenize_sql
 
 EXCLUDED_WORDS = {
     "in", "values", "exists", "join", "using", "on",
@@ -13,10 +13,16 @@ EXCLUDED_WORDS = {
     "geometry", "numeric", "varchar", "integer", "int", "bigint",
     "smallint", "text", "boolean", "bool", "decimal", "json", "jsonb",
     "uuid", "date", "timestamp", "timestamptz", "time", "timetz", "real",
-    "char", "character", "double", "varying"
+    "char", "character", "double", "varying", "filter", "conflict", "lateral",
+    "gist"
 }
 
+KEYWORD_FUNCTIONS = {"COALESCE", "LEFT", "RIGHT"}
+
 class FunctionCaseRule(BaseRule):
+    commit_profile = True
+    embedded_safe = True
+    trellis_safe = True
     rule_id = "IR-function-case"
     description = "Function names should be the same case (default lowercase)."
     category = "routines"
@@ -71,88 +77,24 @@ class FunctionCaseRule(BaseRule):
         return default_ex
 
     def _find_function_calls(self, content: str, exclusions: Set[str]) -> List[tuple]:
-        n = len(content)
-        i = 0
-        in_string = False
-        string_char = None
-        in_single_comment = False
-        in_multi_comment = False
-        
-        line_number = 1
         matches = []
-        
-        while i < n:
-            c = content[i]
-            
-            if c == '\n':
-                line_number += 1
-                
-            if in_string:
-                if c == string_char:
-                    if i + 1 < n and content[i + 1] == string_char:
-                        i += 2
-                        continue
-                    in_string = False
-                i += 1
+        active = [
+            token for token in tokenize_sql(content)
+            if token["type"] not in {"WHITESPACE", "COMMENT"}
+        ]
+        for index, token in enumerate(active[:-1]):
+            if token["type"] not in {"IDENTIFIER", "KEYWORD"}:
                 continue
-                
-            if in_single_comment:
-                if c == '\n':
-                    in_single_comment = False
-                i += 1
+            if token["type"] == "KEYWORD" and token["value"].upper() not in KEYWORD_FUNCTIONS:
                 continue
-                
-            if in_multi_comment:
-                if c == '*' and i + 1 < n and content[i + 1] == '/':
-                    in_multi_comment = False
-                    i += 2
-                    continue
-                i += 1
+            word = token["value"]
+            if word.startswith('"') or word.lower() in exclusions:
                 continue
-                
-            if c in ("'", '"'):
-                in_string = True
-                string_char = c
-                i += 1
+            if active[index + 1]["type"] != "PAREN" or active[index + 1]["value"] != "(":
                 continue
-                
-            if c == '-' and i + 1 < n and content[i + 1] == '-':
-                in_single_comment = True
-                i += 2
+            if index and active[index - 1]["type"] == "CAST":
                 continue
-                
-            if c == '/' and i + 1 < n and content[i + 1] == '*':
-                in_multi_comment = True
-                i += 2
-                continue
-                
-            if c.isalpha() or c == '_':
-                w_start = i
-                w_line = line_number
-                while i < n and (content[i].isalnum() or content[i] == '_'):
-                    i += 1
-                word = content[w_start:i]
-                
-                peek_idx = i
-                while peek_idx < n and content[peek_idx].isspace():
-                    if content[peek_idx] == '\n':
-                        line_number += 1
-                    peek_idx += 1
-                    
-                if peek_idx < n and content[peek_idx] == '(':
-                    is_cast = False
-                    prev_idx = w_start - 1
-                    while prev_idx >= 0 and content[prev_idx].isspace():
-                        prev_idx -= 1
-                    if prev_idx >= 1 and content[prev_idx-1:prev_idx+1] == "::":
-                        is_cast = True
-                        
-                    if not is_cast and word.lower() not in exclusions:
-                        matches.append((w_start, i, word, w_line))
-                    continue
-                
-            i += 1
-            
+            matches.append((token["start"], token["end"], word, token["line"]))
         return matches
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:

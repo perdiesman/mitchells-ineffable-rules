@@ -5,6 +5,7 @@ Enforce exactly one space before self-closing tag endings (e.g. <tag />).
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Tags and Elements
+- **Commit Profile**: Yes
 - **Configuration Options**:
   - `enabled`: `true`
 
@@ -35,4 +36,10 @@ Enforce exactly one space before self-closing tag endings (e.g. <tag />).
 
 ```xml
 <root attr="val" />
+```
+
+```xml
+<root
+    attr="val"
+/>
 ```

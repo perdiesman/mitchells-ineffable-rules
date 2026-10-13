@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+import importlib
 import tempfile
 import shutil
 
@@ -47,6 +48,14 @@ CATEGORIES = {
 """
 
 class TestDynamicLoader(unittest.TestCase):
+    def test_loaded_rule_module_is_importable_for_generated_docs(self):
+        rules = load_rules_for_language("sql")
+        rule = next(rule for rule in rules if rule.rule_id == "IR-keyword-case")
+
+        module = importlib.import_module(rule.__class__.__module__)
+
+        self.assertIn("select", module.KEYWORDS)
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         
@@ -186,6 +195,18 @@ class InvalidRule
 """
         self.create_custom_rule("sql", "invalid_sql.py", invalid_rule_content)
         
+        with self.assertRaises(RuleValidationError):
+            load_rules_for_language("sql", [self.temp_dir], "extend")
+
+    def test_custom_rule_template_safety_metadata_must_be_boolean(self):
+        from mir.engine.rules_loader import RuleValidationError
+
+        invalid_rule_content = SQL_EXT_RULE_CONTENT.replace(
+            'is_fixable = "no"',
+            'is_fixable = "no"\n    trellis_safe = "yes"',
+        )
+        self.create_custom_rule("sql", "invalid_safety.py", invalid_rule_content)
+
         with self.assertRaises(RuleValidationError):
             load_rules_for_language("sql", [self.temp_dir], "extend")
 

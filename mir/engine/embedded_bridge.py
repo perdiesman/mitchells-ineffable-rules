@@ -19,16 +19,26 @@ def find_single_difference(s1: str, s2: str) -> Tuple[int, int, int, int]:
         suffix_len += 1
     return (prefix_len, n1 - suffix_len, prefix_len, n2 - suffix_len)
 
-def get_guest_rules(guest_language: str, rule_config: Dict[str, Any], excluded_rule_ids: set = None) -> List[BaseRule]:
+def get_guest_rules(
+    guest_language: str,
+    rule_config: Dict[str, Any],
+    excluded_rule_ids: set = None,
+    require_embedded_safe: bool = False,
+) -> List[BaseRule]:
     all_rules = load_rules_for_language(guest_language)
     all_configs = rule_config.get("_all_configs", {})
     rules_to_disable = rule_config.get("_rules_to_disable", set())
     rules_to_enable = rule_config.get("_rules_to_enable", set())
     disable_all = rule_config.get("_disable_all", False)
+    profile = rule_config.get("_profile")
     
     filtered = []
     for rule in all_rules:
         if excluded_rule_ids and rule.rule_id in excluded_rule_ids:
+            continue
+        if require_embedded_safe and not rule.embedded_safe:
+            continue
+        if profile == "commit" and not (rule.commit_profile and rule.embedded_safe):
             continue
             
         if rule.rule_id in rules_to_disable or f"{guest_language}:{rule.rule_id}" in rules_to_disable:
@@ -63,9 +73,15 @@ def check_embedded_content(
     file_path: str,
     rule_config: Dict[str, Any],
     excluded_rule_ids: set = None,
-    extra_check_args: Dict[str, Any] = None
+    extra_check_args: Dict[str, Any] = None,
+    require_embedded_safe: bool = False,
 ) -> List[dict]:
-    guest_rules = get_guest_rules(guest_language, rule_config, excluded_rule_ids)
+    guest_rules = get_guest_rules(
+        guest_language,
+        rule_config,
+        excluded_rule_ids,
+        require_embedded_safe,
+    )
     violations = []
     
     all_configs = rule_config.get("_all_configs", {})
@@ -85,6 +101,7 @@ def check_embedded_content(
         guest_rule_config["_rules_to_disable"] = rule_config.get("_rules_to_disable", set())
         guest_rule_config["_rules_to_enable"] = rule_config.get("_rules_to_enable", set())
         guest_rule_config["_disable_all"] = rule_config.get("_disable_all", False)
+        guest_rule_config["_profile"] = rule_config.get("_profile")
         
         if extra_check_args:
             guest_rule_config.update(extra_check_args)
@@ -108,127 +125,130 @@ def check_embedded_content(
             if ignored_comma_offsets:
                 guest_rule_config["ignored_comma_offsets"] = ignored_comma_offsets
             
-        try:
-            sql_violations = rule.check(guest_text, file_path, guest_rule_config)
-            for sv in sql_violations:
-                guest_lines = guest_text.splitlines()
-                char_offset = 0
-                for line_idx in range(sv.line_number - 1):
-                    if line_idx < len(guest_lines):
-                        char_offset += len(guest_lines[line_idx]) + 1
-                        
-                if char_offset < len(mapping):
-                    mapped_idx = mapping[char_offset]
-                    violations.append({
-                        "rule_id": rule.rule_id,
-                        "mapped_offset": mapped_idx,
-                        "message": sv.message,
-                        "is_fixable": sv.is_fixable
-                    })
-        except Exception:
-            pass
+        sql_violations = rule.check(guest_text, file_path, guest_rule_config)
+        for sv in sql_violations:
+            guest_lines = guest_text.splitlines()
+            char_offset = 0
+            for line_idx in range(sv.line_number - 1):
+                if line_idx < len(guest_lines):
+                    char_offset += len(guest_lines[line_idx]) + 1
+
+            if char_offset < len(mapping):
+                mapped_idx = mapping[char_offset]
+                violations.append({
+                    "rule_id": rule.rule_id,
+                    "mapped_offset": mapped_idx,
+                    "message": sv.message,
+                    "is_fixable": sv.is_fixable
+                })
             
     return violations
 
-def is_fixed_text_xml_safe(original_xml: str, tag_ranges: List[Tuple[int, int]], edits: List[Tuple[int, int, str]]) -> bool:
-    if not tag_ranges:
-        return True
-        
-    sorted_edits_asc = sorted(edits, key=lambda x: x[0])
-    structural_chars = {",", "(", ")", "+", "-", "*", "/", "=", "<", ">", "!", "|", "&", ";", "."}
-    
-    # 1. Apply edits to get fixed_xml
-    chars = list(original_xml)
-    sorted_edits_desc = sorted(edits, key=lambda x: x[0], reverse=True)
-    for start, end, new_text in sorted_edits_desc:
-        chars[start:end] = list(new_text)
-    fixed_xml = "".join(chars)
-    
-    # 2. Compute new tag offsets in fixed_xml
-    def get_new_offset(pos, is_end=False):
-        shift = 0
-        for start, end, new_text in sorted_edits_asc:
-            if is_end:
-                if pos <= start:
-                    break
-            else:
-                if pos < start:
-                    break
-            shift += len(new_text) - (end - start)
-        return pos + shift
-        
-    fixed_tag_ranges = []
-    for t_start, t_end in tag_ranges:
-        fixed_tag_ranges.append((get_new_offset(t_start, False), get_new_offset(t_end, True)))
-        
-    def get_zone(pos, t_start, t_end):
-        if pos < t_start:
-            return 0
-        elif pos >= t_end:
-            return 2
-        else:
-            return 1
-            
-    import bisect
-    
-    # Check each structural character type for crossing migrations
-    for char_type in structural_chars:
-        orig_offsets = []
-        for idx, c in enumerate(original_xml):
-            if c == char_type:
-                orig_offsets.append(idx)
-                
-        fixed_offsets = []
-        for idx, c in enumerate(fixed_xml):
-            if c == char_type:
-                fixed_offsets.append(idx)
-                
-        # Pre-compute character count modifications per edit using C-speed .count()
-        edit_counts = []
-        for start, end, replacement in edits:
-            del_cnt = original_xml[start:end].count(char_type)
-            ins_cnt = replacement.count(char_type)
-            edit_counts.append((start, end, del_cnt, ins_cnt))
-                
-        for tag_idx, (t_start, t_end) in enumerate(tag_ranges):
-            t_start_new, t_end_new = fixed_tag_ranges[tag_idx]
-            
-            # O(log N) binary search instead of O(N) generator sums
-            orig_left = bisect.bisect_left(orig_offsets, t_start)
-            orig_inside = bisect.bisect_left(orig_offsets, t_end) - orig_left
-            
-            fixed_left = bisect.bisect_left(fixed_offsets, t_start_new)
-            fixed_inside = bisect.bisect_left(fixed_offsets, t_end_new) - fixed_left
-            
-            del_left = 0
-            ins_left = 0
-            del_inside = 0
-            ins_inside = 0
-            total_del_char = 0
-            total_ins_char = 0
-            
-            for start, end, del_cnt, ins_cnt in edit_counts:
-                total_del_char += del_cnt
-                total_ins_char += ins_cnt
-                
-                if end <= t_start:
-                    del_left += del_cnt
-                    ins_left += ins_cnt
-                elif start >= t_end:
-                    pass
-                else:
-                    del_inside += del_cnt
-                    ins_inside += ins_cnt
-                    
-            if total_del_char == total_ins_char:
-                if fixed_left != orig_left or fixed_inside != orig_inside:
+def _build_xml_safety_context(
+    original_xml: str, tag_ranges: List[Tuple[int, int]]
+) -> Tuple[
+    List[Tuple[int, int]],
+    List[Tuple[int, int]],
+    List[Tuple[int, int]],
+]:
+    sorted_ranges = sorted(tag_ranges)
+    newline_gaps = []
+    tag_indent_ranges = []
+    for tag_start, tag_end in sorted_ranges:
+        line_start = original_xml.rfind("\n", 0, tag_start) + 1
+        if not original_xml[line_start:tag_start].strip():
+            tag_indent_ranges.append((line_start, tag_start))
+
+        before = tag_start
+        while before > 0 and original_xml[before - 1].isspace():
+            before -= 1
+        if "\n" in original_xml[before:tag_start]:
+            newline_gaps.append((before, tag_start))
+
+        after = tag_end
+        while after < len(original_xml) and original_xml[after].isspace():
+            after += 1
+        if "\n" in original_xml[tag_end:after]:
+            newline_gaps.append((tag_end, after))
+    newline_gaps.sort()
+    return sorted_ranges, newline_gaps, tag_indent_ranges
+
+
+def is_fixed_text_xml_safe(
+    original_xml: str,
+    tag_ranges: List[Tuple[int, int]],
+    edits: List[Tuple[int, int, str]],
+    safety_context: Tuple[
+        List[Tuple[int, int]],
+        List[Tuple[int, int]],
+        List[Tuple[int, int]],
+    ] = None,
+) -> bool:
+    """Return whether source-mapped edits leave every XML tag untouched.
+
+    SQL edits may freely change structural SQL characters in text nodes.  The
+    safety invariant is simply that no replacement intersects XML markup; an
+    edit wholly before a tag only shifts that tag and cannot change it.  The
+    previous implementation recounted every punctuation character across
+    every tag and edit, making large mapper fixes effectively cubic.
+    """
+    sorted_edits = sorted(edits, key=lambda edit: (edit[0], edit[1]))
+    previous_end = -1
+    for start, end, _ in sorted_edits:
+        if start < 0 or end < start or end > len(original_xml):
+            return False
+        if start < previous_end:
+            return False
+        previous_end = max(previous_end, end)
+
+    if safety_context is None:
+        safety_context = _build_xml_safety_context(original_xml, tag_ranges)
+    sorted_ranges, newline_gaps, tag_indent_ranges = safety_context
+
+    range_index = 0
+    for start, end, replacement in sorted_edits:
+        while range_index < len(sorted_ranges) and sorted_ranges[range_index][1] <= start:
+            range_index += 1
+        if range_index >= len(sorted_ranges):
+            continue
+        tag_start, tag_end = sorted_ranges[range_index]
+        if (
+            end == tag_start
+            and start < end
+            and original_xml[start:end].isspace()
+            and replacement == ""
+        ):
+            # Whitespace immediately before an inline dynamic tag separates
+            # the surrounding SQL token from optional SQL emitted by that
+            # tag. Removing it produces hard-to-read forms such as
+            # ``column<if ...>`` and can merge tokens for other directives.
+            return False
+        if start == end:
+            # An insertion at a tag's opening boundary is ambiguous: synthetic
+            # MyBatis SQL (for example a <where> prefix) maps there and must
+            # not be allowed to rewrite the XML indentation before the tag.
+            if tag_start <= start < tag_end:
+                return False
+        elif start < tag_end and end > tag_start:
+            return False
+
+        for indent_start, indent_end in tag_indent_ranges:
+            if indent_start >= end and start != end:
+                break
+            if start == end:
+                if indent_start <= start < indent_end:
                     return False
-            else:
-                expected_left = orig_left - del_left + ins_left
-                expected_inside = orig_inside - del_inside + ins_inside
-                if fixed_left != expected_left or fixed_inside != expected_inside:
-                    return False
-                                
+            elif start < indent_end and end > indent_start:
+                return False
+
+        for gap_start, gap_end in newline_gaps:
+            if gap_start >= end:
+                break
+            if gap_end <= start:
+                continue
+            consumed = original_xml[max(start, gap_start):min(end, gap_end)]
+            if "\n" in consumed and "\n" not in replacement:
+                return False
     return True
 
 def fix_embedded_content(
@@ -238,15 +258,62 @@ def fix_embedded_content(
     file_path: str,
     rule_config: Dict[str, Any],
     excluded_rule_ids: set = None,
-    extra_fix_args: Dict[str, Any] = None
+    extra_fix_args: Dict[str, Any] = None,
+    require_embedded_safe: bool = False,
 ) -> List[Tuple[int, int, str]]:
-    guest_rules = get_guest_rules(guest_language, rule_config, excluded_rule_ids)
+    guest_rules = get_guest_rules(
+        guest_language,
+        rule_config,
+        excluded_rule_ids,
+        require_embedded_safe,
+    )
+    if extra_fix_args and extra_fix_args.get("tag_ranges"):
+        # These rules use source offsets to recognize tokens controlled by
+        # dynamic XML tags. Run them before fixes that can invalidate offsets.
+        offset_sensitive_order = {
+            "IR-comma-style": 0,
+            "IR-where-multi": 1,
+            "IR-column-layout": 2,
+            "IR-multiline-function-layout": 3,
+            "IR-case-when-wrap": 4,
+            "IR-window-layout": 4,
+            "IR-parenthesized-expression-wrap": 4,
+            "IR-line-length": 5,
+            # Dynamic SELECT branches can make earlier generic indentation
+            # infer the wrong query anchor. Reassert the set operator's own
+            # indentation after those rules have finished.
+            "IR-union-layout": 7,
+        }
+        guest_rules.sort(
+            key=lambda rule: (
+                -1
+                if rule.commit_semantic_rewrite
+                else offset_sensitive_order.get(
+                    rule.rule_id,
+                    5 if rule.embedded_dynamic_indent_safe else 6,
+                )
+            )
+        )
     fixed_text = guest_text
+    dynamic_indent_safe_lines: set[int] = set()
+    dynamic_indent_safe_occurrences: set[tuple[str, int]] = set()
+    semantic_changed = False
+    xml_safety_context = None
+    if (
+        extra_fix_args
+        and "original_xml" in extra_fix_args
+        and "tag_ranges" in extra_fix_args
+    ):
+        xml_safety_context = _build_xml_safety_context(
+            extra_fix_args["original_xml"], extra_fix_args["tag_ranges"]
+        )
     
     all_configs = rule_config.get("_all_configs", {})
     
     for rule in guest_rules:
         if rule.is_fixable in ("yes", "sometimes"):
+            if semantic_changed and not rule.commit_semantic_rewrite:
+                break
             guest_rule_config = {}
             global_config = all_configs.get(rule.rule_id, {})
             lang_config = all_configs.get(f"{guest_language}:{rule.rule_id}", {})
@@ -261,6 +328,7 @@ def fix_embedded_content(
             guest_rule_config["_rules_to_disable"] = rule_config.get("_rules_to_disable", set())
             guest_rule_config["_rules_to_enable"] = rule_config.get("_rules_to_enable", set())
             guest_rule_config["_disable_all"] = rule_config.get("_disable_all", False)
+            guest_rule_config["_profile"] = rule_config.get("_profile")
             
             if extra_fix_args:
                 guest_rule_config.update(extra_fix_args)
@@ -284,13 +352,73 @@ def fix_embedded_content(
                 if ignored_comma_offsets:
                     guest_rule_config["ignored_comma_offsets"] = ignored_comma_offsets
                 
-            try:
-                prev_text = fixed_text
-                fixed_text = rule.fix(fixed_text, file_path, guest_rule_config)
-                if fixed_text != prev_text and extra_fix_args and "applied_rules" in extra_fix_args:
-                    extra_fix_args["applied_rules"].add(rule.rule_id)
-            except Exception:
-                pass
+            prev_text = fixed_text
+            fixed_text = rule.fix(fixed_text, file_path, guest_rule_config)
+            if fixed_text != prev_text:
+                from mir.rules.sql.sql_utils import protected_sql_signature
+
+                if (
+                    protected_sql_signature(fixed_text) != protected_sql_signature(prev_text)
+                    and not rule.commit_semantic_rewrite
+                ):
+                    if rule_config.get("_profile") == "commit":
+                        raise ValueError(
+                            f"unsafe embedded fix from {rule.rule_id}: protected SQL syntax changed"
+                        )
+                    # Formatting embedded SQL must be all-or-nothing for
+                    # protected tokens. Dynamic XML tags can make only part of
+                    # a semantic rewrite source-mappable, so leave that rule's
+                    # violation for review instead of applying a partial fix.
+                    fixed_text = prev_text
+                    continue
+            if fixed_text != prev_text and rule.embedded_dynamic_indent_safe:
+                previous_lines = prev_text.splitlines()
+                current_lines = fixed_text.splitlines()
+                if len(previous_lines) == len(current_lines):
+                    for line_index, (previous_line, current_line) in enumerate(
+                        zip(previous_lines, current_lines)
+                    ):
+                        previous_indent = len(previous_line) - len(
+                            previous_line.lstrip(" \t")
+                        )
+                        current_indent = len(current_line) - len(
+                            current_line.lstrip(" \t")
+                        )
+                        if (
+                            previous_line.lstrip(" \t") == current_line.lstrip(" \t")
+                            and current_indent != previous_indent
+                        ):
+                            dynamic_indent_safe_lines.add(line_index)
+                            body = current_line.rstrip("\r\n").lstrip(" \t")
+                            if body:
+                                occurrence = sum(
+                                    1
+                                    for prior_line in current_lines[:line_index]
+                                    if prior_line.rstrip("\r\n").lstrip(" \t")
+                                    == body
+                                )
+                                dynamic_indent_safe_occurrences.add(
+                                    (body, occurrence)
+                                )
+            if fixed_text != prev_text and extra_fix_args and "applied_rules" in extra_fix_args:
+                extra_fix_args["applied_rules"].add(rule.rule_id)
+            if fixed_text != prev_text and rule.commit_semantic_rewrite:
+                # Keep deliberate token rewrites separate from line-moving
+                # formatting. This makes their XML source mapping unambiguous;
+                # the host convergence loop applies layout on the next pass.
+                semantic_changed = True
+
+    if extra_fix_args is not None:
+        from mir.rules.sql.sql_utils import protected_sql_signature
+
+        extra_fix_args["semantic_changed"] = semantic_changed
+        extra_fix_args["fixed_text"] = fixed_text
+        extra_fix_args["original_protected_signature"] = protected_sql_signature(
+            guest_text
+        )
+        extra_fix_args["expected_protected_signature"] = protected_sql_signature(
+            fixed_text
+        )
                 
     edits = []
     if fixed_text != guest_text:
@@ -301,30 +429,161 @@ def fix_embedded_content(
             offset += len(line)
         guest_line_offsets.append(offset)
 
-        guest_lines_stripped = [l.rstrip("\r\n") for l in guest_text.splitlines(keepends=True)]
-        fixed_lines_stripped = [l.rstrip("\r\n") for l in fixed_text.splitlines(keepends=True)]
+        guest_lines = guest_text.splitlines(keepends=True)
+        fixed_lines = fixed_text.splitlines(keepends=True)
+        has_dynamic_context = bool(
+            extra_fix_args
+            and extra_fix_args.get("mybatis_dynamic_indent_ranges")
+        )
+        guest_lines_stripped = [
+            line.rstrip("\r\n").lstrip(" \t")
+            if has_dynamic_context
+            else line.rstrip("\r\n")
+            for line in guest_lines
+        ]
+        fixed_lines_stripped = [
+            line.rstrip("\r\n").lstrip(" \t")
+            if has_dynamic_context
+            else line.rstrip("\r\n")
+            for line in fixed_lines
+        ]
 
-        sm = difflib.SequenceMatcher(None, guest_lines_stripped, fixed_lines_stripped)
+        sm = difflib.SequenceMatcher(
+            None,
+            guest_lines_stripped,
+            fixed_lines_stripped,
+            autojunk=False,
+        )
         tag_ranges = extra_fix_args.get("tag_ranges") if extra_fix_args else None
 
         for tag, i1, i2, j1, j2 in sm.get_opcodes():
-            if tag in ("replace", "delete", "insert"):
+            if tag in ("equal", "replace", "delete", "insert"):
                 sub_ops = []
-                if tag == "replace" and (i2 - i1 == j2 - j1):
-                    for k in range(i2 - i1):
-                        sub_ops.append((tag, i1 + k, i1 + k + 1, j1 + k, j1 + k + 1))
+                if tag == "equal":
+                    for old_index, new_index in zip(range(i1, i2), range(j1, j2)):
+                        guest_line = guest_lines[old_index]
+                        fixed_line = fixed_lines[new_index]
+                        guest_indent = len(guest_line) - len(guest_line.lstrip(" \t"))
+                        fixed_indent = len(fixed_line) - len(fixed_line.lstrip(" \t"))
+                        if guest_indent != fixed_indent:
+                            sub_ops.append((
+                                guest_line_offsets[old_index],
+                                guest_line_offsets[old_index] + guest_indent,
+                                fixed_line[:fixed_indent],
+                                new_index in dynamic_indent_safe_lines,
+                            ))
+                elif tag == "replace":
+                    guest_block_start = guest_line_offsets[i1]
+                    guest_block_end = guest_line_offsets[i2]
+                    guest_block = guest_text[guest_block_start:guest_block_end]
+                    fixed_block = "".join(fixed_lines[j1:j2])
+                    guest_block_lines = guest_block.splitlines(keepends=True)
+                    fixed_block_lines = fixed_block.splitlines(keepends=True)
+                    guest_bodies = [line.strip() for line in guest_block_lines]
+                    fixed_bodies = [line.strip() for line in fixed_block_lines]
+                    moved_body = any(
+                        body
+                        and body in fixed_bodies
+                        and fixed_bodies.index(body) != index
+                        for index, body in enumerate(guest_bodies)
+                    )
+                    line_occupancy_changed = [bool(body) for body in guest_bodies] != [
+                        bool(body) for body in fixed_bodies
+                    ]
+                    if (
+                        has_dynamic_context
+                        and len(guest_block_lines) == len(fixed_block_lines)
+                        and not moved_body
+                        and not line_occupancy_changed
+                    ):
+                        line_offset = guest_block_start
+                        for relative_line, (guest_line, fixed_line) in enumerate(
+                            zip(guest_block_lines, fixed_block_lines)
+                        ):
+                            guest_indent = len(guest_line) - len(guest_line.lstrip(" \t"))
+                            fixed_indent = len(fixed_line) - len(fixed_line.lstrip(" \t"))
+                            if guest_indent != fixed_indent:
+                                sub_ops.append((
+                                    line_offset,
+                                    line_offset + guest_indent,
+                                    fixed_line[:fixed_indent],
+                                    j1 + relative_line in dynamic_indent_safe_lines,
+                                ))
+                            guest_body = guest_line[guest_indent:]
+                            fixed_body = fixed_line[fixed_indent:]
+                            if (
+                                len(guest_body) == len(fixed_body)
+                                and guest_body.lower() == fixed_body.lower()
+                            ):
+                                # SequenceMatcher can align a leading letter
+                                # with a later occurrence on case-only lines
+                                # (for example ``select os...``), producing
+                                # ``ELECT`` after source mapping.  Positional
+                                # runs are exact and unambiguous here.
+                                position = 0
+                                while position < len(guest_body):
+                                    if guest_body[position] == fixed_body[position]:
+                                        position += 1
+                                        continue
+                                    run_start = position
+                                    while (
+                                        position < len(guest_body)
+                                        and guest_body[position] != fixed_body[position]
+                                    ):
+                                        position += 1
+                                    sub_ops.append((
+                                        line_offset + guest_indent + run_start,
+                                        line_offset + guest_indent + position,
+                                        fixed_body[run_start:position],
+                                        False,
+                                    ))
+                            else:
+                                char_matcher = difflib.SequenceMatcher(
+                                    None, guest_body, fixed_body, autojunk=False
+                                )
+                                for char_tag, ci1, ci2, cj1, cj2 in char_matcher.get_opcodes():
+                                    if char_tag == "equal":
+                                        continue
+                                    sub_ops.append((
+                                        line_offset + guest_indent + ci1,
+                                        line_offset + guest_indent + ci2,
+                                        fixed_body[cj1:cj2],
+                                        False,
+                                    ))
+                            line_offset += len(guest_line)
+                    else:
+                        char_matcher = difflib.SequenceMatcher(
+                            lambda char: char.isspace(),
+                            guest_block,
+                            fixed_block,
+                            autojunk=False,
+                        )
+                        for char_tag, ci1, ci2, cj1, cj2 in char_matcher.get_opcodes():
+                            if char_tag == "equal":
+                                continue
+                            sub_ops.append((
+                                guest_block_start + ci1,
+                                guest_block_start + ci2,
+                                fixed_block[cj1:cj2],
+                                False,
+                            ))
                 else:
-                    sub_ops.append((tag, i1, i2, j1, j2))
+                    g_start_char = guest_line_offsets[i1]
+                    g_end_char = guest_line_offsets[i2]
+                    replacement = "".join(fixed_lines[j1:j2])
+                    sub_ops.append((g_start_char, g_end_char, replacement, False))
                     
                 block_edits = []
-                block_valid = True
-                for sub_tag, sub_i1, sub_i2, sub_j1, sub_j2 in sub_ops:
-                    g_start_char = guest_line_offsets[sub_i1]
-                    g_end_char = guest_line_offsets[sub_i2]
-
+                for g_start_char, g_end_char, replacement, dynamic_indent_safe in sub_ops:
                     is_contiguous = True
                     start_orig = mapping[g_start_char] if g_start_char < len(mapping) else (mapping[-1] + 1 if mapping else 0)
-                    end_orig = mapping[g_end_char - 1] + 1 if g_end_char <= len(mapping) and g_end_char > 0 else start_orig
+                    end_orig = (
+                        start_orig
+                        if g_start_char == g_end_char
+                        else mapping[g_end_char - 1] + 1
+                        if g_end_char <= len(mapping) and g_end_char > 0
+                        else start_orig
+                    )
 
                     if tag_ranges is not None:
                         if start_orig < end_orig:
@@ -334,7 +593,7 @@ def fix_embedded_content(
                                     break
                         else:
                             for t_start, t_end in tag_ranges:
-                                if t_start < start_orig < t_end:
+                                if t_start <= start_orig < t_end:
                                     is_contiguous = False
                                     break
                     else:
@@ -343,13 +602,9 @@ def fix_embedded_content(
                                 if mapping[k] - mapping[k - 1] != 1:
                                     is_contiguous = False
                                     break
-
                     if not is_contiguous:
-                        block_valid = False
-                        break
+                        continue
 
-                    block_fixed_lines = fixed_text.splitlines(keepends=True)[sub_j1:sub_j2]
-                    replacement = "".join(block_fixed_lines)
                     if file_path.endswith(".xml"):
                         replacement = xml_encode(replacement)
 
@@ -359,17 +614,187 @@ def fix_embedded_content(
                         if all(c in " \t\r\n" for c in orig_str) and all(c in " \t\r\n" for c in replacement):
                             if not (extra_fix_args and "base_indent" in extra_fix_args):
                                 skip = True
+                        if extra_fix_args and "original_xml" in extra_fix_args:
+                            original_xml = extra_fix_args["original_xml"]
+                            xml_line_start = original_xml.rfind("\n", 0, start_orig) + 1
+                            xml_indent_end = xml_line_start
+                            while (
+                                xml_indent_end < len(original_xml)
+                                and original_xml[xml_indent_end] in " \t"
+                            ):
+                                xml_indent_end += 1
+                            is_dynamic_line = any(
+                                range_start < xml_indent_end < range_end
+                                for range_start, range_end, _ in extra_fix_args.get(
+                                    "mybatis_dynamic_indent_ranges", []
+                                )
+                            )
+                            if (
+                                is_dynamic_line
+                                and xml_line_start <= start_orig <= xml_indent_end
+                                and end_orig <= xml_indent_end
+                            ):
+                                # Dynamic XML nesting contributes indentation
+                                # that is invisible in the expanded SQL view.
+                                # Keep it atomic unless the responsible rule
+                                # explicitly allows a deeper continuation.
+                                # Even an indentation-safe rule must not
+                                # remove physical XML nesting while aligning
+                                # the expanded guest query. For example, a
+                                # UNION inside an <if> aligns with its SELECT
+                                # in source even though both appear one level
+                                # shallower after the tag is removed.
+                                if (
+                                    not dynamic_indent_safe
+                                    or len(replacement.expandtabs(4))
+                                    < len(
+                                        original_xml[start_orig:end_orig]
+                                        .expandtabs(4)
+                                    )
+                                ):
+                                    skip = True
 
-                    if not skip:
-                        block_edits.append((start_orig, end_orig, replacement))
+                    candidate_edit = (start_orig, end_orig, replacement)
+                    source_range = (
+                        extra_fix_args.get("source_range")
+                        if extra_fix_args
+                        else None
+                    )
+                    if source_range and not (
+                        source_range[0] <= start_orig
+                        and end_orig <= source_range[1]
+                    ):
+                        continue
+                    if (
+                        not skip
+                        and (
+                            not extra_fix_args
+                            or "original_xml" not in extra_fix_args
+                            or "tag_ranges" not in extra_fix_args
+                            or is_fixed_text_xml_safe(
+                                extra_fix_args["original_xml"],
+                                extra_fix_args["tag_ranges"],
+                                [candidate_edit],
+                                xml_safety_context,
+                            )
+                        )
+                    ):
+                        block_edits.append(candidate_edit)
 
-                if block_valid:
-                    edits.extend(block_edits)
+                edits.extend(block_edits)
+
+        # Line matching can align a freshly expanded line with the wrong
+        # repeated neighbor. Recover unique indentation-only changes directly
+        # from their line bodies so dynamic table-function arguments are not
+        # left partially formatted.
+        guest_body_indexes: Dict[str, List[int]] = {}
+        fixed_body_indexes: Dict[str, List[int]] = {}
+        for index, line in enumerate(guest_lines):
+            body = line.rstrip("\r\n").lstrip(" \t")
+            if body:
+                guest_body_indexes.setdefault(body, []).append(index)
+        for index, line in enumerate(fixed_lines):
+            body = line.rstrip("\r\n").lstrip(" \t")
+            if body:
+                fixed_body_indexes.setdefault(body, []).append(index)
+
+        for body, old_indexes in guest_body_indexes.items():
+            new_indexes = fixed_body_indexes.get(body, [])
+            if not old_indexes or len(old_indexes) != len(new_indexes):
+                continue
+            for occurrence, (old_index, new_index) in enumerate(
+                zip(old_indexes, new_indexes)
+            ):
+                if (
+                    new_index not in dynamic_indent_safe_lines
+                    and (body, occurrence)
+                    not in dynamic_indent_safe_occurrences
+                ):
+                    continue
+                guest_line = guest_lines[old_index]
+                fixed_line = fixed_lines[new_index]
+                guest_indent = len(guest_line) - len(guest_line.lstrip(" \t"))
+                fixed_indent = len(fixed_line) - len(fixed_line.lstrip(" \t"))
+                if guest_indent == fixed_indent:
+                    continue
+                guest_start = guest_line_offsets[old_index]
+                guest_end = guest_start + guest_indent
+                start_orig = mapping[guest_start] if guest_start < len(mapping) else None
+                end_orig = (
+                    mapping[guest_end - 1] + 1
+                    if start_orig is not None and guest_end > guest_start
+                    else start_orig
+                )
+                if start_orig is None or end_orig is None:
+                    continue
+                if any(
+                    mapping[position] - mapping[position - 1] != 1
+                    for position in range(guest_start + 1, guest_end)
+                ):
+                    continue
+                if extra_fix_args and "original_xml" in extra_fix_args:
+                    original_xml = extra_fix_args["original_xml"]
+                    xml_line_start = original_xml.rfind(
+                        "\n", 0, start_orig
+                    ) + 1
+                    xml_indent_end = xml_line_start
+                    while (
+                        xml_indent_end < len(original_xml)
+                        and original_xml[xml_indent_end] in " \t"
+                    ):
+                        xml_indent_end += 1
+                    is_dynamic_line = any(
+                        range_start < xml_indent_end < range_end
+                        for range_start, range_end, _
+                        in extra_fix_args.get(
+                            "mybatis_dynamic_indent_ranges", []
+                        )
+                    )
+                    if (
+                        is_dynamic_line
+                        and xml_line_start <= start_orig <= xml_indent_end
+                        and end_orig <= xml_indent_end
+                        and len(fixed_line[:fixed_indent].expandtabs(4))
+                        < len(
+                            original_xml[start_orig:end_orig].expandtabs(4)
+                        )
+                    ):
+                        # The occurrence recovery below exists to restore
+                        # deeper SQL continuations. It must not re-add a
+                        # shallower edit that the primary mapping rejected
+                        # because that would erase physical XML nesting.
+                        continue
+                candidate = (start_orig, end_orig, fixed_line[:fixed_indent])
+                if any(
+                    start_orig < existing_end and existing_start < end_orig
+                    for existing_start, existing_end, _ in edits
+                ):
+                    continue
+                source_range = extra_fix_args.get("source_range") if extra_fix_args else None
+                if source_range and not (
+                    source_range[0] <= start_orig and end_orig <= source_range[1]
+                ):
+                    continue
+                if (
+                    extra_fix_args
+                    and "original_xml" in extra_fix_args
+                    and "tag_ranges" in extra_fix_args
+                    and not is_fixed_text_xml_safe(
+                        extra_fix_args["original_xml"],
+                        extra_fix_args["tag_ranges"],
+                        [candidate],
+                        xml_safety_context,
+                    )
+                ):
+                    continue
+                edits.append(candidate)
 
     if edits and extra_fix_args and "original_xml" in extra_fix_args and "tag_ranges" in extra_fix_args:
         original_xml = extra_fix_args["original_xml"]
         tag_ranges = extra_fix_args["tag_ranges"]
-        if not is_fixed_text_xml_safe(original_xml, tag_ranges, edits):
+        if not is_fixed_text_xml_safe(
+            original_xml, tag_ranges, edits, xml_safety_context
+        ):
             return []
 
     return edits

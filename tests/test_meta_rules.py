@@ -88,6 +88,22 @@ class TestMetaRules(unittest.TestCase):
                             )
                         except NotImplementedError:
                             pass
+
+                # 5. Typed cases make accepted/reported/fixed/not-fixed
+                # behavior importable by both tests and documentation.
+                for case in getattr(rule, "cases", []):
+                    violations = rule.check(case.source, f"test_case.{lang}", rule_config)
+                    if case.expectation == "accepted":
+                        self.assertEqual(violations, [], f"Rule '{rule_id}' case '{case.name}' should be accepted.")
+                    else:
+                        self.assertTrue(violations, f"Rule '{rule_id}' case '{case.name}' should be reported.")
+                    if case.expectation == "fixed":
+                        fixed = rule.fix(case.source, f"test_case.{lang}", rule_config)
+                        self.assertEqual(fixed, case.fixed, f"Rule '{rule_id}' case '{case.name}' fixed output differs.")
+                        self.assertEqual(rule.check(fixed, f"test_case.{lang}", rule_config), [])
+                        self.assertEqual(rule.fix(fixed, f"test_case.{lang}", rule_config), fixed)
+                    elif case.expectation == "not_fixed":
+                        self.assertEqual(rule.fix(case.source, f"test_case.{lang}", rule_config), case.source)
                     
                 rules_checked_count += 1
                 
@@ -123,6 +139,10 @@ class TestMetaRules(unittest.TestCase):
                         all_snippets.append(ex["correct"])
                 additional_vals = getattr(rule, "additional_validations", [])
                 all_snippets.extend(additional_vals)
+                all_snippets.extend(case.source for case in getattr(rule, "cases", []))
+                all_snippets.extend(
+                    case.fixed for case in getattr(rule, "cases", []) if case.fixed is not None
+                )
                 
                 for idx, snippet in enumerate(all_snippets):
                     if not snippet.strip():
@@ -143,4 +163,3 @@ class TestMetaRules(unittest.TestCase):
                         f"Ruleset idempotency failure in language '{lang}' for rule '{rule.rule_id}' snippet:\n"
                         f"Stable state:\n{curr}\nNext pass:\n{final_pass}"
                     )
-

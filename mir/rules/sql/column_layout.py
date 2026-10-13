@@ -1,10 +1,28 @@
 import re
+from bisect import bisect_left
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.line_length import LineLengthRule
 from mir.rules.sql.indent import IndentRule
+from mir.rules.sql.case_when_wrap import CaseWhenWrapRule
+from mir.rules.sql.sql_utils import tokenize_sql
+
+
+def _normalize_inline_expression(expression: str) -> str:
+    """Collapse SQL whitespace without touching literal or quoted contents."""
+    tokens = tokenize_sql(expression.strip())
+    if any(token["type"] == "COMMENT" for token in tokens):
+        return expression.strip()
+    return "".join(
+        " " if token["type"] == "WHITESPACE" else token["value"]
+        for token in tokens
+    ).strip()
 
 class ColumnLayoutRule(BaseRule):
+    embedded_dynamic_indent_safe = True
+    commit_profile = True
+    embedded_safe = True
+    trellis_safe = True
     rule_id = "IR-column-layout"
     description = "On select, order by, group by, if all the columns fit on one line then put them on one line, otherwise wrap one per line."
     category = "queries"
@@ -41,8 +59,105 @@ class ColumnLayoutRule(BaseRule):
         }
     ]
     additional_validations = [
-        "SELECT id, name FROM users;"
+        "SELECT id, name FROM users;",
+        "SELECT DISTINCT ON (item_id, created_at) item_id, created_at FROM sample_item;"
     ]
+
+    @staticmethod
+    def _split_top_level_csv(text: str) -> List[str]:
+        expressions = []
+        start = 0
+        depth = 0
+        quote = None
+        index = 0
+        while index < len(text):
+            char = text[index]
+            if quote:
+                if char == quote:
+                    if index + 1 < len(text) and text[index + 1] == quote:
+                        index += 2
+                        continue
+                    quote = None
+                index += 1
+                continue
+            if char in ("'", '"'):
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif char == "," and depth == 0:
+                expression = _normalize_inline_expression(text[start:index])
+                if expression:
+                    expressions.append(expression)
+                start = index + 1
+            index += 1
+        expression = _normalize_inline_expression(text[start:])
+        if expression:
+            expressions.append(expression)
+        return expressions
+
+    def _format_prefix(
+        self,
+        clause: dict,
+        max_length: int,
+        indent_size: int,
+        base_indent_spaces: int,
+    ) -> str:
+        keyword = clause["keyword"]
+        distinct_on = clause.get("distinct_on_expressions", [])
+        if not distinct_on:
+            return keyword
+
+        indentation = clause["indentation"]
+        inline = f"SELECT DISTINCT ON ({', '.join(distinct_on)})"
+        effective_indent_len = max(0, len(indentation) - base_indent_spaces)
+        if effective_indent_len + len(inline) <= max_length:
+            return inline
+
+        inner_indent = indentation + (" " * indent_size)
+        return (
+            "SELECT DISTINCT ON (\n"
+            + ",\n".join(f"{inner_indent}{expression}" for expression in distinct_on)
+            + f"\n{indentation})"
+        )
+
+    def _expression_line_limit(
+        self,
+        expressions: List[str],
+        max_length: int,
+        rule_config: Dict[str, Any],
+    ) -> int:
+        expression_limit = max_length
+        if any(
+            re.search(r"\bCASE\b", expression, re.IGNORECASE)
+            for expression in expressions
+        ):
+            case_max_length = self.get_config_value(
+                rule_config,
+                "case_max_line_length",
+                default_value=110,
+                fallbacks=[(CaseWhenWrapRule, "max_line_length")],
+            )
+            expression_limit = min(expression_limit, case_max_length)
+
+        has_additive_expression = any(
+            token["type"] == "OPERATOR" and token["value"] in {"+", "||"}
+            for expression in expressions
+            if not re.search(r"\bCASE\b", expression, re.IGNORECASE)
+            for token in tokenize_sql(expression)
+        )
+        if has_additive_expression:
+            from mir.rules.sql.additive_wrap import AdditiveWrapRule
+
+            additive_max_length = self.get_config_value(
+                rule_config,
+                "additive_max_line_length",
+                default_value=100,
+                fallbacks=[(AdditiveWrapRule, "max_line_length")],
+            )
+            expression_limit = min(expression_limit, additive_max_length)
+        return expression_limit
 
     def _parse_clauses(self, content: str) -> List[dict]:
         """
@@ -158,6 +273,7 @@ class ColumnLayoutRule(BaseRule):
                 if keyword:
                     # Resolve indentation of keyword line (the leading whitespace of the line)
                     line_text = content[line_start_idx:w_start]
+                    keyword_column = w_start - line_start_idx
                     indentation = ""
                     for char in line_text:
                         if char in (" ", "\t"):
@@ -167,6 +283,7 @@ class ColumnLayoutRule(BaseRule):
                             
                     # Parse the list of expressions starting immediately after the keyword
                     list_start = keyword_end
+                    distinct_on_expressions = []
                     
                     # Check for DISTINCT or ALL modifier right after SELECT
                     if keyword == "SELECT":
@@ -192,7 +309,39 @@ class ColumnLayoutRule(BaseRule):
                                 word_on = content[w_on_start:next_on_idx].lower()
                                 if word_on == "on":
                                     keyword = "SELECT DISTINCT ON"
-                                    list_start = next_on_idx
+                                    open_idx = next_on_idx
+                                    while open_idx < n and content[open_idx].isspace():
+                                        open_idx += 1
+                                    if open_idx < n and content[open_idx] == "(":
+                                        depth = 0
+                                        quote = None
+                                        close_idx = open_idx
+                                        while close_idx < n:
+                                            char = content[close_idx]
+                                            if quote:
+                                                if char == quote:
+                                                    if close_idx + 1 < n and content[close_idx + 1] == quote:
+                                                        close_idx += 2
+                                                        continue
+                                                    quote = None
+                                            elif char in ("'", '"'):
+                                                quote = char
+                                            elif char == "(":
+                                                depth += 1
+                                            elif char == ")":
+                                                depth -= 1
+                                                if depth == 0:
+                                                    break
+                                            close_idx += 1
+                                        if close_idx < n:
+                                            distinct_on_expressions = self._split_top_level_csv(
+                                                content[open_idx + 1 : close_idx]
+                                            )
+                                            list_start = close_idx + 1
+                                        else:
+                                            list_start = next_on_idx
+                                    else:
+                                        list_start = next_on_idx
                                     
                     expressions = []
                     expression_indents = []
@@ -203,6 +352,7 @@ class ColumnLayoutRule(BaseRule):
                     list_str_char = None
                     list_single_comment = False
                     list_multi_comment = False
+                    recovery_boundary = False
                     
                     j = list_start
                     current_expr_start = list_start
@@ -270,14 +420,29 @@ class ColumnLayoutRule(BaseRule):
                                 j += 1
                             j_word = content[jw_start:j].lower()
                             
+                            statement_starters = {
+                                "alter", "create", "delete", "drop", "insert",
+                                "truncate", "update",
+                            }
                             if keyword.startswith("SELECT"):
-                                boundaries = {"from", "where", "group", "order", "limit", "offset", "union", "intersect", "except"}
+                                boundaries = {
+                                    "from", "where", "group", "order", "limit",
+                                    "offset", "union", "intersect", "except",
+                                    # Treat an unmistakable statement starter
+                                    # as a recovery boundary when legacy SQL
+                                    # omitted its preceding terminator. This
+                                    # keeps the following statement out of the
+                                    # prior SELECT list without pretending the
+                                    # malformed source is semantically valid.
+                                    *statement_starters,
+                                }
                             elif keyword.startswith("GROUP"):
                                 boundaries = {"having", "order", "limit", "offset", "union", "intersect", "except"}
                             else:
                                 boundaries = {"limit", "offset", "union", "intersect", "except"}
                                 
                             if j_word in boundaries:
+                                recovery_boundary = j_word in statement_starters
                                 j = jw_start
                                 break
                             
@@ -290,7 +455,7 @@ class ColumnLayoutRule(BaseRule):
                         if list_paren == 0 and jc == ',':
                             expr = content[current_expr_start:j].strip()
                             if "\n" not in expr:
-                                expr = re.sub(r"\s+", " ", expr)
+                                expr = _normalize_inline_expression(expr)
                             if expr:
                                 expressions.append(expr)
                                 # Find original base indentation of this expression
@@ -319,7 +484,7 @@ class ColumnLayoutRule(BaseRule):
                     list_end = last_non_space_idx
                     expr = content[current_expr_start:list_end].strip()
                     if "\n" not in expr:
-                        expr = re.sub(r"\s+", " ", expr)
+                        expr = _normalize_inline_expression(expr)
                     if expr:
                         # DISTINCT/ALL has been parsed at the start of SELECT
                         if expr:
@@ -351,6 +516,13 @@ class ColumnLayoutRule(BaseRule):
                     if "--" in clause_text or "/*" in clause_text:
                         i = list_end
                         continue
+
+                    if recovery_boundary:
+                        # Preserve the malformed preceding clause byte for
+                        # byte. Only use the starter as a scan boundary so the
+                        # following independent statement can be formatted.
+                        i = list_end
+                        continue
                         
                     clauses.append({
                         "keyword": keyword,
@@ -362,7 +534,9 @@ class ColumnLayoutRule(BaseRule):
                         "expression_indents": expression_indents,
                         "expression_ranges": expression_ranges,
                         "line_number": w_line,
-                        "indentation": indentation
+                        "indentation": indentation,
+                        "keyword_column": keyword_column,
+                        "distinct_on_expressions": distinct_on_expressions,
                     })
                     i = list_end
                     continue
@@ -394,16 +568,47 @@ class ColumnLayoutRule(BaseRule):
         else:
             orig_base_len = 0
             
-        rebuilt = [new_indent + lines[0].lstrip()]
+        first_body = lines[0].lstrip()
+        rebuilt = [new_indent + first_body]
+        case_indent = new_indent if first_body.upper().startswith("CASE") else None
         for l in lines[1:]:
             stripped = l.lstrip()
             if stripped == "":
                 rebuilt.append("")
             else:
+                upper = stripped.upper()
+                if re.match(r"^(?:\+|-|\*|/|\|\|)\s+CASE\b", upper):
+                    case_indent = new_indent + " " * indent_size
+                    rebuilt.append(case_indent + stripped)
+                    continue
+                if case_indent is not None:
+                    if upper.startswith(("WHEN ", "ELSE ")):
+                        rebuilt.append(case_indent + " " * indent_size + stripped)
+                        continue
+                    if upper.startswith("END"):
+                        rebuilt.append(case_indent + stripped)
+                        case_indent = None
+                        continue
                 l_indent = len(l) - len(stripped)
                 relative_indent = max(0, l_indent - orig_base_len)
                 rebuilt.append(new_indent + " " * relative_indent + stripped)
         return "\n".join(rebuilt)
+
+    @staticmethod
+    def _crosses_dynamic_content(clause: dict, dynamic_offsets: List[int]) -> bool:
+        if not dynamic_offsets:
+            return False
+        index = bisect_left(dynamic_offsets, clause["keyword_start"])
+        return index < len(dynamic_offsets) and dynamic_offsets[index] < clause["list_end"]
+
+    @staticmethod
+    def _is_fully_dynamic(clause: dict, dynamic_offsets: set[int]) -> bool:
+        return bool(
+            dynamic_offsets
+            and clause["keyword_start"] in dynamic_offsets
+            and max(clause["keyword_start"], clause["list_end"] - 1)
+            in dynamic_offsets
+        )
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         max_length = self.get_config_value(
@@ -430,13 +635,31 @@ class ColumnLayoutRule(BaseRule):
             base_indent_spaces = base_indent_opt
         else:
             base_indent_spaces = 0
+        if "original_xml" in rule_config:
+            base_indent_spaces = 0
             
         violations = []
         
         clauses = self._parse_clauses(content)
         lines = content.splitlines()
         
-        top_level_clauses = [cl for cl in clauses if not cl.get("is_nested", False)]
+        dynamic_offset_set = rule_config.get("mybatis_dynamic_offsets", set())
+        dynamic_offsets = sorted(dynamic_offset_set)
+        boundary_offsets = sorted(rule_config.get("mybatis_boundary_offsets", set()))
+        top_level_clauses = [
+            cl
+            for cl in clauses
+            if not cl.get("is_nested", False)
+            and (
+                not self._crosses_dynamic_content(cl, dynamic_offsets)
+                or (
+                    self._is_fully_dynamic(cl, dynamic_offset_set)
+                    and not self._crosses_dynamic_content(
+                        cl, boundary_offsets
+                    )
+                )
+            )
+        ]
         for cl in top_level_clauses:
             keyword = cl["keyword"]
             expressions = cl["expressions"]
@@ -446,13 +669,63 @@ class ColumnLayoutRule(BaseRule):
                 continue
                 
             # 1. Determine if it fits on a single line
-            single_line_clause = f"{keyword} {', '.join(expressions)}"
-            effective_indent_len = max(0, len(indentation) - base_indent_spaces)
+            prefix = self._format_prefix(
+                cl, max_length, indent_size, base_indent_spaces
+            )
+            single_line_clause = f"{prefix} {', '.join(expressions)}"
+            effective_indent_len = max(
+                0,
+                cl.get("keyword_column", len(indentation))
+                - base_indent_spaces,
+            )
             total_len = effective_indent_len + len(single_line_clause)
+            expression_max_length = self._expression_line_limit(
+                expressions, max_length, rule_config
+            )
             
             current_clause_text = content[cl["keyword_start"]:cl["list_end"]]
-            
-            if total_len <= max_length:
+
+            fully_dynamic = self._is_fully_dynamic(
+                cl, dynamic_offset_set
+            ) and not self._crosses_dynamic_content(cl, boundary_offsets)
+            crosses_dynamic = self._crosses_dynamic_content(
+                cl, dynamic_offsets
+            )
+            embedded_reindent_only = (
+                bool(dynamic_offsets)
+                and not fully_dynamic
+                and (
+                    not keyword.startswith("ORDER")
+                    or crosses_dynamic
+                )
+            )
+            if embedded_reindent_only:
+                if "\n" not in current_clause_text:
+                    continue
+                inner_indent = indentation + (" " * indent_size)
+                formatted_exprs = [
+                    self._reindent_multiline(expr, inner_indent, orig_indent)
+                    if "\n" in expr
+                    else f"{inner_indent}{expr}"
+                    for expr, orig_indent in zip(
+                        expressions,
+                        cl.get("expression_indents", [""] * len(expressions)),
+                    )
+                ]
+                expected = f"{prefix}\n" + ",\n".join(formatted_exprs)
+                if current_clause_text.replace("\r\n", "\n") != expected.replace("\r\n", "\n"):
+                    violations.append(
+                        Violation(
+                            rule_id=self.rule_id,
+                            line_number=cl["line_number"],
+                            message=f"Align the multiline {keyword} clause one indentation level below its keyword.",
+                            offending_lines=[lines[cl["line_number"] - 1] if cl["line_number"] - 1 < len(lines) else ""],
+                            is_fixable=True,
+                        )
+                    )
+                continue
+
+            if total_len <= expression_max_length:
                 # Expect single-line format
                 expected = single_line_clause
                 if current_clause_text != expected:
@@ -476,7 +749,7 @@ class ColumnLayoutRule(BaseRule):
                     else:
                         formatted_exprs.append(f"{inner_indent}{expr}")
                         
-                expected = f"{keyword}\n" + ",\n".join(formatted_exprs)
+                expected = f"{prefix}\n" + ",\n".join(formatted_exprs)
                 
                 # Normalize line endings for comparison
                 current_normalized = current_clause_text.replace("\r\n", "\n")
@@ -520,9 +793,27 @@ class ColumnLayoutRule(BaseRule):
             base_indent_spaces = base_indent_opt
         else:
             base_indent_spaces = 0
+        if "original_xml" in rule_config:
+            base_indent_spaces = 0
             
         clauses = self._parse_clauses(content)
-        top_level_clauses = [cl for cl in clauses if not cl.get("is_nested", False)]
+        dynamic_offset_set = rule_config.get("mybatis_dynamic_offsets", set())
+        dynamic_offsets = sorted(dynamic_offset_set)
+        boundary_offsets = sorted(rule_config.get("mybatis_boundary_offsets", set()))
+        top_level_clauses = [
+            cl
+            for cl in clauses
+            if not cl.get("is_nested", False)
+            and (
+                not self._crosses_dynamic_content(cl, dynamic_offsets)
+                or (
+                    self._is_fully_dynamic(cl, dynamic_offset_set)
+                    and not self._crosses_dynamic_content(
+                        cl, boundary_offsets
+                    )
+                )
+            )
+        ]
         if not top_level_clauses:
             return content
             
@@ -538,12 +829,31 @@ class ColumnLayoutRule(BaseRule):
             
             if not expressions:
                 continue
-                
+
+            current_clause_text = content[cl["keyword_start"]:cl["list_end"]]
+            fully_dynamic = self._is_fully_dynamic(
+                cl, dynamic_offset_set
+            ) and not self._crosses_dynamic_content(cl, boundary_offsets)
+            crosses_dynamic = self._crosses_dynamic_content(
+                cl, dynamic_offsets
+            )
+            embedded_reindent_only = (
+                bool(dynamic_offsets)
+                and not fully_dynamic
+                and (
+                    not keyword.startswith("ORDER")
+                    or crosses_dynamic
+                )
+            )
+            if embedded_reindent_only and "\n" not in current_clause_text:
+                fixed_chunks.append(content[last_idx:cl["list_end"]])
+                last_idx = cl["list_end"]
+                continue
             # Recursively format nested expressions (subqueries) first
             recursively_formatted_expressions = []
             recursively_formatted_indices = set()
             for idx, (expr, orig_indent) in enumerate(zip(expressions, cl.get("expression_indents", [""] * len(expressions)))):
-                if any(k in expr.lower() for k in ("select", "group by", "order by")):
+                if not embedded_reindent_only and any(k in expr.lower() for k in ("select", "group by", "order by")):
                     normalized_expr = self._reindent_multiline(expr, "", orig_indent)
                     recursively_formatted_expressions.append(self.fix(normalized_expr, file_path, rule_config))
                     recursively_formatted_indices.add(idx)
@@ -551,11 +861,25 @@ class ColumnLayoutRule(BaseRule):
                     recursively_formatted_expressions.append(expr)
             expressions = recursively_formatted_expressions
             
-            single_line_clause = f"{keyword} {', '.join(expressions)}"
-            effective_indent_len = max(0, len(indentation) - base_indent_spaces)
+            prefix = self._format_prefix(
+                cl, max_length, indent_size, base_indent_spaces
+            )
+            single_line_clause = f"{prefix} {', '.join(expressions)}"
+            effective_indent_len = max(
+                0,
+                cl.get("keyword_column", len(indentation))
+                - base_indent_spaces,
+            )
             total_len = effective_indent_len + len(single_line_clause)
+            expression_max_length = self._expression_line_limit(
+                expressions, max_length, rule_config
+            )
             
-            if total_len <= max_length and not any("\n" in expr for expr in expressions):
+            if (
+                not embedded_reindent_only
+                and total_len <= expression_max_length
+                and not any("\n" in expr for expr in expressions)
+            ):
                 formatted = single_line_clause
             else:
                 inner_indent = indentation + (" " * indent_size)
@@ -566,7 +890,7 @@ class ColumnLayoutRule(BaseRule):
                         formatted_exprs.append(self._reindent_multiline(expr, inner_indent, effective_orig_indent))
                     else:
                         formatted_exprs.append(f"{inner_indent}{expr}")
-                formatted = f"{keyword}{ending}" + f",{ending}".join(formatted_exprs)
+                formatted = f"{prefix}{ending}" + f",{ending}".join(formatted_exprs)
                 
             fixed_chunks.append(content[last_idx:cl["keyword_start"]])
             fixed_chunks.append(formatted)

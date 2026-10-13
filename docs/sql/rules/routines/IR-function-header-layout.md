@@ -5,6 +5,9 @@ Standardize formatting, line-wrapping, and indentation of function creation head
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Routine & Procedure Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `max_length` (Default: `100`): Maximum line length before wrapping clauses.

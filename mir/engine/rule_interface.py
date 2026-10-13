@@ -1,4 +1,15 @@
+from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
+
+
+@dataclass(frozen=True)
+class RuleCase:
+    """Executable rule documentation with an explicit expected outcome."""
+
+    name: str
+    source: str
+    expectation: str
+    fixed: Optional[str] = None
 
 class Violation:
     def __init__(
@@ -35,6 +46,12 @@ class BaseRule:
     config_options: Dict[str, Dict[str, Any]] = {}
     examples: List[Dict[str, str]] = []
     additional_validations: List[str] = []
+    cases: List[RuleCase] = []
+    commit_profile: bool = False
+    commit_semantic_rewrite: bool = False
+    embedded_safe: bool = False
+    embedded_dynamic_indent_safe: bool = False
+    trellis_safe: bool = False
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         """

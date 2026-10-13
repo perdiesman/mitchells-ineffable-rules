@@ -5,6 +5,9 @@ Standardize SQL data types to be uppercase.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
+- **Commit Profile**: Yes
+- **MyBatis Safe**: Yes
+- **Trellis Safe**: Yes
 - **Configuration Options**:
   - `enabled`: `true`
 

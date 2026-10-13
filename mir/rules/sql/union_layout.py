@@ -1,8 +1,10 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql
+from mir.rules.sql.sql_utils import get_token_depths, tokenize_sql
 
 class UnionLayoutRule(BaseRule):
+    embedded_safe = True
+    embedded_dynamic_indent_safe = True
     rule_id = "IR-union-layout"
     description = "Enforce that set operators (UNION, UNION ALL, INTERSECT, EXCEPT) are on their own line, aligned with the query block."
     category = "queries"
@@ -24,6 +26,7 @@ class UnionLayoutRule(BaseRule):
 
     def _find_violations(self, content: str) -> List[dict]:
         tokens = tokenize_sql(content)
+        depths = get_token_depths(tokens)
         violations = []
         n = len(tokens)
 
@@ -70,26 +73,14 @@ class UnionLayoutRule(BaseRule):
                 # Determine expected indent of select_token
                 indent_str = ""
                 if select_token:
-                    # Find beginning of line of select_token
-                    sel_idx = token_to_idx[id(select_token)]
-                    line_start = sel_idx
-                    for k in range(sel_idx - 1, -1, -1):
-                        if "\n" in tokens[k]["value"]:
-                            line_start = k + 1
-                            break
-                        if k == 0:
-                            line_start = 0
-                            break
-                    # The indent is any leading whitespace on this line
-                    leading = []
-                    for k in range(line_start, sel_idx):
-                        if tokens[k]["type"] == "WHITESPACE":
-                            leading.append(tokens[k]["value"])
-                        else:
-                            break
-                    # Extract last line's indent if multiline whitespace
-                    indent_parts = "".join(leading).split("\n")
-                    indent_str = indent_parts[-1] if indent_parts else ""
+                    select_line_start = content.rfind(
+                        "\n", 0, select_token["start"]
+                    ) + 1
+                    select_prefix = content[
+                        select_line_start:select_token["start"]
+                    ]
+                    if not select_prefix or select_prefix.isspace():
+                        indent_str = select_prefix
 
                 # Check before the operator: is there a newline?
                 # We check the tokens between the preceding active token and our operator
@@ -103,6 +94,7 @@ class UnionLayoutRule(BaseRule):
                 after_tokens = tokens[token_to_idx[id(end_token)] + 1 : next_active_idx]
                 after_str = "".join(tok["value"] for tok in after_tokens)
                 has_newline_after = "\n" in after_str
+                operator_str = "UNION ALL" if is_all else t["value"]
 
                 # If either is missing, we flag a violation
                 if not has_newline_before or not has_newline_after:
@@ -110,7 +102,6 @@ class UnionLayoutRule(BaseRule):
                     start_offset = tokens[prev_active_idx]["end"] if i > 0 else 0
                     end_offset = tokens[next_active_idx]["start"] if i + active_skip < num_active else n
                     
-                    operator_str = "UNION ALL" if is_all else t["value"]
                     replacement = f"\n{indent_str}{operator_str}\n{indent_str}"
 
                     violations.append({
@@ -121,6 +112,83 @@ class UnionLayoutRule(BaseRule):
                         "replacement": replacement,
                         "message": f"Set operator '{operator_str}' on line {t['line']} must be on its own line and aligned."
                     })
+                elif not any(tok["type"] == "COMMENT" for tok in after_tokens):
+                    operator_line_start = content.rfind("\n", 0, t["start"]) + 1
+                    operator_prefix = content[operator_line_start:t["start"]]
+                    if operator_prefix.isspace() or not operator_prefix:
+                        canonical_prefix = (
+                            indent_str if select_token is not None else operator_prefix
+                        )
+                        if operator_prefix != canonical_prefix:
+                            violations.append({
+                                "token": t,
+                                "line": t["line"],
+                                "start_offset": operator_line_start,
+                                "end_offset": t["start"],
+                                "replacement": canonical_prefix,
+                                "message": (
+                                    f"Set operator '{operator_str}' must align "
+                                    "with its preceding SELECT."
+                                ),
+                            })
+                        expected_after = "\n" + canonical_prefix
+                        if after_str != expected_after:
+                            violations.append({
+                                "token": t,
+                                "line": t["line"],
+                                "start_offset": end_token["end"],
+                                "end_offset": tokens[next_active_idx]["start"],
+                                "replacement": expected_after,
+                                "message": (
+                                    f"Query after set operator '{operator_str}' "
+                                    "must align with the operator."
+                                ),
+                            })
+
+                        set_depth = depths[t_idx]
+                        for clause_idx in range(next_active_idx + 1, n):
+                            clause = tokens[clause_idx]
+                            if clause["type"] in {"WHITESPACE", "COMMENT"}:
+                                continue
+                            if depths[clause_idx] < set_depth:
+                                break
+                            clause_value = clause["value"].upper()
+                            if (
+                                depths[clause_idx] == set_depth
+                                and clause["type"] == "KEYWORD"
+                                and clause_value in {"UNION", "INTERSECT", "EXCEPT"}
+                            ):
+                                break
+                            if not (
+                                depths[clause_idx] == set_depth
+                                and clause["type"] == "KEYWORD"
+                                and clause_value in {
+                                    "FROM", "WHERE", "GROUP", "HAVING", "ORDER",
+                                    "LIMIT", "OFFSET", "FETCH",
+                                }
+                            ):
+                                continue
+                            clause_line_start = content.rfind(
+                                "\n", 0, clause["start"]
+                            ) + 1
+                            clause_prefix = content[
+                                clause_line_start:clause["start"]
+                            ]
+                            if (
+                                clause_prefix != canonical_prefix
+                                and (not clause_prefix or clause_prefix.isspace())
+                            ):
+                                violations.append({
+                                    "token": clause,
+                                    "line": clause["line"],
+                                    "start_offset": clause_line_start,
+                                    "end_offset": clause["start"],
+                                    "replacement": canonical_prefix,
+                                    "message": (
+                                        "Clauses in a set-operation branch "
+                                        "must align with its SELECT."
+                                    ),
+                                })
 
                 i += active_skip
                 continue

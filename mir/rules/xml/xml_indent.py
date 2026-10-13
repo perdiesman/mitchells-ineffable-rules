@@ -1,5 +1,7 @@
+import re
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
+from mir.rules.sql.sql_utils import get_token_depths, tokenize_sql
 from mir.rules.xml.xml_utils import tokenize_xml
 def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines: List[str], indent_size: int) -> str:
     # 1. Find the query tag in active_parents
@@ -29,6 +31,21 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
     if t["type"] == "TAG_CLOSE_START":
         tag_name = t["value"][2:].lower()
         if tag_name in ("select", "insert", "update", "delete", "sql"):
+            matching_query = next(
+                (
+                    element
+                    for element in reversed(active_parents)
+                    if element["tag"] == tag_name
+                ),
+                None,
+            )
+            if matching_query is not None:
+                if matching_query.get("resolved_indent") is not None:
+                    return matching_query["resolved_indent"]
+                opening_line = lines[matching_query["token"]["line"] - 1]
+                return opening_line[:
+                    len(opening_line) - len(opening_line.lstrip(" \t"))
+                ]
             return None
         # Find the matching opening tag in active_parents
         matching_el = None
@@ -43,6 +60,11 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
         
     # 3. If it's an intermediate tag like <when> or <otherwise>
     tag_name = t["value"][1:].lower()
+    if tag_name in {"where", "set"}:
+        # These MyBatis containers materialize top-level SQL clauses. Their
+        # indentation is owned by the statement, not by the final JOIN/SELECT
+        # continuation immediately preceding the tag.
+        return " " * base_query_indent
     if tag_name in ("when", "otherwise"):
         # Parent should be <choose>
         choose_el = None
@@ -53,8 +75,125 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
         if choose_el and choose_el.get("resolved_indent") is not None:
             # indent one level relative to choose_indent
             return choose_el["resolved_indent"] + " " * indent_size
+
+    # Repeated dynamic assignments/values inside MyBatis containers are XML
+    # siblings. Deriving each indent from the preceding source line makes a
+    # partially indented generated block creep rightward one pass at a time.
+    # Anchor these children directly to their resolved XML parent instead.
+    if active_parents and active_parents[-1]["tag"] in {"trim", "set"}:
+        parent_indent = active_parents[-1].get("resolved_indent")
+        if parent_indent is not None:
+            return parent_indent + " " * indent_size
             
     # 4. For opening tags (like <if>, <foreach>, <choose>, etc.)
+    if tag_name in {"if", "when", "otherwise"}:
+        opening_end = content.find(">", t["start"])
+        closing_start = content.find(f"</{tag_name}", opening_end + 1)
+        if opening_end != -1 and closing_start != -1:
+            dynamic_source = content[opening_end + 1:closing_start].strip()
+            dynamic_text = dynamic_source.upper()
+            if dynamic_text.startswith("ELSE"):
+                for k in range(t["line"] - 2, query_line - 1, -1):
+                    previous = lines[k]
+                    previous_text = previous.strip().upper()
+                    if previous_text == "CASE":
+                        case_indent = previous[
+                            : len(previous) - len(previous.lstrip(" \t"))
+                        ]
+                        return case_indent + " " * indent_size
+                    if previous_text.startswith(
+                        ("FROM", "WHERE", "GROUP BY", "ORDER BY")
+                    ):
+                        break
+            if (
+                tag_name == "if"
+                and active_parents
+                and active_parents[-1]["tag"]
+                in {"select", "insert", "update", "delete", "sql"}
+                and re.search(
+                    r"<include\b[^>]*\brefid\s*=\s*['\"][^'\"]*where[^'\"]*['\"]",
+                    dynamic_source,
+                    re.IGNORECASE,
+                )
+            ):
+                # A generated optional WHERE include is a direct statement
+                # clause. Do not inherit the indentation of the preceding
+                # SELECT column or UPDATE assignment.
+                return " " * base_query_indent
+            if re.match(
+                r"(?:(?:LEFT|RIGHT|FULL)(?:\s+OUTER)?|INNER|CROSS)?\s*JOIN\b",
+                dynamic_text,
+            ):
+                for k in range(t["line"] - 2, query_line - 1, -1):
+                    previous = lines[k]
+                    if not previous.strip():
+                        continue
+                    previous_text = previous.strip().upper()
+                    if previous_text.startswith(("AND ", "OR ")):
+                        previous_indent = previous[
+                            : len(previous) - len(previous.lstrip(" \t"))
+                        ]
+                        if len(previous_indent) >= indent_size:
+                            return previous_indent[:-indent_size]
+                    if (
+                        previous_text.startswith(")")
+                        and " ON " in previous_text
+                    ):
+                        previous_indent = previous[
+                            : len(previous) - len(previous.lstrip(" \t"))
+                        ]
+                        if len(previous_indent) >= indent_size:
+                            # A derived-table closing parenthesis is a JOIN
+                            # continuation line. A following optional JOIN is
+                            # a sibling of that JOIN, not a child of the close.
+                            return previous_indent[:-indent_size]
+                    break
+            if dynamic_text in {"LEFT", "RIGHT", "INNER", "FULL", "CROSS"}:
+                for k in range(t["line"] - 2, query_line - 1, -1):
+                    candidate = lines[k]
+                    candidate_text = candidate.strip().upper()
+                    if re.match(
+                        r"(?:(?:LEFT|RIGHT|FULL)(?:\s+OUTER)?|INNER|CROSS)?\s*JOIN\b",
+                        candidate_text,
+                    ):
+                        return candidate[: len(candidate) - len(candidate.lstrip(" \t"))]
+
+        current_line_start = content.rfind("\n", 0, t["start"]) + 1
+        if not content[current_line_start:t["start"]].strip():
+            previous_index = t["line"] - 2
+            if 0 <= previous_index < len(lines):
+                previous = lines[previous_index]
+                previous_tokens = tokenize_sql(previous)
+                open_depth = sum(
+                    1 if item["value"] == "(" else -1
+                    for item in previous_tokens
+                    if item["type"] == "PAREN"
+                )
+                if open_depth > 0 and dynamic_text.startswith(("AND ", "OR ")):
+                    previous_indent = previous[
+                        : len(previous) - len(previous.lstrip(" \t"))
+                    ]
+                    return previous_indent + " " * indent_size
+
+    if tag_name == "include":
+        for k in range(t["line"] - 2, query_line - 1, -1):
+            previous = lines[k]
+            if not previous.strip():
+                continue
+            if re.search(
+                r"\b(?:(?:(?:LEFT|RIGHT|FULL)(?:\s+OUTER)?|INNER|CROSS)\s+)?"
+                r"(?:JOIN|FROM)\s*\(\s*$",
+                previous,
+                re.IGNORECASE,
+            ):
+                previous_indent = previous[
+                    : len(previous) - len(previous.lstrip(" \t"))
+                ]
+                # A relation's closing parenthesis is one continuation level
+                # beyond JOIN/FROM; its included query is one level deeper.
+                return previous_indent + " " * (indent_size * 2)
+            break
+
     # Look at preceding lines within the query block
     curr_line = t["line"]
     target_indent = None
@@ -96,12 +235,21 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
                             
                         extra_indent_keywords = {
                             "FROM", "WHERE", "SELECT", "HAVING", "ON", "USING", "VALUES", "SET", 
-                            "AND", "OR", "JOIN", "LEFT", "RIGHT", "INNER", "CROSS", "FULL", "WITH",
-                            "CASE", "THEN", "ELSE", "BEGIN", "EXCEPTION",
+                            "IN", "JOIN", "LEFT", "RIGHT", "INNER", "CROSS", "FULL", "WITH",
+                            "CASE", "THEN", "ELSE", "BEGIN", "EXCEPTION", "BY", "IS",
                             "(", "+", "-", "/", "||"
                         }
                         if last_char in extra_indent_keywords or last_word in extra_indent_keywords:
                             target_indent += " " * indent_size
+                            if (
+                                last_char == "("
+                                and re.search(
+                                    r"\bJOIN\s+[A-Z_][A-Z0-9_.]*\s*\($",
+                                    clean_line,
+                                    re.IGNORECASE,
+                                )
+                            ):
+                                target_indent += " " * indent_size
             break
             
     if target_indent is None:
@@ -114,8 +262,16 @@ def get_sql_tag_indent(t: dict, active_parents: List[dict], content: str, lines:
     return target_indent
 
 class XmlIndentRule(BaseRule):
+    commit_profile = True
     rule_id = "IR-xml-indent"
-    description = "Enforce correct tag nesting indentation in XML files."
+    description = (
+        "Enforce correct tag nesting indentation in XML files, format reusable "
+        "MyBatis projection fragments according to their SELECT include sites, "
+        "align physical predicates beneath static MyBatis WHERE clauses, "
+        "indent SELECT and ORDER BY lists containing nested dynamic branches, "
+        "and keep a SQL statement terminator attached to its preceding foreach "
+        "closing tag."
+    )
     category = "general"
     is_fixable = "yes"
     enabled_by_default = True
@@ -140,11 +296,999 @@ class XmlIndentRule(BaseRule):
         "<root>\n    <child>\n        <grandchild />\n    </child>\n</root>"
     ]
 
-    def _find_violations(self, content: str, indent_size: int) -> List[dict]:
+    def _find_violations(
+        self,
+        content: str,
+        indent_size: int,
+        defer_sql_text: bool = False,
+    ) -> List[dict]:
         tokens = tokenize_xml(content)
         violations = []
         lines = content.splitlines()
         n = len(tokens)
+
+        from mir.rules.xml.xml_mybatis_sql import parse_xml_elements, get_all_elements_recursively
+
+        elements = get_all_elements_recursively(parse_xml_elements(tokens))
+        from mir.rules.xml.xml_mybatis_sql import reusable_select_list_ids
+        projection_fragment_ids = reusable_select_list_ids(
+            tokens, elements, content
+        )
+        query_ranges = [
+            (el["start_offset"], el["end_offset"])
+            for el in elements
+            if el["tag"] in ("select", "insert", "update", "delete", "sql")
+        ]
+        for element in elements:
+            if element["tag"] not in {"if", "when", "otherwise"}:
+                continue
+            opening_end = tokens[element["open_end_idx"]]["end"]
+            closing_start = content.rfind(
+                f"</{element['tag']}", opening_end, element["end_offset"]
+            )
+            if closing_start == -1:
+                continue
+            if content.count("\n", 0, opening_end) == content.count(
+                "\n", 0, closing_start
+            ):
+                continue
+            opening_line_start = content.rfind(
+                "\n", 0, element["start_offset"]
+            ) + 1
+            tag_indent = content[opening_line_start:element["start_offset"]]
+            if tag_indent.strip():
+                continue
+            body_indent = tag_indent + " " * indent_size
+
+            first_body = opening_end
+            while first_body < closing_start and content[first_body] in " \t":
+                first_body += 1
+            if first_body < closing_start and content[first_body] not in "\r\n":
+                violations.append({
+                    "line": content.count("\n", 0, opening_end) + 1,
+                    "start_offset": opening_end,
+                    "end_offset": first_body,
+                    "replacement": "\n" + body_indent,
+                    "message": (
+                        f"Multiline MyBatis <{element['tag']}> content must "
+                        "start on the following indented line."
+                    ),
+                    "structural": True,
+                })
+
+            closing_line_start = content.rfind("\n", 0, closing_start) + 1
+            if content[closing_line_start:closing_start].strip():
+                violations.append({
+                    "line": content.count("\n", 0, closing_start) + 1,
+                    "start_offset": closing_start,
+                    "end_offset": closing_start,
+                    "replacement": "\n" + tag_indent,
+                    "message": (
+                        f"Multiline MyBatis <{element['tag']}> closing tag "
+                        "must start on its own line."
+                    ),
+                    "structural": True,
+                })
+        for element in elements:
+            if element["tag"] != "sql":
+                continue
+            fragment_id = element.get("attrs", {}).get("id", "")
+            if fragment_id not in projection_fragment_ids:
+                continue
+            body_start = tokens[element["open_end_idx"]]["end"]
+            body_end = tokens[element["end_idx"] - 1]["start"]
+            body = content[body_start:body_end]
+            if "<" in body or "," not in body:
+                continue
+            body_text = body.strip()
+            sql_tokens = tokenize_sql(body_text)
+            depth = 0
+            part_start = 0
+            parts = []
+            for sql_token in sql_tokens:
+                if sql_token["type"] == "PAREN":
+                    depth += 1 if sql_token["value"] == "(" else -1
+                elif sql_token["type"] == "COMMA" and depth == 0:
+                    parts.append(body_text[part_start:sql_token["start"]])
+                    part_start = sql_token["end"]
+            parts.append(body_text[part_start:])
+            normalized_parts = [
+                (
+                    part.strip()
+                    if "\n" in part or "\r" in part
+                    else " ".join(part.split())
+                )
+                for part in parts
+            ]
+            if len(normalized_parts) < 2 or any(not part for part in normalized_parts):
+                continue
+            tag_line_start = content.rfind("\n", 0, element["start_offset"]) + 1
+            tag_prefix = content[tag_line_start:element["start_offset"]]
+            tag_indent = tag_prefix[: len(tag_prefix) - len(tag_prefix.lstrip(" \t"))]
+            column_indent = tag_indent + " " * indent_size
+            expected = (
+                "\n"
+                + (",\n" + column_indent).join(
+                    column_indent + part if index == 0 else part
+                    for index, part in enumerate(normalized_parts)
+                )
+                + "\n"
+                + tag_indent
+            )
+            if body != expected:
+                violations.append({
+                    "line": tokens[element["open_end_idx"]]["line"] + 1,
+                    "start_offset": body_start,
+                    "end_offset": body_end,
+                    "replacement": expected,
+                    "message": "MyBatis column-list fragments should put each column on its own indented line.",
+                })
+        for element in elements:
+            if element["tag"] not in {"select", "insert", "update", "delete", "sql"}:
+                continue
+            body_start = tokens[element["open_end_idx"]]["end"]
+            body_end = tokens[element["end_idx"] - 1]["start"]
+            body = content[body_start:body_end]
+            first_clause = re.match(
+                r"\A[ \t\r\n]*(?:WITH|SELECT|FROM|UPDATE|INSERT|DELETE)\b",
+                body,
+                re.IGNORECASE,
+            )
+            if first_clause is None:
+                continue
+            clause_start = body_start + first_clause.end()
+            matched_text = content[body_start:clause_start]
+            clause_word = re.search(
+                r"(?:WITH|SELECT|FROM|UPDATE|INSERT|DELETE)\b\Z",
+                matched_text,
+                re.IGNORECASE,
+            )
+            if clause_word is None:
+                continue
+            clause_start = body_start + clause_word.start()
+            line_start = content.rfind("\n", 0, clause_start) + 1
+            if line_start < body_start:
+                # Inline SQL follows the opening XML tag on the same line;
+                # there is no standalone clause indentation to normalize.
+                continue
+            actual_indent = content[line_start:clause_start]
+            tag_line_start = content.rfind("\n", 0, element["start_offset"]) + 1
+            tag_prefix = content[tag_line_start:element["start_offset"]]
+            tag_indent = tag_prefix[: len(tag_prefix) - len(tag_prefix.lstrip(" \t"))]
+            expected_indent = tag_indent + " " * indent_size
+            if actual_indent != expected_indent:
+                violations.append({
+                    "line": content.count("\n", 0, clause_start) + 1,
+                    "start_offset": line_start,
+                    "end_offset": clause_start,
+                    "replacement": expected_indent,
+                    "message": "The first MyBatis SQL clause should align one level inside its XML tag.",
+                })
+        dynamic_list_tags = {
+            "if", "choose", "when", "otherwise", "foreach", "trim"
+        }
+        for element in elements:
+            if element["tag"] not in {"select", "sql"}:
+                continue
+            body_start = tokens[element["open_end_idx"]]["end"]
+            body_end = tokens[element["end_idx"] - 1]["start"]
+            body = content[body_start:body_end]
+            masked_body = re.sub(
+                r"<[^>]+>",
+                lambda match: "".join(
+                    character if character in "\r\n" else " "
+                    for character in match.group(0)
+                ),
+                body,
+                flags=re.DOTALL,
+            )
+            sql_tokens = tokenize_sql(masked_body)
+            sql_depths = get_token_depths(sql_tokens)
+            dynamic_children = [
+                child
+                for child in elements
+                if child["tag"] in dynamic_list_tags
+                and element["start_offset"] < child["start_offset"]
+                and child["end_offset"] < element["end_offset"]
+            ]
+
+            def add_dynamic_list_layout(
+                keyword_start: int,
+                keyword_end: int,
+                list_end: int,
+                semicolon: int | None = None,
+                require_nested_branch: bool = False,
+            ) -> None:
+                ancestor_ends = [
+                    tokens[child["end_idx"] - 1]["start"]
+                    for child in dynamic_children
+                    if child["start_offset"] < keyword_start < child["end_offset"]
+                ]
+                if ancestor_ends:
+                    branch_end = min(ancestor_ends)
+                    if branch_end < list_end:
+                        list_end = branch_end
+                        semicolon = None
+                list_children = [
+                    child
+                    for child in dynamic_children
+                    if keyword_end < child["start_offset"] < list_end
+                ]
+                if not list_children:
+                    return
+                if require_nested_branch and not any(
+                    outer["start_offset"] < inner["start_offset"]
+                    and inner["end_offset"] < outer["end_offset"]
+                    for outer in list_children
+                    for inner in list_children
+                    if outer is not inner
+                ):
+                    return
+                line_start = content.rfind("\n", 0, keyword_start) + 1
+                clause_indent = content[line_start:keyword_start]
+                if clause_indent.strip():
+                    return
+                item_indent = clause_indent + " " * indent_size
+                first_item = keyword_end
+                while first_item < list_end and content[first_item].isspace():
+                    first_item += 1
+                if first_item >= list_end:
+                    return
+                expected_gap = "\n" + item_indent
+                if content[keyword_end:first_item] != expected_gap:
+                    violations.append({
+                        "line": content.count("\n", 0, keyword_start) + 1,
+                        "start_offset": keyword_end,
+                        "end_offset": first_item,
+                        "replacement": expected_gap,
+                        "message": (
+                            "A SQL list containing MyBatis branches should "
+                            "start below its clause keyword."
+                        ),
+                        "structural": True,
+                    })
+
+                cursor = content.find("\n", keyword_end, list_end)
+                if cursor != -1:
+                    cursor += 1
+                while cursor != -1 and cursor < list_end:
+                    line_end = content.find("\n", cursor, list_end)
+                    if line_end == -1:
+                        line_end = list_end
+                    nonspace = cursor
+                    while (
+                        nonspace < line_end
+                        and content[nonspace] in " \t\r"
+                    ):
+                        nonspace += 1
+                    if nonspace < line_end and nonspace < list_end:
+                        dynamic_depth = sum(
+                            1
+                            for child in dynamic_children
+                            if tokens[child["open_end_idx"]]["end"]
+                            < nonspace
+                            < tokens[child["end_idx"] - 1]["start"]
+                        )
+                        expected_indent = item_indent + (
+                            " " * (indent_size * dynamic_depth)
+                        )
+                        if content[cursor:nonspace] != expected_indent:
+                            violations.append({
+                                "line": content.count("\n", 0, cursor) + 1,
+                                "start_offset": cursor,
+                                "end_offset": nonspace,
+                                "replacement": expected_indent,
+                                "message": (
+                                    "Items in a dynamic SQL list should align "
+                                    "with their MyBatis nesting level."
+                                ),
+                                "structural": True,
+                            })
+                    if line_end >= list_end:
+                        break
+                    cursor = line_end + 1
+
+                if semicolon is not None:
+                    previous = semicolon - 1
+                    while previous >= keyword_end and content[previous].isspace():
+                        previous -= 1
+                    if (
+                        content[max(keyword_end, previous - 4):previous + 1]
+                        .lower()
+                        .endswith("</if>")
+                        and content[previous + 1:semicolon]
+                    ):
+                        violations.append({
+                            "line": content.count("\n", 0, semicolon) + 1,
+                            "start_offset": previous + 1,
+                            "end_offset": semicolon,
+                            "replacement": "",
+                            "message": (
+                                "A trailing semicolon should stay with the "
+                                "closing MyBatis branch when it fits."
+                            ),
+                            "structural": True,
+                        })
+
+            for index, sql_token in enumerate(sql_tokens):
+                if (
+                    sql_depths[index] != 0
+                    or sql_token["type"] != "KEYWORD"
+                    or sql_token["value"].upper() != "SELECT"
+                ):
+                    continue
+                from_index = next((
+                    candidate
+                    for candidate in range(index + 1, len(sql_tokens))
+                    if sql_depths[candidate] == 0
+                    and sql_tokens[candidate]["type"] == "KEYWORD"
+                    and sql_tokens[candidate]["value"].upper() == "FROM"
+                ), None)
+                if from_index is None:
+                    continue
+                keyword_line_end = content.find(
+                    "\n", body_start + sql_token["end"]
+                )
+                if keyword_line_end == -1:
+                    keyword_line_end = body_end
+                if not content[
+                    body_start + sql_token["end"]:keyword_line_end
+                ].strip():
+                    # An already-expanded SELECT can contain CASE expressions,
+                    # DISTINCT ON keys, and other layouts with their own
+                    # indentation rules. Only initiate this normalization from
+                    # an inline SELECT projection.
+                    continue
+                add_dynamic_list_layout(
+                    body_start + sql_token["start"],
+                    body_start + sql_token["end"],
+                    body_start + sql_tokens[from_index]["start"],
+                    require_nested_branch=True,
+                )
+
+            for index, sql_token in enumerate(sql_tokens):
+                if (
+                    sql_depths[index] != 0
+                    or sql_token["type"] != "KEYWORD"
+                    or sql_token["value"].upper() != "ORDER"
+                ):
+                    continue
+                by_index = index + 1
+                while (
+                    by_index < len(sql_tokens)
+                    and sql_tokens[by_index]["type"] in {"WHITESPACE", "COMMENT"}
+                ):
+                    by_index += 1
+                if (
+                    by_index >= len(sql_tokens)
+                    or sql_tokens[by_index]["value"].upper() != "BY"
+                ):
+                    continue
+                end_index = next((
+                    candidate
+                    for candidate in range(by_index + 1, len(sql_tokens))
+                    if sql_depths[candidate] == 0
+                    and (
+                        sql_tokens[candidate]["type"] == "SEMI"
+                        or (
+                            sql_tokens[candidate]["type"] == "KEYWORD"
+                            and sql_tokens[candidate]["value"].upper()
+                            in {
+                                "LIMIT", "OFFSET", "FETCH", "RETURNING",
+                                "UNION", "INTERSECT", "EXCEPT",
+                            }
+                        )
+                    )
+                ), None)
+                if end_index is None:
+                    list_end = body_end
+                    semicolon = None
+                else:
+                    list_end = body_start + sql_tokens[end_index]["start"]
+                    semicolon = (
+                        list_end
+                        if sql_tokens[end_index]["type"] == "SEMI"
+                        else None
+                    )
+                add_dynamic_list_layout(
+                    body_start + sql_token["start"],
+                    body_start + sql_tokens[by_index]["end"],
+                    list_end,
+                    semicolon,
+                    require_nested_branch=True,
+                )
+        for element in elements:
+            if element["tag"] not in {"select", "insert", "update", "delete", "sql"}:
+                continue
+            body_start = tokens[element["open_end_idx"]]["end"]
+            body_end = tokens[element["end_idx"] - 1]["start"]
+            body = content[body_start:body_end]
+            masked_body = re.sub(
+                r"<[^>]+>",
+                lambda match: "".join(
+                    character if character in "\r\n" else " "
+                    for character in match.group(0)
+                ),
+                body,
+                flags=re.DOTALL,
+            )
+            where_token_offsets = {
+                sql_token["start"]
+                for sql_token in tokenize_sql(masked_body)
+                if sql_token["type"] == "KEYWORD"
+                and sql_token["value"].upper() == "WHERE"
+            }
+            for where_match in re.finditer(
+                r"(?im)^(?P<indent>[ \t]*)WHERE[ \t]*\r?\n",
+                body,
+            ):
+                where_word_offset = where_match.start() + len(
+                    where_match.group("indent")
+                )
+                if where_word_offset not in where_token_offsets:
+                    continue
+                where_source = body_start + where_match.start()
+                if any(
+                    dynamic["tag"]
+                    in {
+                        "if", "foreach", "choose", "when", "otherwise",
+                        "trim", "where",
+                    }
+                    and dynamic["start_offset"]
+                    < where_source
+                    < dynamic["end_offset"]
+                    for dynamic in elements
+                ):
+                    continue
+                where_indent = where_match.group("indent")
+                expected_indent = where_indent + " " * indent_size
+                cursor = where_match.end()
+                while cursor < len(body):
+                    line_end = body.find("\n", cursor)
+                    if line_end == -1:
+                        line_end = len(body)
+                    line = body[cursor:line_end].rstrip("\r")
+                    stripped = line.strip()
+                    if not stripped:
+                        cursor = line_end + 1
+                        continue
+                    if stripped == ";":
+                        break
+                    actual_indent = line[: len(line) - len(line.lstrip(" \t"))]
+                    visible_sql = re.sub(r"<[^>]+>", " ", stripped).strip()
+                    if re.match(
+                        r"(?i)^(?:GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|OFFSET|"
+                        r"FETCH|RETURNING|UNION|INTERSECT|EXCEPT|ON\s+CONFLICT|"
+                        r"SELECT|UPDATE|INSERT|DELETE|CREATE|ALTER|DROP)\b",
+                        visible_sql,
+                    ) and len(actual_indent) <= len(where_indent):
+                        break
+                    if (
+                        stripped.startswith(")")
+                        and len(actual_indent) <= len(where_indent)
+                    ):
+                        break
+                    if stripped.startswith(("<", "--", "/*")):
+                        cursor = line_end + 1
+                        continue
+                    if len(actual_indent) <= len(where_indent):
+                        source_line_start = body_start + cursor
+                        violations.append({
+                            "line": content.count("\n", 0, source_line_start) + 1,
+                            "start_offset": source_line_start,
+                            "end_offset": source_line_start + len(actual_indent),
+                            "replacement": expected_indent,
+                            "message": (
+                                "A physical MyBatis WHERE predicate should be "
+                                "indented one level below WHERE."
+                            ),
+                        })
+                    cursor = line_end + 1
+        for element in elements:
+            if element["tag"] not in {"select", "sql"}:
+                continue
+            body_start = tokens[element["open_end_idx"]]["end"]
+            body_end = tokens[element["end_idx"] - 1]["start"]
+            body = content[body_start:body_end]
+            for match in re.finditer(
+                r"(?i)\bSELECT\s+DISTINCT\s+ON\s*\(", body
+            ):
+                select_start = body_start + match.start()
+                open_paren = body_start + match.end() - 1
+                depth = 1
+                quote = None
+                cursor = open_paren + 1
+                close_paren = None
+                while cursor < body_end:
+                    char = content[cursor]
+                    if char == "<":
+                        tag_end = content.find(">", cursor, body_end)
+                        if tag_end == -1:
+                            break
+                        cursor = tag_end + 1
+                        continue
+                    if quote:
+                        if char == quote:
+                            if cursor + 1 < body_end and content[cursor + 1] == quote:
+                                cursor += 2
+                                continue
+                            quote = None
+                    elif char in ("'", '"'):
+                        quote = char
+                    elif char == "(":
+                        depth += 1
+                    elif char == ")":
+                        depth -= 1
+                        if depth == 0:
+                            close_paren = cursor
+                            break
+                    cursor += 1
+                if close_paren is None:
+                    continue
+                inner = content[open_paren + 1:close_paren]
+                if "<if" not in inner.lower():
+                    continue
+                suffix = re.match(r"\s*\*", content[close_paren + 1:body_end])
+                if suffix is None:
+                    continue
+                projection_end = close_paren + 1 + suffix.end()
+
+                parts = []
+                segment_start = 0
+                inner_depth = 0
+                inner_quote = None
+                index = 0
+                while index < len(inner):
+                    char = inner[index]
+                    if char == "<" and inner[index:index + 3].lower() == "<if":
+                        if inner[segment_start:index].strip():
+                            parts.append((inner[segment_start:index], False))
+                        close_tag = inner.lower().find("</if>", index)
+                        if close_tag == -1:
+                            break
+                        close_tag += len("</if>")
+                        parts.append((inner[index:close_tag], False))
+                        index = close_tag
+                        segment_start = index
+                        continue
+                    if inner_quote:
+                        if char == inner_quote:
+                            if index + 1 < len(inner) and inner[index + 1] == inner_quote:
+                                index += 2
+                                continue
+                            inner_quote = None
+                    elif char in ("'", '"'):
+                        inner_quote = char
+                    elif char == "(":
+                        inner_depth += 1
+                    elif char == ")":
+                        inner_depth -= 1
+                    elif char == "," and inner_depth == 0:
+                        parts.append((inner[segment_start:index], True))
+                        segment_start = index + 1
+                    index += 1
+                if inner[segment_start:].strip():
+                    parts.append((inner[segment_start:], False))
+
+                normalized_parts = []
+                for part, had_comma in parts:
+                    stripped = part.strip()
+                    if not stripped:
+                        continue
+                    if stripped.startswith("<"):
+                        normalized = re.sub(r">\s+", ">", stripped)
+                        normalized = re.sub(r"\s+<", "<", normalized)
+                    else:
+                        sql_tokens = tokenize_sql(stripped)
+                        normalized = "".join(
+                            " " if item["type"] == "WHITESPACE" else item["value"]
+                            for item in sql_tokens
+                        ).strip()
+                    if had_comma:
+                        normalized += ","
+                    normalized_parts.append(normalized)
+                if not normalized_parts:
+                    continue
+
+                line_start = content.rfind("\n", 0, select_start) + 1
+                prefix = content[line_start:select_start]
+                indent = prefix[: len(prefix) - len(prefix.lstrip(" \t"))]
+                distinct_indent = indent + " " * indent_size
+                inner_indent = distinct_indent + " " * indent_size
+                expected = (
+                    "SELECT\n"
+                    + distinct_indent
+                    + "DISTINCT ON (\n"
+                    + "\n".join(inner_indent + part for part in normalized_parts)
+                    + "\n"
+                    + distinct_indent
+                    + ") *"
+                )
+                original = content[select_start:projection_end]
+                if original != expected:
+                    violations.append({
+                        "line": content.count("\n", 0, select_start) + 1,
+                        "start_offset": select_start,
+                        "end_offset": projection_end,
+                        "replacement": expected,
+                        "message": "Dynamic DISTINCT ON keys should use multiline column layout.",
+                        "structural": True,
+                    })
+        include_relation = re.compile(
+            r"(?im)^([ \t]*)((?:(?:LEFT|RIGHT|FULL)(?:[ \t]+OUTER)?|INNER|CROSS)?"
+            r"[ \t]*JOIN|FROM)[ \t]*\([ \t]*(<include\b[^>]+/>)[ \t]*\)"
+            r"[ \t]*(\S[^\r\n]*)$"
+        )
+        for match in include_relation.finditer(content):
+            if not any(start < match.start() < end for start, end in query_ranges):
+                continue
+            indent = match.group(1)
+            expected = (
+                indent
+                + match.group(2).strip()
+                + " (\n"
+                + indent
+                + " " * (indent_size * 2)
+                + match.group(3)
+                + "\n"
+                + indent
+                + " " * indent_size
+                + ") "
+                + match.group(4)
+            )
+            if match.group(0) != expected:
+                violations.append({
+                    "line": content.count("\n", 0, match.start()) + 1,
+                    "start_offset": match.start(),
+                    "end_offset": match.end(),
+                    "replacement": expected,
+                    "message": "A reusable SQL relation should use derived-table indentation.",
+                    "structural": True,
+                })
+        for token_index, token in enumerate(tokens):
+            if token["type"] != "TAG_OPEN_START" or token["value"][1:].lower() != "include":
+                continue
+            if not any(start < token["start"] < end for start, end in query_ranges):
+                continue
+            line_start = content.rfind("\n", 0, token["start"]) + 1
+            prefix = content[line_start:token["start"]]
+            sql_prefix = prefix.rstrip(" \t")
+            same_line_select = bool(
+                sql_prefix
+                and sql_prefix.split()[-1].upper() == "SELECT"
+            )
+            previous_line_select = False
+            select_indent = ""
+            if same_line_select:
+                select_indent = prefix[
+                    : len(prefix) - len(prefix.lstrip(" \t"))
+                ]
+            elif not prefix.strip() and token["line"] > 1:
+                previous_line = lines[token["line"] - 2]
+                previous_line_select = previous_line.strip().upper() == "SELECT"
+                if previous_line_select:
+                    select_indent = previous_line[
+                        : len(previous_line) - len(previous_line.lstrip(" \t"))
+                    ]
+            if not same_line_select and not previous_line_select:
+                continue
+            if same_line_select:
+                violations.append({
+                    "line": token["line"],
+                    "start_offset": line_start + len(sql_prefix),
+                    "end_offset": token["start"],
+                    "replacement": "\n" + select_indent + " " * indent_size,
+                    "message": "MyBatis SELECT includes should use column-list indentation.",
+                })
+            tag_end = next(
+                (
+                    item
+                    for item in tokens[token_index + 1:]
+                    if item["type"] == "TAG_END"
+                ),
+                None,
+            )
+            if tag_end is None:
+                continue
+            next_line_start = content.find("\n", tag_end["end"])
+            expected_indent = select_indent + " " * indent_size
+            while next_line_start != -1:
+                next_line_start += 1
+                next_line_end = content.find("\n", next_line_start)
+                if next_line_end == -1:
+                    next_line_end = len(content)
+                next_line = content[next_line_start:next_line_end]
+                next_text = next_line.lstrip(" \t")
+                if next_text:
+                    first_words = " ".join(next_text.upper().split()[:2])
+                    is_projection_include = bool(re.match(
+                        r"^<include\b[^>]*/>\s*,?\s*$",
+                        next_text,
+                        re.IGNORECASE,
+                    ))
+                    if next_text.startswith("<") and not is_projection_include:
+                        break
+                    if re.match(
+                        r"^(?:FROM|INTO|WHERE|GROUP BY|ORDER BY|HAVING|"
+                        r"LIMIT|OFFSET|UNION|INTERSECT|EXCEPT|RETURNING)\b",
+                        first_words,
+                    ):
+                        break
+                    actual_indent = next_line[
+                        : len(next_line) - len(next_text)
+                    ]
+                    if (
+                        len(actual_indent) <= len(select_indent)
+                        and not is_projection_include
+                    ):
+                        violations.append({
+                            "line": content.count("\n", 0, next_line_start) + 1,
+                            "start_offset": next_line_start,
+                            "end_offset": next_line_start + len(actual_indent),
+                            "replacement": expected_indent,
+                            "message": "Columns after a MyBatis SELECT include should stay aligned.",
+                        })
+                if next_line_end >= len(content):
+                    break
+                next_line_start = next_line_end
+        for token in tokens:
+            if (
+                token["type"] != "TAG_OPEN_START"
+                or token["value"][1:].lower()
+                not in {"if", "when", "otherwise"}
+            ):
+                continue
+            if not any(start < token["start"] < end for start, end in query_ranges):
+                continue
+            line_start = content.rfind("\n", 0, token["start"]) + 1
+            prefix = content[line_start:token["start"]]
+            sql_prefix = prefix.rstrip(" \t")
+            upper_sql_prefix = sql_prefix.upper()
+            same_line_select = bool(
+                upper_sql_prefix.endswith("SELECT")
+                or upper_sql_prefix.endswith("GROUP BY")
+            )
+            previous_line_end = max(0, line_start - 1)
+            previous_line_start = content.rfind(
+                "\n", 0, previous_line_end
+            ) + 1
+            previous_line = content[
+                previous_line_start:previous_line_end
+            ]
+            previous_line_select = (
+                not prefix.strip()
+                and previous_line.strip().upper().endswith(
+                    ("SELECT", "GROUP BY")
+                )
+            )
+            if not same_line_select and not previous_line_select:
+                continue
+            select_line = prefix if same_line_select else previous_line
+            select_indent = select_line[
+                : len(select_line) - len(select_line.lstrip(" \t"))
+            ]
+            if same_line_select:
+                violations.append({
+                    "line": token["line"],
+                    "start_offset": line_start + len(sql_prefix),
+                    "end_offset": token["start"],
+                    "replacement": "\n" + select_indent + " " * indent_size,
+                    "message": (
+                        "A dynamic projection or grouping should start on "
+                        "the line after its clause."
+                    ),
+                })
+            element = next(
+                (
+                    item
+                    for item in elements
+                    if item["start_offset"] == token["start"]
+                ),
+                None,
+            )
+            if element is None:
+                continue
+            if (
+                element.get("inner_tokens")
+                and content.count("\n", 0, element["start_offset"])
+                == content.count("\n", 0, element["end_offset"])
+            ):
+                first_inner = element["inner_tokens"][0]["start"]
+                last_inner = element["inner_tokens"][-1]["end"]
+                opening = content[element["start_offset"]:first_inner].rstrip()
+                inner = content[first_inner:last_inner].strip()
+                closing = content[last_inner:element["end_offset"]].lstrip()
+                body_indent = select_indent + " " * (2 * indent_size)
+                inner_tokens = tokenize_sql(inner)
+                inner_depths = get_token_depths(inner_tokens)
+                comma_offsets = [
+                    item["start"]
+                    for index, item in enumerate(inner_tokens)
+                    if item["type"] == "COMMA" and inner_depths[index] == 0
+                ]
+                trailing_comma = bool(
+                    comma_offsets and not inner[comma_offsets[-1] + 1:].strip()
+                )
+                split_offsets = comma_offsets[:-1] if trailing_comma else comma_offsets
+                items = []
+                item_start = 0
+                for comma_offset in split_offsets:
+                    items.append(inner[item_start:comma_offset].strip())
+                    item_start = comma_offset + 1
+                items.append(
+                    inner[item_start:].rstrip(",").strip()
+                    if trailing_comma
+                    else inner[item_start:].strip()
+                )
+                if len(items) > 1 and all(items):
+                    inner = (",\n" + body_indent).join(items)
+                    if trailing_comma:
+                        inner += ","
+                replacement = (
+                    opening
+                    + "\n"
+                    + body_indent
+                    + inner
+                    + "\n"
+                    + select_indent
+                    + " " * indent_size
+                    + closing
+                )
+                violations.append({
+                    "line": token["line"],
+                    "start_offset": element["start_offset"],
+                    "end_offset": element["end_offset"],
+                    "replacement": replacement,
+                    "message": (
+                        "A dynamic projection or grouping should use a "
+                        "multiline programming-style block."
+                    ),
+                })
+            next_line_start = content.find("\n", element["end_offset"])
+            if next_line_start == -1:
+                continue
+            next_line_start += 1
+            next_line_end = content.find("\n", next_line_start)
+            if next_line_end == -1:
+                next_line_end = len(content)
+            next_line = content[next_line_start:next_line_end]
+            next_text = next_line.lstrip(" \t")
+            if (
+                not next_text
+                or next_text.startswith("<")
+                or next_text.split(None, 1)[0].upper() == "FROM"
+            ):
+                continue
+            actual_indent = next_line[: len(next_line) - len(next_text)]
+            expected_indent = select_indent + " " * indent_size
+            if actual_indent != expected_indent:
+                violations.append({
+                    "line": content.count("\n", 0, next_line_start) + 1,
+                    "start_offset": next_line_start,
+                    "end_offset": next_line_start + len(actual_indent),
+                    "replacement": expected_indent,
+                    "message": (
+                        "Items after a dynamic projection or grouping should "
+                        "stay aligned."
+                    ),
+                })
+        for token in tokens:
+            if token["type"] != "TAG_OPEN_START" or token["value"][1:].lower() != "foreach":
+                continue
+            if not any(start < token["start"] < end for start, end in query_ranges):
+                continue
+            line_start = content.rfind("\n", 0, token["start"]) + 1
+            prefix = content[line_start:token["start"]]
+            sql_prefix = prefix.rstrip(" \t")
+            same_line = bool(sql_prefix)
+            if same_line and 0 < token["line"] <= len(lines):
+                if len(lines[token["line"] - 1]) <= 120:
+                    # A compact IN/foreach expression follows the same
+                    # fit-first rule as WHERE and JOIN. Expanding it here
+                    # would be immediately reversed by the SQL bridge.
+                    continue
+            if same_line:
+                in_line = sql_prefix
+                gap_start = line_start + len(sql_prefix)
+                gap_replacement_prefix = "\n"
+            else:
+                previous_line_end = line_start - 1
+                previous_line_start = content.rfind(
+                    "\n", 0, previous_line_end
+                ) + 1
+                in_line = content[previous_line_start:previous_line_end].rstrip(
+                    " \t"
+                )
+                gap_start = line_start
+                gap_replacement_prefix = ""
+            if not in_line or in_line.split()[-1].upper() != "IN":
+                continue
+            line_indent = in_line[: len(in_line) - len(in_line.lstrip(" \t"))]
+            foreach_indent = line_indent + " " * indent_size
+            inline_where = re.match(
+                r"(?i)^([ \t]*)WHERE([ \t]+)(.+\bIN)$", in_line
+            )
+            if inline_where is not None:
+                in_line_start = line_start if same_line else previous_line_start
+                where_gap_start = in_line_start + inline_where.start(2)
+                where_gap_end = in_line_start + inline_where.end(2)
+                condition_indent = line_indent + " " * indent_size
+                where_replacement = "\n" + condition_indent
+                if content[where_gap_start:where_gap_end] != where_replacement:
+                    violations.append({
+                        "line": token["line"],
+                        "start_offset": where_gap_start,
+                        "end_offset": where_gap_end,
+                        "replacement": where_replacement,
+                        "message": "A WHERE condition continued by foreach should start on its own line.",
+                    })
+                foreach_indent = condition_indent + " " * indent_size
+            foreach_replacement = gap_replacement_prefix + foreach_indent
+            if content[gap_start:token["start"]] != foreach_replacement:
+                violations.append({
+                    "line": token["line"],
+                    "start_offset": gap_start,
+                    "end_offset": token["start"],
+                    "replacement": foreach_replacement,
+                    "message": "MyBatis foreach continuation should start on the line after IN.",
+                })
+
+        dynamic_join_modifier = re.compile(
+            r"(?im)^([ \t]*)<if\b[^>\n]*>\s*"
+            r"(?:LEFT|RIGHT|FULL|INNER|CROSS)\s*</if>([ \t]+)(?=JOIN\b)"
+        )
+        for match in dynamic_join_modifier.finditer(content):
+            if not any(start < match.start() < end for start, end in query_ranges):
+                continue
+            violations.append({
+                "line": content.count("\n", 0, match.start()) + 1,
+                "start_offset": match.start(2),
+                "end_offset": match.end(2),
+                "replacement": "\n" + match.group(1),
+                "message": "A JOIN controlled by a dynamic modifier should start on its own line.",
+            })
+
+        # Source-mapped SQL can contain repeated CASE branches on opposite
+        # sides of dynamic tags. Keep boolean continuations anchored to their
+        # WHEN line even when the embedded diff cannot identify the repeated
+        # whitespace span unambiguously.
+        active_case_indent = None
+        case_continuation_lines = set()
+        case_line_starts = [0]
+        case_line_starts.extend(
+            offset + 1 for offset, char in enumerate(content) if char == "\n"
+        )
+        for line_index, line_text in enumerate(lines):
+            line_start = case_line_starts[line_index]
+            if not any(start < line_start < end for start, end in query_ranges):
+                active_case_indent = None
+                continue
+            stripped = line_text.strip()
+            if not stripped or stripped.startswith("<"):
+                continue
+            upper = stripped.upper()
+            actual_indent = line_text[: len(line_text) - len(line_text.lstrip(" \t"))]
+            if upper.startswith("WHEN "):
+                active_case_indent = (
+                    None if " THEN " in f" {upper} " else actual_indent
+                )
+                continue
+            if active_case_indent is None:
+                continue
+            if upper.startswith(("AND ", "OR ")):
+                case_continuation_lines.add(line_index + 1)
+                expected_indent = active_case_indent + " " * indent_size
+                if actual_indent != expected_indent:
+                    violations.append({
+                        "line": line_index + 1,
+                        "start_offset": line_start,
+                        "end_offset": line_start + len(actual_indent),
+                        "replacement": expected_indent,
+                        "message": "Multiline CASE conditions should align one indent beyond WHEN.",
+                    })
+                continue
+            if upper.startswith(("THEN ", "ELSE", "END", "WHEN ")):
+                active_case_indent = None
 
         # Build line starts mapping
         line_starts = [0]
@@ -177,7 +1321,10 @@ class XmlIndentRule(BaseRule):
                             break
                     
                     if query_el is not None:
-                        delta = query_el.get("delta", 0)
+                        # SQL indentation is owned by the embedded SQL rules.
+                        # Moving a query tag must not shift every text line in
+                        # its body and then fight the SQL formatter next pass.
+                        delta = 0
                     else:
                         delta = 0
                         for el in reversed(tag_stack):
@@ -200,6 +1347,173 @@ class XmlIndentRule(BaseRule):
                                 break
                     line_min_parent_indent[l] = min_parent_indent
 
+            if t["type"] == "TEXT" and t["value"].strip():
+                dynamic_parent = next(
+                    (
+                        parent
+                        for parent in reversed(tag_stack)
+                        if parent["tag"] in {
+                            "if", "foreach", "choose", "when", "otherwise",
+                            "trim", "where", "set",
+                        }
+                    ),
+                    None,
+                )
+                if dynamic_parent is not None:
+                    parent_indent = dynamic_parent.get("resolved_indent")
+                    if parent_indent is None:
+                        parent_line = lines[dynamic_parent["token"]["line"] - 1]
+                        parent_indent = parent_line[: len(parent_line) - len(parent_line.lstrip(" \t"))]
+                    minimum_indent = parent_indent + " " * indent_size
+                    token_line_start = content.rfind("\n", 0, t["start"]) + 1
+                    starts_inline = bool(
+                        content[token_line_start:t["start"]].strip()
+                    )
+                    text_block_delta = 0
+                    if defer_sql_text and not starts_inline:
+                        for candidate_line in range(line, end_line + 1):
+                            if not (1 <= candidate_line <= len(lines)):
+                                continue
+                            candidate = lines[candidate_line - 1]
+                            if (
+                                not candidate.strip()
+                                or candidate.lstrip().startswith("<")
+                            ):
+                                continue
+                            candidate_indent = candidate[
+                                : len(candidate) - len(candidate.lstrip(" \t"))
+                            ]
+                            if len(candidate_indent) % indent_size != 0:
+                                text_block_delta = (
+                                    len(minimum_indent) - len(candidate_indent)
+                                )
+                            break
+                    for text_line in range(line, end_line + 1):
+                        if text_line < 1 or text_line > len(lines):
+                            continue
+                        text_line_start = line_starts[text_line - 1]
+                        line_text = lines[text_line - 1]
+                        if not line_text.strip() or line_text.lstrip().startswith("<"):
+                            continue
+                        if text_line == line and starts_inline:
+                            # The dynamic tag starts in an existing SQL line;
+                            # its text must not redefine that whole line's
+                            # indentation.
+                            continue
+                        actual_indent = line_text[: len(line_text) - len(line_text.lstrip(" \t"))]
+                        if defer_sql_text and text_block_delta:
+                            expected_length = max(
+                                len(minimum_indent),
+                                len(actual_indent) + text_block_delta,
+                            )
+                            explicit_expected_indent[text_line] = (
+                                " " * expected_length
+                            )
+                            continue
+                        first_word = line_text.strip().split(None, 1)[0].upper()
+                        is_logical_continuation = first_word in {"AND", "OR"}
+                        open_parenthesis_depth = 0
+                        opening_tag_end = content.find(
+                            ">", dynamic_parent["token"]["start"]
+                        )
+                        dynamic_prefix_tokens = []
+                        if 0 <= opening_tag_end < text_line_start:
+                            dynamic_prefix_tokens = tokenize_sql(
+                                content[opening_tag_end + 1:text_line_start]
+                            )
+                            open_parenthesis_depth = sum(
+                                1 if item["value"] == "(" else -1
+                                for item in dynamic_prefix_tokens
+                                if item["type"] == "PAREN"
+                            )
+                        has_local_logical_clause = False
+                        local_logical_indent = None
+                        if is_logical_continuation:
+                            if 0 <= opening_tag_end < text_line_start:
+                                prefix_tokens = dynamic_prefix_tokens
+                                has_local_logical_clause = any(
+                                    item["type"] == "KEYWORD"
+                                    and item["value"].upper() in {"WHERE", "ON", "HAVING"}
+                                    for item in prefix_tokens
+                                )
+                                if has_local_logical_clause:
+                                    prefix_source = content[
+                                        opening_tag_end + 1:text_line_start
+                                    ]
+                                    prefix_tokens = tokenize_sql(prefix_source)
+                                    prefix_depths = get_token_depths(prefix_tokens)
+                                    open_parenthesis_depth = sum(
+                                        1 if item["value"] == "(" else -1
+                                        for item in prefix_tokens
+                                        if item["type"] == "PAREN"
+                                    )
+                                    owners = [
+                                        item
+                                        for index, item in enumerate(prefix_tokens)
+                                        if prefix_depths[index]
+                                        == open_parenthesis_depth
+                                        and item["type"] == "KEYWORD"
+                                        and item["value"].upper()
+                                        in {"WHERE", "ON", "HAVING", "AND", "OR"}
+                                    ]
+                                    if owners:
+                                        owner = owners[-1]
+                                        owner_line = prefix_source.splitlines()[
+                                            owner["line"] - 1
+                                        ]
+                                        owner_body = owner_line.lstrip(" \t")
+                                        owner_indent = owner_line[
+                                            : len(owner_line) - len(owner_body)
+                                        ]
+                                        owner_word = owner["value"].upper()
+                                        if owner_word in {"AND", "OR"}:
+                                            local_logical_indent = owner_indent
+                                        elif (
+                                            owner_word == "ON"
+                                            and owner_body.upper().startswith("ON ")
+                                        ) or owner_body.startswith(")"):
+                                            local_logical_indent = owner_indent
+                                        else:
+                                            local_logical_indent = (
+                                                owner_indent + " " * indent_size
+                                            )
+                                open_parenthesis_depth = sum(
+                                    1 if item["value"] == "(" else -1
+                                    for item in prefix_tokens
+                                    if item["type"] == "PAREN"
+                                )
+                        malformed_dynamic_indent = (
+                            not defer_sql_text
+                            and len(actual_indent) % indent_size != 0
+                        )
+                        if (
+                            (
+                                is_logical_continuation
+                                and text_line not in case_continuation_lines
+                                and (
+                                    (
+                                        has_local_logical_clause
+                                        and local_logical_indent is not None
+                                        and actual_indent != local_logical_indent
+                                    )
+                                    or (
+                                        not has_local_logical_clause
+                                        and open_parenthesis_depth <= 0
+                                        and actual_indent != minimum_indent
+                                    )
+                                )
+                            )
+                            or malformed_dynamic_indent
+                            or len(actual_indent) < len(minimum_indent)
+                        ):
+                            explicit_expected_indent[text_line] = (
+                                local_logical_indent
+                                if is_logical_continuation
+                                and has_local_logical_clause
+                                and local_logical_indent is not None
+                                else minimum_indent
+                            )
+
             # Track depth transitions
             if t["type"] == "TAG_OPEN_START":
                 tag_name = t["value"][1:].lower()
@@ -216,6 +1530,11 @@ class XmlIndentRule(BaseRule):
                         depth += 1
                     else:  # self closing tag "/>"
                         if tag_stack:
+                            line_start_idx = content.rfind("\n", 0, t["start"]) + 1
+                            if not content[line_start_idx:t["start"]].strip():
+                                opening_indent = tag_stack[-1].get("resolved_indent")
+                                if opening_indent is not None:
+                                    explicit_expected_indent[line] = opening_indent
                             tag_stack.pop()
                     last_open_start = None
 
@@ -313,10 +1632,17 @@ class XmlIndentRule(BaseRule):
                     })
                     
         # Check for collapsable elements that can fit on a single line under 120 chars
-        from mir.rules.xml.xml_mybatis_sql import parse_xml_elements, get_all_elements_recursively
         try:
-            root_elements = parse_xml_elements(tokens)
-            elements = get_all_elements_recursively(root_elements)
+            multiline_foreach_signatures = {
+                content[
+                    element["start_offset"]:element["inner_tokens"][0]["start"]
+                ].strip()
+                for element in elements
+                if element["tag"] == "foreach"
+                and element["inner_tokens"]
+                and content.count("\n", 0, element["start_offset"])
+                != content.count("\n", 0, element["end_offset"])
+            }
             for el in elements:
                 if el["tag"] in ("mapper", "select", "insert", "update", "delete", "sql"):
                     continue
@@ -325,13 +1651,36 @@ class XmlIndentRule(BaseRule):
                 has_child_tags = any(t["type"] == "TAG_OPEN_START" for t in el["inner_tokens"])
                 if has_child_tags:
                     continue
+                if el["tag"] in {"if", "when", "otherwise"}:
+                    opening_line_start = content.rfind(
+                        "\n", 0, el["start_offset"]
+                    ) + 1
+                    opening_prefix = content[
+                        opening_line_start:el["start_offset"]
+                    ].strip().upper()
+                    previous_line_end = max(0, opening_line_start - 1)
+                    previous_line_start = content.rfind(
+                        "\n", 0, previous_line_end
+                    ) + 1
+                    if opening_prefix.endswith(("SELECT", "GROUP BY")) or content[
+                        previous_line_start:previous_line_end
+                    ].strip().upper().endswith(("SELECT", "GROUP BY")):
+                        # A conditional projection is a programming-style
+                        # block even when its body would fit inline.
+                        continue
+                    first_inner = el["inner_tokens"][0]["start"]
+                    last_inner = el["inner_tokens"][-1]["end"]
+                    if content[first_inner:last_inner].strip().upper().startswith(
+                        "ELSE"
+                    ):
+                        # An XML-controlled CASE branch should read like a
+                        # programming-language block, even when its SQL body
+                        # happens to fit beside the opening tag.
+                        continue
                 
                 # Check if it's on multiple lines originally
-                start_token = tokens[el["start_idx"]]
-                end_token = tokens[el["end_idx"]]
-                if start_token["line"] == end_token["line"]:
-                    continue
-                    
+                start_line_number = content.count("\n", 0, el["start_offset"]) + 1
+                end_line_number = content.count("\n", 0, el["end_offset"]) + 1
                 start_offset = el["start_offset"]
                 end_offset = el["end_offset"]
                 
@@ -341,12 +1690,58 @@ class XmlIndentRule(BaseRule):
                 opening_tag = content[start_offset:first_inner]
                 inner_text = content[first_inner:last_inner]
                 closing_tag = content[last_inner:end_offset]
+                inner_lines = [
+                    line.strip()
+                    for line in inner_text.splitlines()
+                    if line.strip()
+                ]
+                if start_line_number == end_line_number:
+                    continue
+                if (
+                    el["tag"] == "foreach"
+                    and opening_tag.strip() in multiline_foreach_signatures
+                ):
+                    # XML line length deliberately expands every repeated
+                    # foreach with the same opening tag once one occurrence
+                    # needs multiple lines. Do not collapse a shorter copy
+                    # and create an inter-rule formatting cycle.
+                    continue
+                if el["tag"] in {"if", "when", "otherwise"} and len(inner_lines) > 1:
+                    continue
                 
                 collapsed = opening_tag.strip() + inner_text.strip() + closing_tag.strip()
+                if (
+                    el["tag"] in {"if", "when", "otherwise"}
+                    and inner_lines
+                    and inner_lines[0].upper().startswith(("AND ", "OR "))
+                    and start_line_number > 1
+                    and end_line_number < len(lines)
+                ):
+                    previous_sql = lines[start_line_number - 2].rstrip()
+                    following_sql = lines[end_line_number].strip()
+                    combined_physical_line = (
+                        previous_sql + " " + collapsed + " " + following_sql
+                    )
+                    preceding_tokens = tokenize_sql(content[:el["start_offset"]])
+                    preceding_open_depth = sum(
+                        1 if item["value"] == "(" else -1
+                        for item in preceding_tokens
+                        if item["type"] == "PAREN"
+                    )
+                    if (
+                        preceding_open_depth > 0
+                        and len(combined_physical_line) > 120
+                    ):
+                        # The embedded-SQL bridge would otherwise rejoin this
+                        # parenthesized conditional with both surrounding
+                        # fragments and send XML line length around a cycle.
+                        # Independent WHERE continuations remain compact XML
+                        # instructions when their own physical lines fit.
+                        continue
                 
                 # Resolve indent from start_line
-                start_line_idx = start_token["line"] - 1
-                expected_indent = explicit_expected_indent.get(start_token["line"])
+                start_line_idx = start_line_number - 1
+                expected_indent = explicit_expected_indent.get(start_line_number)
                 if expected_indent is None:
                     start_line = lines[start_line_idx] if start_line_idx < len(lines) else ""
                     indent = ""
@@ -360,7 +1755,7 @@ class XmlIndentRule(BaseRule):
                 total_len = len(expected_indent) + len(collapsed)
                 if total_len < 120:
                     violations.append({
-                        "line": start_token["line"],
+                        "line": start_line_number,
                         "start_offset": start_offset,
                         "end_offset": end_offset,
                         "replacement": collapsed,
@@ -368,6 +1763,34 @@ class XmlIndentRule(BaseRule):
                     })
         except Exception:
             pass
+
+        # A multiline table-function JOIN may live inside a dynamic XML
+        # branch. Its ON continuations align with the physical ``) alias ON``
+        # line; adding another XML level would break the SQL join layout.
+        filtered_join_continuations = []
+        for violation in violations:
+            line_number = violation.get("line", 0)
+            line_text = (
+                lines[line_number - 1]
+                if 1 <= line_number <= len(lines)
+                else ""
+            )
+            body = line_text.lstrip(" \t")
+            if body.upper().startswith(("AND ", "OR ")):
+                previous_index = line_number - 2
+                while previous_index >= 0 and not lines[previous_index].strip():
+                    previous_index -= 1
+                if previous_index >= 0:
+                    previous_line = lines[previous_index]
+                    previous_body = previous_line.lstrip(" \t")
+                    if (
+                        re.match(r"^\)\s+\w+\s+ON\b", previous_body, re.IGNORECASE)
+                        and len(previous_line) - len(previous_body)
+                        == len(line_text) - len(body)
+                    ):
+                        continue
+            filtered_join_continuations.append(violation)
+        violations = filtered_join_continuations
             
         collapse_spans = []
         for v in violations:
@@ -387,13 +1810,45 @@ class XmlIndentRule(BaseRule):
                     filtered_violations.append(v)
             violations = filtered_violations
             
+        structural_spans = [
+            (item["start_offset"], item["end_offset"])
+            for item in violations
+            if item.get("structural")
+        ]
+        if structural_spans:
+            violations = [
+                item
+                for item in violations
+                if item.get("structural")
+                or not any(
+                    start <= item["start_offset"] < end
+                    for start, end in structural_spans
+                )
+            ]
+
+        for match in re.finditer(
+            r"(?m)</foreach>(?P<gap>\n[ \t]*);[ \t]*(?=\n|$)",
+            content,
+        ):
+            gap_start, gap_end = match.span("gap")
+            violations.append({
+                "line": content.count("\n", 0, gap_end) + 1,
+                "start_offset": gap_start,
+                "end_offset": match.end(),
+                "replacement": ";",
+                "message": (
+                    "A SQL statement terminator should remain on the foreach "
+                    "closing-tag line when it fits."
+                ),
+            })
         return violations
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         indent_size = self.get_config_value(rule_config, "indent_size", 4)
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content, indent_size)
+        defer_sql_text = self._mybatis_rule_is_active(rule_config)
+        offending = self._find_violations(content, indent_size, defer_sql_text)
         for v in offending:
             line_idx = v["line"] - 1
             offending_line = lines[line_idx] if line_idx < len(lines) else ""
@@ -408,13 +1863,19 @@ class XmlIndentRule(BaseRule):
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
         indent_size = self.get_config_value(rule_config, "indent_size", 4)
-        offending = self._find_violations(content, indent_size)
+        defer_sql_text = self._mybatis_rule_is_active(rule_config)
+        offending = self._find_violations(content, indent_size, defer_sql_text)
         if not offending:
             return content
             
-        edits = []
+        edits_by_range = {}
         for item in offending:
-            edits.append((item["start_offset"], item["end_offset"], item["replacement"]))
+            key = (item["start_offset"], item["end_offset"])
+            edits_by_range.setdefault(key, item["replacement"])
+        edits = [
+            (start, end, replacement)
+            for (start, end), replacement in edits_by_range.items()
+        ]
             
         edits.sort(key=lambda x: x[0], reverse=True)
         chars = list(content)
@@ -422,3 +1883,14 @@ class XmlIndentRule(BaseRule):
             chars[start:end] = list(new_text)
             
         return "".join(chars)
+
+    @staticmethod
+    def _mybatis_rule_is_active(rule_config: Dict[str, Any]) -> bool:
+        rule_id = "IR-xml-mybatis-sql"
+        disabled = set(rule_config.get("_rules_to_disable", []))
+        if rule_id in disabled or f"xml:{rule_id}" in disabled:
+            return False
+        enabled = set(rule_config.get("_rules_to_enable", []))
+        if rule_config.get("_disable_all"):
+            return rule_id in enabled or f"xml:{rule_id}" in enabled
+        return True

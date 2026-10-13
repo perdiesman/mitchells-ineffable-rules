@@ -5,6 +5,9 @@ Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Data Modification Rules
+- **Commit Profile**: Yes
+- **MyBatis Safe**: Yes
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `max_length` (Default: `120`): Maximum line length before wrapping UPDATE statements.
@@ -33,6 +36,18 @@ SET
     my_first_very_long_field_with_very_long_value = 1,
     my_second_very_long_field_with_very_long_value = 2
 WHERE some_condition;
+```
+
+#### ❌ Violating Example #3
+```sql
+UPDATE sample_item SET enabled = true,
+                    updated_at = now()
+                WHERE item_id = :item_id
+```
+
+####  Correct Example #3
+```sql
+UPDATE sample_item SET enabled = true, updated_at = now() WHERE item_id = :item_id
 ```
 
 #### Additional Validations

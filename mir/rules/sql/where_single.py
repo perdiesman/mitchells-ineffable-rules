@@ -1,29 +1,60 @@
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
+from mir.rules.sql.sql_utils import (
+    find_boolean_operator_indices,
+    get_token_depths,
+    source_text_length,
+    tokenize_sql,
+)
+from mir.rules.sql.indent import IndentRule
+from mir.rules.sql.line_length import LineLengthRule
 
 class WhereSingleRule(BaseRule):
+    commit_profile = True
+    embedded_safe = True
     rule_id = "IR-where-single"
-    description = "Single WHERE condition should be on the same line as the WHERE keyword."
+    description = (
+        "Keep a single WHERE condition inline when it fits; otherwise place the "
+        "condition on the next indented line."
+    )
     category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
     
-    default_config = {}
-    config_options = {}
+    default_config = {"max_line_length": 120, "indent_size": 4}
+    config_options = {
+        "max_line_length": {
+            "default": 120,
+            "description": "Maximum length for an inline WHERE clause.",
+            "fallback": "IR-line-length:max_length",
+        },
+        "indent_size": {
+            "default": 4,
+            "description": "Spaces used for a wrapped WHERE condition.",
+            "fallback": "IR-indent:indent_size",
+        },
+    }
     
     examples = [
         {
             "violating": "SELECT id FROM users\nWHERE\n    active = true;",
             "correct": "SELECT id FROM users\nWHERE active = true;"
+        },
+        {
+            "violating": "SELECT item_id FROM sample_item WHERE recorded_timestamp_for_requested_interval BETWEEN timezone('utc', :requested_interval_start) AND timezone('utc', :requested_interval_end);",
+            "correct": "SELECT item_id FROM sample_item\nWHERE\n    recorded_timestamp_for_requested_interval BETWEEN timezone('utc', :requested_interval_start) AND timezone('utc', :requested_interval_end);"
         }
     ]
     additional_validations = [
         "SELECT id FROM users WHERE active = true;",
-        "SELECT id FROM users WHERE active = true AND age > 21;" # Multi-condition is skipped here
+        "SELECT id FROM users WHERE active = true AND age > 21;", # Multi-condition is skipped here
+        "SELECT id FROM users WHERE created_at BETWEEN :start AND :end;",
     ]
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _find_violations(
+        self, content: str, rule_config: Dict[str, Any] | None = None
+    ) -> List[dict]:
+        rule_config = rule_config or {}
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
         violations = []
@@ -55,33 +86,113 @@ class WhereSingleRule(BaseRule):
                 clause_depths = depths[i + 1:clause_end]
                 
                 # Check for AND/OR at depth outer_depth
-                has_logical = False
+                has_logical = bool(find_boolean_operator_indices(
+                    tokens, depths, outer_depth, i + 1, clause_end
+                ))
                 first_cond_tok = None
+                first_cond_idx = None
                 
-                for idx, (t, d) in enumerate(zip(clause_tokens, clause_depths)):
+                for idx, (t, d) in enumerate(
+                    zip(clause_tokens, clause_depths), start=i + 1
+                ):
                     if d == outer_depth:
-                        if t["type"] == "KEYWORD" and t["value"].upper() in ("AND", "OR"):
-                            has_logical = True
-                            break
-                        elif t["type"] != "WHITESPACE" and first_cond_tok is None:
+                        if t["type"] != "WHITESPACE" and first_cond_tok is None:
                             first_cond_tok = t
+                            first_cond_idx = idx
                             
                 if first_cond_tok and not has_logical:
-                    # Single condition! Verify line numbers
-                    if first_cond_tok["line"] != tok["line"]:
-                        violations.append({
+                    if any(token["type"] == "COMMENT" for token in clause_tokens):
+                        continue
+                    clause_single = "".join(
+                        " " if token["type"] == "WHITESPACE" else token["value"]
+                        for token in tokens[i:clause_end]
+                    ).strip()
+                    line_start = content.rfind("\n", 0, tok["start"]) + 1
+                    where_indent = content[line_start:tok["start"]]
+                    where_indent = where_indent[: len(where_indent) - len(where_indent.lstrip())]
+                    max_length = self.get_config_value(
+                        rule_config,
+                        "max_line_length",
+                        120,
+                        fallbacks=[(LineLengthRule, "max_length")],
+                    )
+                    indent_size = self.get_config_value(
+                        rule_config,
+                        "indent_size",
+                        4,
+                        fallbacks=[(IndentRule, "indent_size")],
+                    )
+                    should_wrap = (
+                        source_text_length(where_indent + clause_single, rule_config)
+                        > max_length
+                    )
+                    dynamic_offsets = rule_config.get(
+                        "mybatis_foreach_offsets", set()
+                    )
+                    clause_has_foreach = any(
+                        token["start"] in dynamic_offsets
+                        for token in clause_tokens
+                        if token["type"] not in ("WHITESPACE", "COMMENT")
+                    )
+                    # A foreach that wraps the complete statement contributes
+                    # no runtime structure inside this WHERE. Only force the
+                    # condition onto its own line when the foreach is nested
+                    # within an otherwise static statement.
+                    statement_has_static_token = any(
+                        token["type"] not in ("WHITESPACE", "COMMENT")
+                        and token["start"] not in dynamic_offsets
+                        for token in tokens
+                    )
+                    if clause_has_foreach and statement_has_static_token:
+                        should_wrap = True
+                    prefix_before_where = content[line_start:tok["start"]].rstrip()
+                    if prefix_before_where.strip():
+                        should_wrap = (
+                            source_text_length(
+                                prefix_before_where + " " + clause_single,
+                                rule_config,
+                            )
+                            > max_length
+                        )
+                    expected = (
+                        "\n" + where_indent + " " * indent_size
+                        if should_wrap
+                        else " "
+                    )
+                    whitespace = (
+                        tokens[first_cond_idx - 1]
+                        if first_cond_idx > i
+                        and tokens[first_cond_idx - 1]["type"] == "WHITESPACE"
+                        else None
+                    )
+                    actual = whitespace["value"] if whitespace else ""
+                    if actual != expected:
+                        item = {
                             "where_tok": tok,
                             "cond_tok": first_cond_tok,
-                            "ws_start": tok["end"],
-                            "ws_end": first_cond_tok["start"]
-                        })
+                            "ws_start": whitespace["start"] if whitespace else tok["end"],
+                            "ws_end": first_cond_tok["start"],
+                            "replacement": expected,
+                        }
+                        if should_wrap and prefix_before_where.strip():
+                            ws_before_where = (
+                                tokens[i - 1]
+                                if i > 0 and tokens[i - 1]["type"] == "WHITESPACE"
+                                else None
+                            )
+                            item["pre_where_edit"] = (
+                                ws_before_where["start"] if ws_before_where else tok["start"],
+                                ws_before_where["end"] if ws_before_where else tok["start"],
+                                "\n" + where_indent,
+                            )
+                        violations.append(item)
                         
         return violations
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         violations = []
         lines = content.splitlines()
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         
         for item in offending:
             tok = item["where_tok"]
@@ -89,7 +200,7 @@ class WhereSingleRule(BaseRule):
                 Violation(
                     rule_id=self.rule_id,
                     line_number=tok["line"],
-                    message="Single WHERE condition should be on the same line as WHERE.",
+                    message="Single WHERE condition should use the configured fit-or-wrap layout.",
                     offending_lines=[lines[tok["line"] - 1] if tok["line"] - 1 < len(lines) else ""],
                     is_fixable=True
                 )
@@ -97,13 +208,15 @@ class WhereSingleRule(BaseRule):
         return violations
 
     def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
-        offending = self._find_violations(content)
+        offending = self._find_violations(content, rule_config)
         if not offending:
             return content
             
         edits = []
         for item in offending:
-            edits.append((item["ws_start"], item["ws_end"], " "))
+            edits.append((item["ws_start"], item["ws_end"], item["replacement"]))
+            if item.get("pre_where_edit"):
+                edits.append(item["pre_where_edit"])
             
         edits.sort(key=lambda x: x[0], reverse=True)
         chars = list(content)

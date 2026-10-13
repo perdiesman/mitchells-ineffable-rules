@@ -5,6 +5,9 @@ Parenthesized column alias lists in FROM/JOIN clauses should format entries one 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled` (Default: `true`): Enable or disable this rule.
   - `max_line_length` (Default: `140`): Line length threshold above which paren lists will be split. *Note: Value dynamically inherited from rule [`IR-line-length`](../general/IR-line-length.md) -> `max_line_length` if not configured.*

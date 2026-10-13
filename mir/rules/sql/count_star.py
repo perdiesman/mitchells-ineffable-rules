@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class CountStarRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-count-star"
     description = "Standardize COUNT(1) or row-counting expressions to COUNT(*)."
     category = "queries"

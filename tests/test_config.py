@@ -1,18 +1,58 @@
 import os
 import sys
+import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from mir.engine.config import load_config
 
 class TestConfig(unittest.TestCase):
+    def test_version_matches_package_metadata(self):
+        output = StringIO()
+        with self.assertRaises(SystemExit) as raised:
+            with redirect_stdout(output):
+                load_config(["--version"])
+        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(output.getvalue().strip(), "mir-linter 0.3.0")
+
     def test_default_config(self):
         config = load_config([])
         self.assertFalse(config.fix)
         self.assertFalse(config.dry_run)
         self.assertFalse(config.verbose)
         self.assertEqual(config.paths, ["."])
+        self.assertEqual(config.language_configs, {})
+
+    def test_language_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, ".ir-config.yaml")
+            with open(path, "w", encoding="utf-8") as stream:
+                stream.write("languages:\n  java:\n    generated:\n      mode: check\n")
+            config = load_config(["--config", path])
+            self.assertEqual(config.language_configs["java"]["generated"]["mode"], "check")
+
+    def test_provider_configuration(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as stream:
+            stream.write(
+                "providers:\n"
+                "  ruff:\n"
+                "    enabled: true\n"
+                "    unsafe_fixes: false\n"
+                "provider_dirs: [tools/providers]\n"
+                "disable_providers: [prettier]\n"
+            )
+            path = stream.name
+        try:
+            config = load_config(["--config", path, "--enable-provider", "eslint"])
+            self.assertTrue(config.provider_configs["ruff"]["enabled"])
+            self.assertEqual(config.provider_dirs, ["tools/providers"])
+            self.assertEqual(config.providers_to_enable, ["eslint"])
+            self.assertEqual(config.providers_to_disable, ["prettier"])
+        finally:
+            os.unlink(path)
 
     def test_cli_overrides(self):
         config = load_config(["--fix", "--verbose", "file1.sql", "file2.sql"])
@@ -20,6 +60,16 @@ class TestConfig(unittest.TestCase):
         self.assertFalse(config.dry_run)
         self.assertTrue(config.verbose)
         self.assertEqual(config.paths, ["file1.sql", "file2.sql"])
+
+    def test_staged_uses_commit_profile_inputs(self):
+        config = load_config(["--staged", "--fix", "--profile", "commit"])
+        self.assertTrue(config.staged)
+        self.assertTrue(config.fix)
+        self.assertEqual(config.profile, "commit")
+
+    def test_lines_reject_multiple_paths(self):
+        with self.assertRaises(SystemExit):
+            load_config(["--lines", "2-3", "first.sql", "second.sql"])
 
     def test_env_overrides(self):
         os.environ["IR_FIX"] = "True"

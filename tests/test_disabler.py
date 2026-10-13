@@ -70,5 +70,20 @@ select * from orders;
         # Ends after line 7 comment, so line 8 is not disabled
         self.assertNotIn(8, all_disabled)
 
+    def test_xml_formatter_off_disables_until_formatter_on(self):
+        content = (
+            "<mapper>\n"
+            "    <!-- @formatter:off -->\n"
+            "    <select>select  one</select>\n"
+            "    <!--@formatter:on-->\n"
+            "    <select>select two</select>\n"
+            "</mapper>\n"
+        )
+
+        disabled_map = get_disabled_rules_map(content, "test.xml")
+
+        self.assertIn(3, disabled_map.get("IR-all", set()))
+        self.assertNotIn(5, disabled_map.get("IR-all", set()))
+
 if __name__ == "__main__":
     unittest.main()

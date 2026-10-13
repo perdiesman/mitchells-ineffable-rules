@@ -22,7 +22,7 @@ class RaiseLayoutRule(BaseRule):
     examples = [
         {
             "violating": "RAISE unique_violation USING MESSAGE = 'id: ' || NEW.id::text || ' already exists in my_schema.my_very_long_table_name_to_exceed_the_line_length_limit';",
-            "correct": "RAISE unique_violation\n    USING MESSAGE = 'id: '\n        || NEW.id::text\n        || ' already exists in my_schema.my_very_long_table_name_to_exceed_the_line_length_limit';"
+            "correct": "RAISE unique_violation\n    USING MESSAGE = 'id: ' || NEW.id::text\n        || ' already exists in my_schema.my_very_long_table_name_to_exceed_the_line_length_limit';"
         }
     ]
     additional_validations = [
@@ -31,6 +31,14 @@ class RaiseLayoutRule(BaseRule):
 
     def _find_violations(self, content: str, rule_config: Dict[str, Any]) -> List[dict]:
         max_len = self.get_config_value(rule_config, "max_length", 120)
+        from mir.rules.sql.additive_wrap import AdditiveWrapRule
+
+        additive_max_len = self.get_config_value(
+            rule_config,
+            "additive_max_length",
+            100,
+            fallbacks=[(AdditiveWrapRule, "max_line_length")],
+        )
         tokens = tokenize_sql(content)
         violations = []
         n = len(tokens)
@@ -140,12 +148,21 @@ class RaiseLayoutRule(BaseRule):
                     parts = [p for p in parts if p]
                     
                     if len(parts) > 1:
-                        # Format with split ||
-                        expected = (
-                            first_part + "\n" +
-                            base_indent + "    " + using_prefix + " " + parts[0] + "\n" +
-                            "\n".join(base_indent + "        || " + p for p in parts[1:]) + ";"
-                        )
+                        # Keep as many operands together as fit, then align
+                        # every continuation operator at one stable level.
+                        expression_lines = [
+                            base_indent + "    " + using_prefix + " " + parts[0]
+                        ]
+                        continuation_indent = base_indent + "        "
+                        for part in parts[1:]:
+                            candidate = expression_lines[-1] + " || " + part
+                            if len(candidate) <= additive_max_len:
+                                expression_lines[-1] = candidate
+                            else:
+                                expression_lines.append(
+                                    continuation_indent + "|| " + part
+                                )
+                        expected = first_part + "\n" + "\n".join(expression_lines) + ";"
                     else:
                         expected = (
                             first_part + "\n" +

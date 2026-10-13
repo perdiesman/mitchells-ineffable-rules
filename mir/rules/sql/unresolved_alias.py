@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql, find_matching_paren
 
 class UnresolvedAliasRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-unresolved-alias"
     description = "Detect references to table aliases or qualifiers that are not declared in the query context."
     category = "general"
@@ -20,7 +21,11 @@ class UnresolvedAliasRule(BaseRule):
     ]
     additional_validations = [
         "SELECT o.id FROM other_schema.other_table o;",
-        "SELECT NEW.id;"
+        "SELECT NEW.id;",
+        "INSERT INTO sample_table (item_id, item_value) VALUES (1, 'x') "
+        "ON CONFLICT (item_id) DO UPDATE SET item_value = excluded.item_value;",
+        "SELECT lateral_rows.item_id FROM sample_item item "
+        "LEFT JOIN LATERAL (SELECT item_id FROM sample_child) lateral_rows ON true;",
     ]
 
     def _find_violations(self, content: str) -> List[dict]:
@@ -70,6 +75,11 @@ class UnresolvedAliasRule(BaseRule):
                 idx = i + 1
                 while idx < n and tokens[idx]["type"] in ("WHITESPACE", "COMMENT"):
                     idx += 1
+
+                if idx < n and tokens[idx]["value"].upper() == "LATERAL":
+                    idx += 1
+                    while idx < n and tokens[idx]["type"] in ("WHITESPACE", "COMMENT"):
+                        idx += 1
                     
                 paren_idx = None
                 path_tokens = []
@@ -148,6 +158,19 @@ class UnresolvedAliasRule(BaseRule):
                     continue
                     
                 qualifier = tokens[i]["value"].lower()
+                if qualifier == "excluded":
+                    statement_values = []
+                    for previous in range(i - 1, -1, -1):
+                        if tokens[previous]["type"] == "SEMI":
+                            break
+                        if tokens[previous]["type"] not in ("WHITESPACE", "COMMENT"):
+                            statement_values.append(tokens[previous]["value"].upper())
+                    statement_values.reverse()
+                    if any(
+                        statement_values[index:index + 2] == ["ON", "CONFLICT"]
+                        for index in range(len(statement_values) - 1)
+                    ):
+                        continue
                 if qualifier not in valid:
                     violations.append({
                         "token": tokens[i],

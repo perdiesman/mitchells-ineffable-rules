@@ -2,8 +2,9 @@ import os
 import glob
 import importlib.util
 import inspect
+import sys
 from typing import List, Optional, Type
-from mir.engine.rule_interface import BaseRule
+from mir.engine.rule_interface import BaseRule, RuleCase
 
 class RuleValidationError(Exception):
     """
@@ -39,6 +40,19 @@ def validate_rule_class(rule_class: Type[BaseRule]) -> None:
         raise RuleValidationError(
             f"Rule '{rule_id}' (class {rule_class.__name__}) 'is_fixable' must be 'yes', 'no', or 'sometimes'."
         )
+
+    for metadata_name in (
+        "commit_profile",
+        "commit_semantic_rewrite",
+        "embedded_safe",
+        "embedded_dynamic_indent_safe",
+        "trellis_safe",
+    ):
+        metadata_value = getattr(rule_class, metadata_name, None)
+        if not isinstance(metadata_value, bool):
+            raise RuleValidationError(
+                f"Rule '{rule_id}' (class {rule_class.__name__}) '{metadata_name}' must be a boolean."
+            )
         
     # Check if 'check' is implemented (must not be the base check)
     if not hasattr(rule_class, "check") or rule_class.check == BaseRule.check:
@@ -104,6 +118,23 @@ def validate_rule_class(rule_class: Type[BaseRule]) -> None:
                     f"Rule '{rule_id}' (class {rule_class.__name__}) additional_validation #{idx + 1} must be a string."
                 )
 
+    cases = getattr(rule_class, "cases", None)
+    if cases is not None:
+        if not isinstance(cases, list):
+            raise RuleValidationError(f"Rule '{rule_id}' (class {rule_class.__name__}) 'cases' must be a list.")
+        valid_expectations = {"accepted", "reported", "fixed", "not_fixed"}
+        for idx, case in enumerate(cases):
+            if not isinstance(case, RuleCase):
+                raise RuleValidationError(
+                    f"Rule '{rule_id}' (class {rule_class.__name__}) case #{idx + 1} must be a RuleCase."
+                )
+            if case.expectation not in valid_expectations:
+                raise RuleValidationError(
+                    f"Rule '{rule_id}' case #{idx + 1} has unknown expectation '{case.expectation}'."
+                )
+            if case.expectation == "fixed" and case.fixed is None:
+                raise RuleValidationError(f"Rule '{rule_id}' fixed case #{idx + 1} must define fixed output.")
+
 def load_rules_from_dir(directory: str, language: str, is_external: bool = False) -> List[BaseRule]:
     """
     Helper to load all rules from a single directory.
@@ -127,7 +158,16 @@ def load_rules_from_dir(directory: str, language: str, is_external: bool = False
             spec = importlib.util.spec_from_file_location(module_name, file_path)
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
+                previous_module = sys.modules.get(module_name)
+                sys.modules[module_name] = module
+                try:
+                    spec.loader.exec_module(module)
+                except Exception:
+                    if previous_module is None:
+                        sys.modules.pop(module_name, None)
+                    else:
+                        sys.modules[module_name] = previous_module
+                    raise
                 
                 # Scan module for classes that subclass BaseRule
                 for name, obj in inspect.getmembers(module, inspect.isclass):

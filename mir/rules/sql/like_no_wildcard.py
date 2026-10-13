@@ -3,6 +3,7 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
 
 class LikeNoWildcardRule(BaseRule):
+    embedded_safe = True
     rule_id = "IR-like-no-wildcard"
     description = "Simplify LIKE comparisons to standard = comparisons when the pattern contains no wildcard characters (% or _)."
     category = "queries"

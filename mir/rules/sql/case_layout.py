@@ -1,15 +1,26 @@
+import re
 from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
-from mir.rules.sql.sql_utils import tokenize_sql, get_token_depths
+from mir.rules.sql.case_when_wrap import CaseWhenWrapRule
+from mir.rules.sql.sql_utils import (
+    find_between_delimiter_indices,
+    find_boolean_operator_indices,
+    get_token_depths,
+    source_text_length,
+    tokenize_sql,
+)
 from mir.rules.sql.indent import IndentRule
 from mir.rules.sql.line_length import LineLengthRule
 
 class CaseLayoutRule(BaseRule):
+    commit_profile = True
+    embedded_safe = True
     rule_id = "IR-case"
     description = (
         "CASE statements should be formatted with WHEN/THEN on separate lines "
         "unless the block is simple (exactly one WHEN condition and an optional ELSE clause) "
-        "and fits on a single line within length constraints."
+        "and fits on a single line within length constraints. Nested CASE results stay "
+        "attached to ELSE and indent as child blocks."
     )
     category = "queries"
     is_fixable = "yes"
@@ -27,7 +38,17 @@ class CaseLayoutRule(BaseRule):
     additional_validations = [
         "SELECT CASE WHEN x = 1 THEN 'a' END FROM users;",
         "SELECT CASE WHEN x = 1 THEN 'a' ELSE 'b' END FROM users;",
-        "SELECT \n    CASE\n        WHEN x = 1 THEN 'a'\n        ELSE 'b'\n    END;"
+        "SELECT \n    CASE\n        WHEN x = 1 THEN 'a'\n        WHEN x = 2 THEN 'b'\n        ELSE 'c'\n    END;",
+        "SELECT CASE WHEN x IS NULL THEN NULL ELSE CASE WHEN y = 1 THEN true ELSE false END END FROM users;",
+        (
+            "SELECT CASE\n"
+            "    WHEN group_id = 1 THEN group_name\n"
+            "    ELSE CASE\n"
+            "        WHEN group_id = 2 THEN option_name\n"
+            "        ELSE CASE WHEN group_id = 3 THEN style_name ELSE null END\n"
+            "    END\n"
+            "END AS display_name FROM sample_item;"
+        ),
     ]
 
     def _find_case_blocks(self, tokens: List[dict]) -> List[dict]:
@@ -52,12 +73,19 @@ class CaseLayoutRule(BaseRule):
         return blocks
 
     def _find_violations(self, content: str, rule_config: Dict[str, Any]) -> List[dict]:
-        max_len = self.get_config_value(
+        line_max_len = self.get_config_value(
             rule_config,
             "max_length",
-            default_value=100,
+            default_value=120,
             fallbacks=[(LineLengthRule, "max_length")]
         )
+        case_max_len = self.get_config_value(
+            rule_config,
+            "max_line_length",
+            default_value=110,
+            fallbacks=[(CaseWhenWrapRule, "max_line_length")],
+        )
+        max_len = min(line_max_len, case_max_len)
         tokens = tokenize_sql(content)
         depths = get_token_depths(tokens)
         blocks = self._find_case_blocks(tokens)
@@ -83,16 +111,103 @@ class CaseLayoutRule(BaseRule):
             base_indent_spaces = base_indent_opt
         else:
             base_indent_spaces = 0
+        if "original_xml" in rule_config:
+            # MyBatis line limits apply to the physical XML line, matching
+            # IR-line-length rather than discounting the statement indent.
+            base_indent_spaces = 0
             
         for block in blocks:
             start_idx = block["start_idx"]
             end_idx = block["end_idx"]
             case_tok = block["case_tok"]
             end_tok = block["end_tok"]
+            if any(
+                token["type"] == "STRING" and "\n" in token["value"]
+                for token in tokens[start_idx:end_idx + 1]
+            ):
+                # Collapsing or rebuilding the CASE would normalize bytes
+                # inside a dynamic SQL string literal. Its contents are data,
+                # not layout owned by this rule.
+                continue
+            if any(
+                token["type"] == "SEMI"
+                for token in tokens[start_idx:end_idx + 1]
+            ):
+                # A CASE containing complete statements is a procedural
+                # PL/pgSQL control-flow block, not a scalar SQL expression.
+                # Its THEN bodies belong to the nested statement rules.
+                continue
+            effective_max_len = max_len
+            has_additive_expression = any(
+                token["type"] == "OPERATOR"
+                and token["value"] in {"+", "||"}
+                for token in tokens[start_idx:end_idx + 1]
+            )
+            if (
+                has_additive_expression
+                and case_tok["line"] != end_tok["line"]
+            ):
+                # Additive and WHEN/THEN rules own line breaks inside an
+                # already-multiline CASE. Rebuilding the whole block would
+                # compact their stricter expression layout on the next pass.
+                continue
+            if has_additive_expression:
+                from mir.rules.sql.additive_wrap import AdditiveWrapRule
+
+                additive_max_len = self.get_config_value(
+                    rule_config,
+                    "additive_max_line_length",
+                    default_value=100,
+                    fallbacks=[(AdditiveWrapRule, "max_line_length")],
+                )
+                effective_max_len = min(
+                    effective_max_len, additive_max_len
+                )
+            effective_base_indent = (
+                0 if has_additive_expression else base_indent_spaces
+            )
             
             original_text = content[case_tok["start"]:end_tok["end"]]
             
             base_depth = depths[start_idx]
+            in_result_arm = False
+            has_multiline_result_comparison = False
+            for token_index in range(start_idx, end_idx):
+                current = tokens[token_index]
+                if (
+                    depths[token_index] == base_depth
+                    and current["type"] == "KEYWORD"
+                ):
+                    keyword = current["value"].upper()
+                    if keyword == "THEN":
+                        in_result_arm = True
+                    elif keyword in {"WHEN", "ELSE", "END"}:
+                        in_result_arm = keyword == "ELSE"
+                if (
+                    in_result_arm
+                    and current["type"] == "OPERATOR"
+                    and current["value"]
+                    in {"=", "!=", "<>", "<", ">", "<=", ">="}
+                    and tokens[token_index + 1]["type"] == "WHITESPACE"
+                    and "\n" in tokens[token_index + 1]["value"]
+                ):
+                    has_multiline_result_comparison = True
+                    break
+            if has_multiline_result_comparison:
+                # CASE-WHEN wrapping owns comparison continuations in a result
+                # arm. Rebuilding the complete CASE would retain legacy source
+                # indentation and oscillate with that focused rule.
+                continue
+            if any(
+                nested["start_idx"] > start_idx
+                and nested["end_idx"] < end_idx
+                for nested in blocks
+            ):
+                # Rebuilding an outer block must not reinterpret a nested
+                # CASE's WHEN/THEN/ELSE tokens as arms of the outer block.
+                # The nested block is discovered independently and may still
+                # be formatted when its own structure is safe.
+                continue
             when_count = 0
             has_else = False
             
@@ -108,16 +223,72 @@ class CaseLayoutRule(BaseRule):
                         
             line_start = content.rfind("\n", 0, case_tok["start"]) + 1
             line_prefix = content[line_start:case_tok["start"]]
-            effective_prefix_len = max(0, len(line_prefix) - base_indent_spaces)
-            
+            previous_active_index = next(
+                (
+                    index
+                    for index in range(start_idx - 1, -1, -1)
+                    if tokens[index]["type"]
+                    not in {"WHITESPACE", "COMMENT"}
+                ),
+                None,
+            )
+            follows_between_delimiter = bool(
+                previous_active_index is not None
+                and tokens[previous_active_index]["type"] == "KEYWORD"
+                and tokens[previous_active_index]["value"].upper() == "AND"
+                and previous_active_index
+                in find_between_delimiter_indices(
+                    tokens,
+                    depths,
+                    depths[previous_active_index],
+                    0,
+                    len(tokens),
+                )
+            )
+            line_end = content.find("\n", end_tok["end"])
+            if line_end == -1:
+                line_end = len(content)
+            line_suffix = content[end_tok["end"]:line_end]
             # Simple inline allows exactly one WHEN condition and optional ELSE
             is_simple_inline = (
                 case_tok["line"] == end_tok["line"]
                 and when_count == 1
-                and (effective_prefix_len + len(original_text.strip())) <= 140
+                and (
+                    source_text_length(
+                        line_prefix + original_text.strip() + line_suffix,
+                        rule_config,
+                    )
+                    - effective_base_indent
+                ) <= effective_max_len
             )
             
             if is_simple_inline:
+                continue
+
+            compact_text = " ".join(original_text.split())
+            can_compact_multiline = (
+                case_tok["line"] != end_tok["line"]
+                and when_count == 1
+                and not has_additive_expression
+                and not follows_between_delimiter
+                and not any(
+                    token["type"] in {"COMMENT", "COMMA"}
+                    for token in tokens[start_idx:end_idx + 1]
+                )
+                and (
+                    source_text_length(
+                        line_prefix + compact_text + line_suffix,
+                        rule_config,
+                    )
+                    - effective_base_indent
+                ) <= effective_max_len
+            )
+            if can_compact_multiline:
+                violations.append({
+                    "case_tok": case_tok,
+                    "end_tok": end_tok,
+                    "replacement": compact_text,
+                })
                 continue
                 
             select_indent = ""
@@ -127,8 +298,28 @@ class CaseLayoutRule(BaseRule):
                 else:
                     break
                     
-            is_inline = line_prefix.strip() != ""
-            if is_inline:
+            prefix_body = line_prefix.strip()
+            follows_else_branch = prefix_body.upper() == "ELSE"
+            is_additive_continuation = prefix_body in {"+", "-", "*", "/", "||"}
+            follows_inline_operator = bool(
+                re.search(r"(?:\+|-|\*|/|\|\|)\s*$", prefix_body)
+            ) or follows_between_delimiter
+            is_inline = prefix_body != "" and not is_additive_continuation
+            if follows_between_delimiter and previous_active_index is not None:
+                delimiter_line_start = content.rfind(
+                    "\n", 0, tokens[previous_active_index]["start"]
+                ) + 1
+                delimiter_prefix = content[
+                    delimiter_line_start:tokens[previous_active_index]["start"]
+                ]
+                select_indent = delimiter_prefix[
+                    : len(delimiter_prefix)
+                    - len(delimiter_prefix.lstrip(" \t"))
+                ]
+                is_inline = True
+            if follows_else_branch:
+                case_indent = select_indent
+            elif is_inline and not follows_inline_operator:
                 case_indent = select_indent + "    "
             else:
                 case_indent = select_indent
@@ -152,7 +343,11 @@ class CaseLayoutRule(BaseRule):
             needs_fix = False
             rebuilt_parts = []
             
-            if is_inline:
+            if (
+                is_inline
+                and not follows_inline_operator
+                and not follows_else_branch
+            ):
                 rebuilt_parts.append("\n" + case_indent + "CASE")
                 needs_fix = True
             else:
@@ -183,18 +378,16 @@ class CaseLayoutRule(BaseRule):
                         res_tokens = tokens[then_part[1]:then_part[2]]
                         res_text = "".join([t["value"] for t in res_tokens]).strip()
                         
-                        # Split condition tokens on AND/OR at depth 0
-                        import re
+                        # Split condition tokens on boolean AND/OR at depth 0;
+                        # BETWEEN's delimiter AND belongs to the same condition.
                         cond_parts = []
                         current_part = []
-                        depth = 0
-                        for t_c in cond_tokens:
-                            if t_c["type"] == "PAREN" and t_c["value"] == "(":
-                                depth += 1
-                            elif t_c["type"] == "PAREN" and t_c["value"] == ")":
-                                depth -= 1
-                                
-                            if depth == 0 and t_c["type"] == "KEYWORD" and t_c["value"].upper() in ("AND", "OR"):
+                        cond_depths = get_token_depths(cond_tokens)
+                        boolean_indices = set(find_boolean_operator_indices(
+                            cond_tokens, cond_depths, 0
+                        ))
+                        for cond_index, t_c in enumerate(cond_tokens):
+                            if cond_index in boolean_indices:
                                 if current_part:
                                     cond_parts.append(current_part)
                                 current_part = [t_c]
@@ -204,23 +397,123 @@ class CaseLayoutRule(BaseRule):
                             cond_parts.append(current_part)
                             
                         cond_strs = []
+                        condition_has_subquery = any(
+                            token["type"] == "KEYWORD"
+                            and token["value"].upper() == "SELECT"
+                            for token in cond_tokens
+                        )
                         for part in cond_parts:
                             part_str = "".join([t["value"] for t in part]).strip()
-                            if "\n" not in part_str:
+                            if "\n" in part_str and not condition_has_subquery:
+                                condition_fragments = [
+                                    line.rstrip()
+                                    for line in part_str.splitlines()
+                                    if line.strip()
+                                ]
+                                continuation_indents = [
+                                    len(line) - len(line.lstrip(" \t"))
+                                    for line in condition_fragments[1:]
+                                ]
+                                common_indent = (
+                                    min(continuation_indents)
+                                    if continuation_indents
+                                    else 0
+                                )
+                                part_str = condition_fragments[0].strip()
+                                normalized_lines = []
+                                previous_relative_indent = 0
+                                previous_starts_with_operator = False
+                                for line in condition_fragments[1:]:
+                                    relative_indent = max(
+                                        0,
+                                        len(line)
+                                        - len(line.lstrip(" \t"))
+                                        - common_indent,
+                                    )
+                                    body = line.lstrip(" \t")
+                                    starts_with_operator = bool(
+                                        re.match(r"(?:\+|-|\*|/|\|\|)\s", body)
+                                    )
+                                    if starts_with_operator:
+                                        operator_indent = (
+                                            previous_relative_indent
+                                            if previous_starts_with_operator
+                                            else previous_relative_indent + 4
+                                        )
+                                        relative_indent = max(
+                                            relative_indent, operator_indent
+                                        )
+                                    normalized_lines.append(
+                                        "\n"
+                                        + case_indent
+                                        + "        "
+                                        + " " * relative_indent
+                                        + body
+                                    )
+                                    previous_relative_indent = relative_indent
+                                    previous_starts_with_operator = (
+                                        starts_with_operator
+                                    )
+                                part_str += "".join(normalized_lines)
+                            elif "\n" not in part_str:
                                 part_str = re.sub(r"\s+", " ", part_str)
                             cond_strs.append(part_str)
                             
-                        is_multiline = len(cond_strs) > 1 or len(f"{case_indent}    WHEN {cond_strs[0]} THEN {res_text}") > max_len
-                        
-                        if is_multiline:
-                            first_line = f"\n{case_indent}    WHEN {cond_strs[0]}"
+                        compact_condition = " ".join(cond_strs)
+                        condition_line = (
+                            f"{case_indent}    WHEN {compact_condition}"
+                        )
+                        inline_arm = f"{condition_line} THEN {res_text}"
+                        inline_arm_for_length = (
+                            f"{condition_line} THEN "
+                            + re.sub(r"\s+", " ", res_text)
+                        )
+                        has_additive_condition_break = (
+                            any(
+                                token["type"] == "WHITESPACE"
+                                and "\n" in token["value"]
+                                for token in cond_tokens
+                            )
+                            and any(
+                                token["type"] == "OPERATOR"
+                                and token["value"] in {"+", "||"}
+                                for token in cond_tokens
+                            )
+                        )
+
+                        if has_additive_condition_break:
+                            condition_lines = [
+                                line.strip()
+                                for line in compact_condition.splitlines()
+                                if line.strip()
+                            ]
+                            line_text = (
+                                f"\n{case_indent}    WHEN "
+                                + condition_lines[0]
+                                + "".join(
+                                    f"\n{case_indent}        {line}"
+                                    for line in condition_lines[1:]
+                                )
+                                + f"\n{case_indent}        THEN {res_text}"
+                            )
+                        elif source_text_length(
+                            inline_arm_for_length, rule_config
+                        ) > effective_max_len:
+                            if source_text_length(
+                                condition_line, rule_config
+                            ) <= effective_max_len:
+                                first_line = f"\n{condition_line}"
+                                remaining_conditions = []
+                            else:
+                                first_line = f"\n{case_indent}    WHEN {cond_strs[0]}"
+                                remaining_conditions = cond_strs[1:]
                             subsequent_lines = []
-                            for cs in cond_strs[1:]:
+                            for cs in remaining_conditions:
                                 subsequent_lines.append(f"\n{case_indent}        {cs}")
                             then_line = f"\n{case_indent}        THEN {res_text}"
                             line_text = first_line + "".join(subsequent_lines) + then_line
                         else:
-                            line_text = f"\n{case_indent}    WHEN {cond_strs[0]} THEN {res_text}"
+                            line_text = f"\n{inline_arm}"
                             
                         rebuilt_parts.append(line_text)
                         
@@ -241,7 +534,30 @@ class CaseLayoutRule(BaseRule):
                 elif val_upper == "ELSE":
                     else_tokens = tokens[start_c:end_c]
                     else_text = "".join([t["value"] for t in else_tokens]).strip()
-                    line_text = f"\n{case_indent}    ELSE {else_text}"
+                    preserve_additive_break = (
+                        "\n" in else_text
+                        and any(
+                            token["type"] == "OPERATOR"
+                            and token["value"] in {"+", "||"}
+                            for token in else_tokens
+                        )
+                    )
+                    if preserve_additive_break:
+                        else_lines = [
+                            line.strip()
+                            for line in else_text.splitlines()
+                            if line.strip()
+                        ]
+                        line_text = (
+                            f"\n{case_indent}    ELSE {else_lines[0]}"
+                            + "".join(
+                                f"\n{case_indent}        {line}"
+                                for line in else_lines[1:]
+                            )
+                        )
+                    else:
+                        else_text = " ".join(else_text.split())
+                        line_text = f"\n{case_indent}    ELSE {else_text}"
                     rebuilt_parts.append(line_text)
                     
                     kw_token_idx = tokens.index(kw_tok)
@@ -250,6 +566,9 @@ class CaseLayoutRule(BaseRule):
                         ws_tok = tokens[kw_token_idx - 1]
                     expected_ws = f"\n{case_indent}    "
                     if not ws_tok or ws_tok["value"] != expected_ws:
+                        needs_fix = True
+                    original_else = content[kw_tok["start"]:tokens[end_c]["start"]]
+                    if original_else.strip() != line_text.strip():
                         needs_fix = True
                         
                 i_idx += 1
@@ -265,10 +584,20 @@ class CaseLayoutRule(BaseRule):
                 needs_fix = True
                 
             if needs_fix:
+                replacement_start = case_tok["start"]
+                replacement = "".join(rebuilt_parts)
+                if (
+                    follows_between_delimiter
+                    and start_idx > 0
+                    and tokens[start_idx - 1]["type"] == "WHITESPACE"
+                ):
+                    replacement_start = tokens[start_idx - 1]["start"]
+                    replacement = " " + replacement
                 violations.append({
                     "case_tok": case_tok,
                     "end_tok": end_tok,
-                    "replacement": "".join(rebuilt_parts)
+                    "replacement_start": replacement_start,
+                    "replacement": replacement,
                 })
                 
         return violations
@@ -298,7 +627,11 @@ class CaseLayoutRule(BaseRule):
             
         edits = []
         for item in offending:
-            edits.append((item["case_tok"]["start"], item["end_tok"]["end"], item["replacement"]))
+            edits.append((
+                item.get("replacement_start", item["case_tok"]["start"]),
+                item["end_tok"]["end"],
+                item["replacement"],
+            ))
             
         edits.sort(key=lambda x: x[0], reverse=True)
         chars = list(content)

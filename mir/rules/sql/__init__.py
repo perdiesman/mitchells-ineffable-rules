@@ -3,5 +3,6 @@ CATEGORIES = {
     "queries": "Query Structure Rules",
     "schema-definition": "Schema Definition Rules",
     "data-modification": "Data Modification Rules",
-    "routines": "Routine & Procedure Rules"
+    "routines": "Routine & Procedure Rules",
+    "templates": "Template Rules"
 }

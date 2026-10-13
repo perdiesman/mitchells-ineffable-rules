@@ -5,6 +5,9 @@ SELECT statements under a CREATE VIEW should be indented 4 spaces relative to th
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Schema Definition Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 

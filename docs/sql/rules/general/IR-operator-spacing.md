@@ -5,6 +5,9 @@ Operators should have a single space on both sides.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: General Rules
+- **Commit Profile**: Yes
+- **MyBatis Safe**: Yes
+- **Trellis Safe**: Yes
 - **Configuration Options**:
   - `enabled`: `true`
 
@@ -25,4 +28,8 @@ SELECT -5 FROM users;
 
 ```sql
 SELECT COUNT(*) FROM users;
+```
+
+```sql
+DECLARE item_name sample_item.name%TYPE;
 ```

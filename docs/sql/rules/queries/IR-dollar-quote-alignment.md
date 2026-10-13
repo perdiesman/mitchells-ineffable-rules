@@ -5,6 +5,9 @@ Align the closing dollar quote ($function$, $$, etc.) with its opening tag.
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
 - **Category**: Query Structure Rules
+- **Commit Profile**: No
+- **MyBatis Safe**: No
+- **Trellis Safe**: No
 - **Configuration Options**:
   - `enabled`: `true`
 

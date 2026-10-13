@@ -3,8 +3,12 @@ from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.xml.xml_utils import tokenize_xml
 
 class XmlAttributeQuotesRule(BaseRule):
+    commit_profile = True
     rule_id = "IR-xml-attribute-quotes"
-    description = "Enforce double quotes around attribute values instead of single quotes."
+    description = (
+        "Enforce double quotes around attribute values and encode greater-than "
+        "comparisons inside attributes."
+    )
     category = "attributes"
     is_fixable = "yes"
     enabled_by_default = True
@@ -16,27 +20,44 @@ class XmlAttributeQuotesRule(BaseRule):
         {
             "violating": "<root attr='value' />",
             "correct": "<root attr=\"value\" />"
+        },
+        {
+            "violating": '<if test="count > 0">value</if>',
+            "correct": '<if test="count &gt; 0">value</if>',
         }
     ]
     additional_validations = [
         "<root attr=\"value\" />",
-        "<root attr=\"val &quot;quote&quot;\" />"
+        "<root attr=\"val &quot;quote&quot;\" />",
+        '<if test="count &gt; 0">value</if>',
     ]
 
     def _find_violations(self, content: str) -> List[dict]:
         tokens = tokenize_xml(content)
         violations = []
         for t in tokens:
-            if t["type"] == "ATTR_VALUE" and t["value"].startswith("'") and t["value"].endswith("'"):
-                inner = t["value"][1:-1]
-                replacement = '"' + inner.replace('"', '&quot;') + '"'
+            if t["type"] != "ATTR_VALUE" or len(t["value"]) < 2:
+                continue
+            quote = t["value"][0]
+            if quote not in {"'", '"'} or t["value"][-1] != quote:
+                continue
+            inner = t["value"][1:-1]
+            if quote == "'" or ">" in inner:
+                replacement = (
+                    '"'
+                    + inner.replace('"', '&quot;').replace(">", "&gt;")
+                    + '"'
+                )
                 violations.append({
                     "token": t,
                     "line": t["line"],
                     "start_offset": t["start"],
                     "end_offset": t["end"],
                     "replacement": replacement,
-                    "message": f"Attribute value on line {t['line']} should use double quotes."
+                    "message": (
+                        f"Attribute value on line {t['line']} should use double "
+                        "quotes and encoded comparison operators."
+                    )
                 })
         return violations
 
