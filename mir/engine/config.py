@@ -31,6 +31,10 @@ class Config:
         self.lines_spec: Optional[str] = None
         self.staged: bool = False
         self.profile: Optional[str] = None
+        self.provider_dirs: List[str] = []
+        self.provider_configs: Dict[str, Dict[str, Any]] = {}
+        self.providers_to_enable: List[str] = []
+        self.providers_to_disable: List[str] = []
 
 def load_config(args_list: Optional[List[str]] = None) -> Config:
     # 1. Parse CLI arguments first to check for config path, flags, and targets
@@ -68,6 +72,9 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
     parser.add_argument("--lines", help="Only lint/fix specified line numbers or line ranges (e.g. '10', '10-20', '10-20,30,40-50')")
     parser.add_argument("--staged", action="store_true", help="Lint or fix staged Git content using staged changed-line scopes")
     parser.add_argument("--profile", choices=["commit"], help="Use a built-in rule profile (normal CLI defaults are unchanged)")
+    parser.add_argument("--provider-dir", action="append", help="Directory containing external provider modules")
+    parser.add_argument("--enable-provider", help="Comma-separated provider IDs to enable")
+    parser.add_argument("--disable-provider", help="Comma-separated provider IDs to disable")
     
     parsed_args = parser.parse_args(args_list)
     
@@ -199,6 +206,34 @@ def load_config(args_list: Optional[List[str]] = None) -> Config:
             for language, value in language_configs.items()
             if isinstance(value, dict)
         }
+
+    provider_configs = file_config.get("providers", {})
+    if isinstance(provider_configs, dict):
+        config.provider_configs = {
+            str(provider).lower(): value
+            for provider, value in provider_configs.items()
+            if isinstance(value, dict)
+        }
+    file_provider_dirs = file_config.get("provider_dirs", [])
+    env_provider_dirs = os.environ.get("IR_PROVIDER_DIRS")
+    configured_provider_dirs = parsed_args.provider_dir or (
+        env_provider_dirs.split(",") if env_provider_dirs else file_provider_dirs
+    )
+    if isinstance(configured_provider_dirs, list):
+        config.provider_dirs = [str(path).strip() for path in configured_provider_dirs if str(path).strip()]
+
+    def provider_ids(cli_value: Optional[str], env_name: str, key: str) -> List[str]:
+        value: Any = cli_value
+        if value is None:
+            value = os.environ.get(env_name)
+        if value is None:
+            value = file_config.get(key, [])
+        if isinstance(value, str):
+            value = value.split(",")
+        return sorted({str(item).strip().lower() for item in value if str(item).strip()}) if isinstance(value, list) else []
+
+    config.providers_to_enable = provider_ids(parsed_args.enable_provider, "IR_ENABLE_PROVIDERS", "enable_providers")
+    config.providers_to_disable = provider_ids(parsed_args.disable_provider, "IR_DISABLE_PROVIDERS", "disable_providers")
         
     # -- content and lang --
     config.content = parsed_args.content

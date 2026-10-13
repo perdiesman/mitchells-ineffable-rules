@@ -130,8 +130,12 @@ def expand_selection(content: str, language: str, lines: Iterable[int]) -> LineS
             allowed = _expand_xml(content, changed)
         elif language == "java":
             allowed = _expand_java(content, changed)
-        else:
+        elif language == "sql":
             allowed = _expand_sql(content, changed)
+        else:
+            # External providers own syntax-aware range expansion. Keep the
+            # immutable Git selection narrow until the provider accepts it.
+            allowed = changed
     except Exception:
         allowed = changed
     return LineSelection(frozenset(changed), frozenset(allowed))

@@ -34,6 +34,26 @@ class TestConfig(unittest.TestCase):
             config = load_config(["--config", path])
             self.assertEqual(config.language_configs["java"]["generated"]["mode"], "check")
 
+    def test_provider_configuration(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as stream:
+            stream.write(
+                "providers:\n"
+                "  ruff:\n"
+                "    enabled: true\n"
+                "    unsafe_fixes: false\n"
+                "provider_dirs: [tools/providers]\n"
+                "disable_providers: [prettier]\n"
+            )
+            path = stream.name
+        try:
+            config = load_config(["--config", path, "--enable-provider", "eslint"])
+            self.assertTrue(config.provider_configs["ruff"]["enabled"])
+            self.assertEqual(config.provider_dirs, ["tools/providers"])
+            self.assertEqual(config.providers_to_enable, ["eslint"])
+            self.assertEqual(config.providers_to_disable, ["prettier"])
+        finally:
+            os.unlink(path)
+
     def test_cli_overrides(self):
         config = load_config(["--fix", "--verbose", "file1.sql", "file2.sql"])
         self.assertTrue(config.fix)

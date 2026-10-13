@@ -3,9 +3,10 @@ import re
 from typing import Dict, Set, List, Tuple
 
 # Regexes to find IR rules in comments
-START_RE = re.compile(r"IR-start-([a-zA-Z0-9_-]+)")
-END_RE = re.compile(r"IR-end-([a-zA-Z0-9_-]+)")
-SINGLE_RE = re.compile(r"IR-([a-zA-Z0-9_-]+)")
+DIRECTIVE_ID = r"[a-zA-Z0-9_:@./-]+"
+START_RE = re.compile(rf"IR-start-({DIRECTIVE_ID})")
+END_RE = re.compile(rf"IR-end-({DIRECTIVE_ID})")
+SINGLE_RE = re.compile(rf"IR-({DIRECTIVE_ID})")
 FORMATTER_OFF_RE = re.compile(r"@formatter\s*:\s*off\b", re.IGNORECASE)
 FORMATTER_ON_RE = re.compile(r"@formatter\s*:\s*on\b", re.IGNORECASE)
 
@@ -17,6 +18,16 @@ def get_file_language(file_path: str) -> str:
         return "java"
     elif ext == ".xml":
         return "xml"
+    elif ext in (".py", ".pyi"):
+        return "python"
+    elif ext in (".js", ".jsx", ".mjs", ".cjs"):
+        return "javascript"
+    elif ext in (".ts", ".tsx"):
+        return "typescript"
+    elif ext in (".css", ".scss"):
+        return "css"
+    elif ext == ".html":
+        return "html"
     return "unknown"
 
 def extract_comments_and_code_lines(content: str, lang: str) -> Tuple[List[str], Dict[int, List[str]], Set[int]]:
@@ -29,6 +40,8 @@ def extract_comments_and_code_lines(content: str, lang: str) -> Tuple[List[str],
     """
     if lang == "java":
         return _extract_java_comments_and_code_lines(content)
+    if lang == "python":
+        return _extract_python_comments_and_code_lines(content)
 
     lines = content.splitlines()
     line_comments: Dict[int, List[str]] = {}
@@ -83,7 +96,7 @@ def extract_comments_and_code_lines(content: str, lang: str) -> Tuple[List[str],
         if in_multi_comment:
             active_comment.append(c)
             # Check for end of multi-line comment */
-            if lang in ("java", "sql") and c == '*' and i + 1 < n and content[i + 1] == '/':
+            if lang in ("java", "sql", "javascript", "typescript", "css") and c == '*' and i + 1 < n and content[i + 1] == '/':
                 active_comment.append('/')
                 comment_text = "".join(active_comment)
                 # Multi-line comment might span lines, associate with start line or all lines?
@@ -122,7 +135,7 @@ def extract_comments_and_code_lines(content: str, lang: str) -> Tuple[List[str],
                     line_has_code[current_line] = True
                     i += 2
                     continue
-                elif lang == "java" and content[i - 1] == '\\':
+                elif lang in ("java", "javascript", "typescript", "css") and content[i - 1] == '\\':
                     # Escaped quote in Java (if previous char was backslash, and not escaped backslash itself)
                     # Let's do a simple check
                     backslash_count = 0
@@ -142,7 +155,7 @@ def extract_comments_and_code_lines(content: str, lang: str) -> Tuple[List[str],
             continue
             
         # Normal State: look for transitions
-        if lang == "xml":
+        if lang in ("xml", "html"):
             if c == '<' and i + 3 < n and content[i+1:i+4] == "!--":
                 in_xml_comment = True
                 active_comment_start_line = current_line
@@ -152,9 +165,9 @@ def extract_comments_and_code_lines(content: str, lang: str) -> Tuple[List[str],
             elif not c.isspace():
                 line_has_code[current_line] = True
                 
-        elif lang in ("java", "sql"):
+        elif lang in ("java", "sql", "javascript", "typescript", "css"):
             # String literals
-            if c in ("'", '"'):
+            if c in ("'", '"', "`"):
                 # In SQL, only single quotes are strings (double quotes are identifiers, but let's treat both as string/code)
                 in_string = True
                 string_char = c
@@ -163,7 +176,7 @@ def extract_comments_and_code_lines(content: str, lang: str) -> Tuple[List[str],
                 continue
                 
             # Single line comments
-            if lang == "java" and c == '/' and i + 1 < n and content[i + 1] == '/':
+            if lang in ("java", "javascript", "typescript") and c == '/' and i + 1 < n and content[i + 1] == '/':
                 in_single_comment = True
                 active_comment_start_line = current_line
                 active_comment = ["//"]
@@ -229,6 +242,36 @@ def _extract_java_comments_and_code_lines(content: str) -> Tuple[List[str], Dict
         for line in range(node.start_point.row + 1, node.end_point.row + 2):
             code_lines.add(line)
     comment_only = {line for line in comment_lines if line not in code_lines}
+    return lines, line_comments, comment_only
+
+
+def _extract_python_comments_and_code_lines(content: str) -> Tuple[List[str], Dict[int, List[str]], Set[int]]:
+    """Use Python's tokenizer so hashes inside strings are never directives."""
+    import io
+    import tokenize
+
+    lines = content.splitlines()
+    line_comments: Dict[int, List[str]] = {}
+    code_lines: Set[int] = set()
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(content).readline)
+        for token in tokens:
+            start_line, _ = token.start
+            end_line, _ = token.end
+            if token.type == tokenize.COMMENT:
+                line_comments.setdefault(start_line, []).append(token.string)
+            elif token.type not in {
+                tokenize.ENCODING,
+                tokenize.ENDMARKER,
+                tokenize.INDENT,
+                tokenize.DEDENT,
+                tokenize.NEWLINE,
+                tokenize.NL,
+            }:
+                code_lines.update(range(start_line, end_line + 1))
+    except (IndentationError, tokenize.TokenError):
+        pass
+    comment_only = {line for line in line_comments if line not in code_lines}
     return lines, line_comments, comment_only
 
 

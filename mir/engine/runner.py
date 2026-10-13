@@ -14,6 +14,7 @@ from typing import List, Optional, Set
 from mir.engine.config import Config
 from mir.engine.disabler import get_disabled_rules_map, get_file_language
 from mir.engine.rule_interface import BaseRule, Violation
+from mir.engine.provider_interface import ProviderContext, ProviderFinding
 from mir.engine.rules_help import get_supported_languages
 from mir.engine.rules_loader import load_rules_for_language
 from mir.engine.selection import LineSelection, expand_selection
@@ -243,15 +244,26 @@ def detect_base_indent(content: str) -> str:
     return ""
 
 
-def _supported_extensions(include_dirs: Optional[list[str]] = None) -> set[str]:
+def _supported_extensions(
+    include_dirs: Optional[list[str]] = None,
+    provider_dirs: Optional[list[str]] = None,
+) -> set[str]:
     extensions = set()
     for language in get_supported_languages(include_dirs):
         extensions.update({".java", ".jav"} if language == "java" else {f".{language}"})
+    from mir.engine.providers_loader import load_providers
+
+    for provider in load_providers(provider_dirs or []):
+        extensions.update(extension.lower() for extension in provider.extensions)
     return extensions
 
 
-def find_files(paths: List[str], include_dirs: Optional[List[str]] = None) -> List[str]:
-    extensions = _supported_extensions(include_dirs)
+def find_files(
+    paths: List[str],
+    include_dirs: Optional[List[str]] = None,
+    provider_dirs: Optional[List[str]] = None,
+) -> List[str]:
+    extensions = _supported_extensions(include_dirs, provider_dirs)
     found: list[str] = []
     for raw_path in paths:
         path = Path(raw_path)
@@ -375,6 +387,100 @@ def _collect(
             # flow back through the host's source map rather than run on XML.
             collected.append((violation, rule, severity))
     return collected, diagnostics
+
+
+class _ProviderRule:
+    """Formatting shim so provider findings use MIR's existing output model."""
+
+    is_fixable = "sometimes"
+
+    def __init__(self, rule_id: str, description: str):
+        self.rule_id = rule_id
+        self.description = description
+
+    @staticmethod
+    def get_config_value(rule_config: dict, name: str, default: object) -> object:
+        return rule_config.get(name, default)
+
+
+def _provider_config(config: Config, provider: object) -> dict:
+    resolved = dict(provider.default_config)
+    resolved.update(config.provider_configs.get(provider.provider_id, {}))
+    if provider.provider_id in config.providers_to_enable:
+        resolved["enabled"] = True
+    if provider.provider_id in config.providers_to_disable:
+        resolved["enabled"] = False
+    return resolved
+
+
+def _provider_pipeline(config: Config, language: str) -> list[object]:
+    from mir.engine.providers_loader import load_providers
+
+    providers = load_providers(config.provider_dirs)
+    configured = config.language_configs.get(language, {}).get("providers")
+    if isinstance(configured, list):
+        by_id = {provider.provider_id: provider for provider in providers}
+        return [by_id[value] for value in configured if value in by_id and language in by_id[value].languages]
+    return [provider for provider in providers if language in provider.languages]
+
+
+def _run_providers(
+    config: Config,
+    result: DocumentResult,
+    language: str,
+    selection: LineSelection,
+) -> None:
+    current = result.content
+    active_selection = selection
+    for provider in _provider_pipeline(config, language):
+        provider_config = _provider_config(config, provider)
+        if provider_config.get("enabled") is False:
+            continue
+        disabled = get_disabled_rules_map(current, result.path) if "IR-" in current else {}
+        context = ProviderContext(
+            path=result.path,
+            language=language,
+            selected_lines=frozenset(active_selection.allowed),
+            restricted=active_selection.restricted,
+            fix=config.fix or config.dry_run,
+            profile=config.profile,
+            disabled_lines={
+                provider.provider_id: frozenset(disabled.get(f"IR-{provider.provider_id}", set())),
+                "all": frozenset(disabled.get("IR-all", set())),
+            },
+        )
+        provider_result = provider.run(current, context, provider_config)
+        result.diagnostics.extend(provider_result.diagnostics)
+        if provider_result.content != current:
+            if active_selection.restricted:
+                active_selection = LineSelection(
+                    active_selection.changed,
+                    frozenset(remap_selected_lines(current, provider_result.content, set(active_selection.allowed))),
+                )
+            current = provider_result.content
+            result.rules_fixed.add(provider.provider_id.upper())
+        lines = current.splitlines()
+        for finding in provider_result.findings:
+            if active_selection.restricted and not active_selection.contains(finding.line):
+                continue
+            provider_disabled = disabled.get(f"IR-{provider.provider_id}", set())
+            code_disabled = disabled.get(f"IR-{provider.provider_id}:{finding.code}", set())
+            if finding.line in provider_disabled or finding.line in code_disabled or finding.line in disabled.get("IR-all", set()):
+                continue
+            if config.no_warnings and finding.severity == "warning":
+                continue
+            if config.warnings_only and finding.severity != "warning":
+                continue
+            rule_id = f"{provider.provider_id.upper()}:{finding.code}"
+            violation = Violation(
+                rule_id,
+                finding.line,
+                finding.message,
+                [lines[finding.line - 1]] if 0 < finding.line <= len(lines) else [],
+                bool(finding.edits),
+            )
+            result.violations.append((violation, _ProviderRule(rule_id, provider.description), finding.severity))
+    result.content = current
 
 
 def process_document(
@@ -554,6 +660,8 @@ def process_document(
     else:
         result.violations = initial
 
+    _run_providers(config, result, lang, active_selection)
+
     # Avoid charging the same repeated rule failure from every convergence pass.
     result.diagnostics = list(dict.fromkeys(result.diagnostics))
     for _, _, severity in result.violations:
@@ -608,7 +716,7 @@ def _run_staged(config: Config) -> int:
 
     try:
         root = repository_root()
-        documents = read_staged_documents(root, _supported_extensions(config.include_dirs))
+        documents = read_staged_documents(root, _supported_extensions(config.include_dirs, config.provider_dirs))
     except subprocess.CalledProcessError as error:
         print(f"Error reading staged content: {error}", file=sys.stderr)
         return 2
@@ -683,7 +791,7 @@ def run_linter(config: Config) -> int:
         return 1 if result.errors else 0
 
     total_errors = 0
-    for file_path in find_files(config.paths, config.include_dirs):
+    for file_path in find_files(config.paths, config.include_dirs, config.provider_dirs):
         language = get_file_language(file_path)
         if not language:
             continue
