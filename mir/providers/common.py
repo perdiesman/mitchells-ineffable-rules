@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -25,10 +26,16 @@ def offset_for_location(content: str, row: int, column: int) -> int:
     )
 
 
-def selected_edit(content: str, edit: ProviderEdit, selected: Iterable[int], restricted: bool) -> bool:
+def selected_edit(
+    content: str, edit: ProviderEdit, selected: Iterable[int], restricted: bool
+) -> bool:
     if not restricted:
         return True
-    lines = set(range(line_for_offset(content, edit.start), line_for_offset(content, edit.end) + 1))
+    lines = set(
+        range(
+            line_for_offset(content, edit.start), line_for_offset(content, edit.end) + 1
+        )
+    )
     return bool(lines.intersection(selected))
 
 
@@ -37,7 +44,12 @@ def apply_edits(content: str, edits: Iterable[ProviderEdit]) -> str:
     ordered = sorted(edits, key=lambda edit: (edit.start, edit.end), reverse=True)
     previous_start = len(content) + 1
     for edit in ordered:
-        if edit.end > previous_start or edit.start < 0 or edit.end < edit.start or edit.end > len(content):
+        if (
+            edit.end > previous_start
+            or edit.start < 0
+            or edit.end < edit.start
+            or edit.end > len(content)
+        ):
             continue
         result = result[: edit.start] + edit.replacement + result[edit.end :]
         previous_start = edit.start
@@ -53,10 +65,16 @@ def find_project_executable(path: str, name: str) -> Optional[str]:
     return None
 
 
-def resolve_executable(path: str, name: str, configured: object, project_local: bool = False) -> Optional[str]:
+def resolve_executable(
+    path: str, name: str, configured: object, project_local: bool = False
+) -> Optional[str]:
     if isinstance(configured, str) and configured not in {"", "auto"}:
         candidate = Path(configured).expanduser()
-        return str(candidate) if candidate.is_file() and os.access(candidate, os.X_OK) else None
+        return (
+            str(candidate)
+            if candidate.is_file() and os.access(candidate, os.X_OK)
+            else None
+        )
     if project_local:
         return find_project_executable(path, name)
     current = Path(path).resolve().parent
@@ -79,6 +97,35 @@ def run_process(
         timeout=timeout,
         check=False,
     )
+
+
+@lru_cache(maxsize=32)
+def tool_version(executable: str, timeout: float = 10.0) -> Optional[str]:
+    try:
+        process = subprocess.run(
+            [executable, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if process.returncode != 0:
+        return None
+    output = (process.stdout or process.stderr).strip().splitlines()
+    return output[0].strip() if output else None
+
+
+def version_diagnostic(
+    provider_id: str, actual: Optional[str], required: object
+) -> Optional[str]:
+    if not required:
+        return None
+    expected = str(required).strip()
+    if actual == expected:
+        return None
+    return f"Provider {provider_id} requires version {expected}, but found {actual or 'an unknown version'}"
 
 
 def contiguous_ranges(lines: Iterable[int]) -> list[tuple[int, int]]:

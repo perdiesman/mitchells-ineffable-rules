@@ -1,13 +1,32 @@
+import shutil
+import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mir.engine.config import Config
-from mir.engine.provider_interface import BaseProvider, ProviderCapabilities
-from mir.engine.providers_loader import ProviderValidationError, load_providers, validate_provider_class
-from mir.engine.runner import find_files
 from mir.engine.disabler import get_disabled_rules_map, get_file_language
+from mir.engine.provider_interface import (
+    BaseProvider,
+    ProviderCapabilities,
+    ProviderContext,
+)
+from mir.engine.providers_loader import (
+    ProviderValidationError,
+    load_providers,
+    validate_provider_class,
+)
+from mir.engine.runner import find_files, process_document, run_linter
+from mir.providers.eslint import EslintProvider
+from mir.providers.node_bridge import project_root_for_executable
+from mir.providers.prettier import PrettierProvider
+
+RUFF = shutil.which("ruff") or str(Path(sys.executable).with_name("ruff"))
+if not Path(RUFF).is_file():
+    RUFF = None
 
 
 class TestProviders(unittest.TestCase):
@@ -53,17 +72,138 @@ class TestProviders(unittest.TestCase):
             ignored_file = Path(directory, "sample.txt")
             for path in (python_file, typescript_file, ignored_file):
                 path.write_text("value\n", encoding="utf-8")
-            self.assertEqual(find_files([directory]), sorted([str(python_file), str(typescript_file)]))
+            self.assertEqual(
+                find_files([directory]),
+                sorted([str(python_file), str(typescript_file)]),
+            )
 
     def test_provider_directives_and_language_detection(self):
-        source = (
-            "# IR-start-ruff:F401\n"
-            "import os\n"
-            "# IR-end-ruff:F401\n"
-        )
+        source = "# IR-start-ruff:F401\nimport os\n# IR-end-ruff:F401\n"
         disabled = get_disabled_rules_map(source, "sample.py")
         self.assertIn(2, disabled["IR-ruff:F401"])
         self.assertEqual(get_file_language("sample.ts"), "typescript")
+
+    def test_prettier_bridge_honors_exact_version(self):
+        context = ProviderContext(
+            "/tmp/sample.ts", "typescript", frozenset(), False, True, None, {}
+        )
+        response = {"content": "const value = 1;\n", "version": "3.6.2"}
+        with (
+            patch(
+                "mir.providers.prettier.resolve_executable",
+                return_value="/project/node_modules/.bin/prettier",
+            ),
+            patch(
+                "mir.providers.prettier.node_request", return_value=response
+            ) as request,
+        ):
+            result = PrettierProvider().run(
+                "const value=1\n",
+                context,
+                {"required_version": "3.6.2", "timeout_seconds": 10},
+            )
+        self.assertEqual(result.content, response["content"])
+        self.assertEqual(result.version, "3.6.2")
+        self.assertEqual(request.call_args.args[2]["path"], "/tmp/sample.ts")
+
+    def test_eslint_bridge_applies_reported_fix(self):
+        context = ProviderContext(
+            "/tmp/sample.ts", "typescript", frozenset(), False, True, None, {}
+        )
+        violation = {
+            "messages": [
+                {
+                    "ruleId": "prefer-const",
+                    "message": "Use const.",
+                    "line": 1,
+                    "column": 1,
+                    "severity": 2,
+                    "fix": {"range": [0, 3], "text": "const"},
+                }
+            ],
+            "version": "9.35.0",
+        }
+        clean = {"messages": [], "version": "9.35.0"}
+        with (
+            patch(
+                "mir.providers.eslint.resolve_executable",
+                return_value="/project/node_modules/.bin/eslint",
+            ),
+            patch(
+                "mir.providers.eslint.node_request",
+                side_effect=[violation, clean, clean],
+            ),
+        ):
+            result = EslintProvider().run(
+                "let value = 1;\n",
+                context,
+                {"fix": True, "required_version": "9.35.0", "timeout_seconds": 10},
+            )
+        self.assertEqual(result.content, "const value = 1;\n")
+        self.assertEqual(result.findings, [])
+
+    def test_node_project_root_preserves_project_symlink(self):
+        self.assertEqual(
+            project_root_for_executable("/project/node_modules/.bin/eslint"),
+            "/project",
+        )
+
+    @unittest.skipUnless(RUFF, "Ruff optional dependency is not installed")
+    def test_real_ruff_fix_is_clean_and_idempotent(self):
+        config = Config()
+        config.fix = True
+        config.provider_configs = {"ruff": {"enabled": True, "executable": RUFF}}
+        source = "import os\n\ndef add( left,right ):\n return left+right\n"
+        first = process_document(config, source, "/tmp/generic_provider.py", "python")
+        second = process_document(
+            config, first.content, "/tmp/generic_provider.py", "python"
+        )
+        self.assertEqual(
+            first.content, "def add(left, right):\n    return left + right\n"
+        )
+        self.assertEqual(first.violations, [])
+        self.assertEqual(first.diagnostics, [])
+        self.assertEqual(second.content, first.content)
+
+    @unittest.skipUnless(RUFF, "Ruff optional dependency is not installed")
+    def test_staged_ruff_updates_index_and_preserves_unstaged_content(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.name", "MIR Test"], cwd=root, check=True
+            )
+            subprocess.run(
+                ["git", "config", "user.email", "mir@example.invalid"],
+                cwd=root,
+                check=True,
+            )
+            path = root / "sample.py"
+            path.write_text(
+                "def add( left,right ):\n return left+right\n", encoding="utf-8"
+            )
+            subprocess.run(["git", "add", "sample.py"], cwd=root, check=True)
+            path.write_text(
+                "def add( left,right ):\n return left+right\n# unstaged note\n",
+                encoding="utf-8",
+            )
+            config = Config()
+            config.staged = True
+            config.fix = True
+            config.provider_configs = {"ruff": {"enabled": True, "executable": RUFF}}
+            with patch("mir.engine.git_staged.repository_root", return_value=root):
+                self.assertEqual(run_linter(config), 0)
+            staged = subprocess.run(
+                ["git", "show", ":sample.py"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+            self.assertEqual(staged, "def add(left, right):\n    return left + right\n")
+            self.assertTrue(
+                path.read_text(encoding="utf-8").endswith("# unstaged note\n")
+            )
 
 
 if __name__ == "__main__":

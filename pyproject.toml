@@ -37,3 +37,6 @@ Repository = "https://github.com/perdiesman/mitchells-ineffable-rules"
 
 [tool.setuptools.packages.find]
 include = ["mir*"]
+
+[tool.setuptools.package-data]
+"mir.providers" = ["*.mjs"]

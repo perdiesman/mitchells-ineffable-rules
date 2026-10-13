@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from mir.engine.provider_interface import (
     BaseProvider,
@@ -23,6 +23,8 @@ from mir.providers.common import (
     resolve_executable,
     run_process,
     selected_edit,
+    tool_version,
+    version_diagnostic,
 )
 
 
@@ -31,7 +33,9 @@ class RuffProvider(BaseProvider):
     description = "Lint and format Python with Ruff."
     languages = ("python",)
     extensions = (".py", ".pyi")
-    capabilities = ProviderCapabilities(check=True, fix=True, format=True, range_format=True, batch=True)
+    capabilities = ProviderCapabilities(
+        check=True, fix=True, format=True, range_format=True, batch=True
+    )
     documentation_url = "https://docs.astral.sh/ruff/"
     default_config = {
         "enabled": "auto",
@@ -40,24 +44,60 @@ class RuffProvider(BaseProvider):
         "check": True,
         "format": True,
         "unsafe_fixes": False,
+        "required_version": None,
         "timeout_seconds": 30,
     }
     config_options = {
         "enabled": {"default": "auto", "description": "auto, true, or false"},
-        "unsafe_fixes": {"default": False, "description": "Allow Ruff fixes marked unsafe."},
+        "unsafe_fixes": {
+            "default": False,
+            "description": "Allow Ruff fixes marked unsafe.",
+        },
+        "required_version": {
+            "default": None,
+            "description": "Require an exact Ruff version.",
+        },
     }
     cases = (
-        ProviderCase("formatted function", "def add( left,right ):\n return left+right\n", "fixed", "def add(left, right):\n    return left + right\n"),
+        ProviderCase(
+            "formatted function",
+            "def add( left,right ):\n return left+right\n",
+            "fixed",
+            "def add(left, right):\n    return left + right\n",
+        ),
     )
 
-    def _check(self, executable: str, content: str, context: ProviderContext, config: Dict[str, Any]):
-        command = [executable, "check", "--output-format=json", "--no-cache", "--stdin-filename", context.path, "-"]
+    def _check(
+        self,
+        executable: str,
+        content: str,
+        context: ProviderContext,
+        config: Dict[str, Any],
+    ):
+        source_path = str(Path(context.path).resolve())
+        command = [
+            executable,
+            "check",
+            "--output-format=json",
+            "--no-cache",
+            "--force-exclude",
+            "--stdin-filename",
+            source_path,
+            "-",
+        ]
         configured = config.get("config")
         if isinstance(configured, str) and configured not in {"", "auto", "discover"}:
             command[2:2] = ["--config", configured]
-        process = run_process(command, content, str(Path(context.path).resolve().parent), float(config.get("timeout_seconds", 30)))
+        process = run_process(
+            command,
+            content,
+            str(Path(source_path).parent),
+            float(config.get("timeout_seconds", 30)),
+        )
         if process.returncode not in {0, 1}:
-            raise RuntimeError(process.stderr.strip() or f"Ruff exited with {process.returncode}")
+            raise RuntimeError(
+                process.stderr.strip() or f"Ruff exited with {process.returncode}"
+            )
         payload = json.loads(process.stdout or "[]")
         findings: list[ProviderFinding] = []
         for item in payload:
@@ -71,8 +111,14 @@ class RuffProvider(BaseProvider):
                 end = edit.get("end_location") or end_location
                 edits.append(
                     ProviderEdit(
-                        offset_for_location(content, int(start.get("row", 1)), int(start.get("column", 1))),
-                        offset_for_location(content, int(end.get("row", 1)), int(end.get("column", 1))),
+                        offset_for_location(
+                            content,
+                            int(start.get("row", 1)),
+                            int(start.get("column", 1)),
+                        ),
+                        offset_for_location(
+                            content, int(end.get("row", 1)), int(end.get("column", 1))
+                        ),
                         str(edit.get("content") or ""),
                         applicability,
                     )
@@ -90,50 +136,116 @@ class RuffProvider(BaseProvider):
             )
         return findings
 
-    def _format(self, executable: str, content: str, context: ProviderContext, config: Dict[str, Any]) -> str:
-        disabled = set(context.disabled_lines.get("ruff", frozenset())) | set(context.disabled_lines.get("all", frozenset()))
+    def _format(
+        self,
+        executable: str,
+        content: str,
+        context: ProviderContext,
+        config: Dict[str, Any],
+    ) -> str:
+        disabled = set(context.disabled_lines.get("ruff", frozenset())) | set(
+            context.disabled_lines.get("all", frozenset())
+        )
         if context.restricted or disabled:
-            candidates = set(context.selected_lines) if context.restricted else set(range(1, len(content.splitlines()) + 1))
+            candidates = (
+                set(context.selected_lines)
+                if context.restricted
+                else set(range(1, len(content.splitlines()) + 1))
+            )
             candidates.difference_update(disabled)
             ranges = list(reversed(contiguous_ranges(candidates)))
         else:
             ranges = [(0, 0)]
         current = content
+        source_path = str(Path(context.path).resolve())
         for start, end in ranges:
-            command = [executable, "format", "--stdin-filename", context.path]
+            command = [
+                executable,
+                "format",
+                "--force-exclude",
+                "--stdin-filename",
+                source_path,
+            ]
             configured = config.get("config")
-            if isinstance(configured, str) and configured not in {"", "auto", "discover"}:
+            if isinstance(configured, str) and configured not in {
+                "",
+                "auto",
+                "discover",
+            }:
                 command.extend(["--config", configured])
             if start:
-                line = current.splitlines()[end - 1] if end <= len(current.splitlines()) else ""
+                line = (
+                    current.splitlines()[end - 1]
+                    if end <= len(current.splitlines())
+                    else ""
+                )
                 command.extend(["--range", f"{start}:1-{end}:{len(line) + 1}"])
             command.append("-")
-            process = run_process(command, current, str(Path(context.path).resolve().parent), float(config.get("timeout_seconds", 30)))
+            process = run_process(
+                command,
+                current,
+                str(Path(source_path).parent),
+                float(config.get("timeout_seconds", 30)),
+            )
             if process.returncode != 0:
-                raise RuntimeError(process.stderr.strip() or f"Ruff formatter exited with {process.returncode}")
+                raise RuntimeError(
+                    process.stderr.strip()
+                    or f"Ruff formatter exited with {process.returncode}"
+                )
             current = process.stdout
         return current
 
-    def run(self, content: str, context: ProviderContext, provider_config: Dict[str, Any]) -> ProviderResult:
-        executable = resolve_executable(context.path, "ruff", provider_config.get("executable"))
+    def run(
+        self, content: str, context: ProviderContext, provider_config: Dict[str, Any]
+    ) -> ProviderResult:
+        executable = resolve_executable(
+            context.path, "ruff", provider_config.get("executable")
+        )
         if not executable:
             if provider_config.get("enabled") is True:
-                return ProviderResult(content, diagnostics=[f"Provider ruff is enabled but no executable was found for {context.path}"])
+                return ProviderResult(
+                    content,
+                    diagnostics=[
+                        f"Provider ruff is enabled but no executable was found for {context.path}"
+                    ],
+                )
             return ProviderResult(content)
         try:
+            version = tool_version(executable)
+            mismatch = version_diagnostic(
+                "ruff", version, provider_config.get("required_version")
+            )
+            if mismatch:
+                return ProviderResult(content, diagnostics=[mismatch], version=version)
             current = content
-            findings = self._check(executable, current, context, provider_config) if provider_config.get("check", True) else []
+            findings = (
+                self._check(executable, current, context, provider_config)
+                if provider_config.get("check", True)
+                else []
+            )
             if context.fix and findings:
                 for _ in range(10):
-                    disabled = set(context.disabled_lines.get("ruff", frozenset())) | set(context.disabled_lines.get("all", frozenset()))
+                    disabled = set(
+                        context.disabled_lines.get("ruff", frozenset())
+                    ) | set(context.disabled_lines.get("all", frozenset()))
                     edits = []
                     for finding in findings:
-                        if context.restricted and finding.line not in context.selected_lines:
+                        if (
+                            context.restricted
+                            and finding.line not in context.selected_lines
+                        ):
                             continue
                         for edit in finding.edits:
-                            if edit.applicability != "safe" and not provider_config.get("unsafe_fixes", False):
+                            if edit.applicability != "safe" and not provider_config.get(
+                                "unsafe_fixes", False
+                            ):
                                 continue
-                            if selected_edit(current, edit, context.selected_lines, context.restricted):
+                            if selected_edit(
+                                current,
+                                edit,
+                                context.selected_lines,
+                                context.restricted,
+                            ):
                                 touched = range(
                                     current.count("\n", 0, edit.start) + 1,
                                     current.count("\n", 0, edit.end) + 2,
@@ -144,7 +256,9 @@ class RuffProvider(BaseProvider):
                     if updated == current:
                         break
                     current = updated
-                    findings = self._check(executable, current, context, provider_config)
+                    findings = self._check(
+                        executable, current, context, provider_config
+                    )
             format_finding = None
             if provider_config.get("format", True):
                 formatted = self._format(executable, current, context, provider_config)
@@ -157,10 +271,24 @@ class RuffProvider(BaseProvider):
                             "File is not formatted with Ruff",
                             min(context.selected_lines or {1}),
                         )
-            final = self._check(executable, current, context, provider_config) if provider_config.get("check", True) else []
+            final = (
+                self._check(executable, current, context, provider_config)
+                if provider_config.get("check", True)
+                else []
+            )
             if format_finding is not None:
                 final.append(format_finding)
-            return ProviderResult(current, final, changed=current != content)
-        except (OSError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired) as error:
-            return ProviderResult(content, diagnostics=[f"Error running provider ruff on {context.path}: {error}"])
-
+            return ProviderResult(
+                current, final, changed=current != content, version=version
+            )
+        except (
+            OSError,
+            RuntimeError,
+            ValueError,
+            json.JSONDecodeError,
+            subprocess.TimeoutExpired,
+        ) as error:
+            return ProviderResult(
+                content,
+                diagnostics=[f"Error running provider ruff on {context.path}: {error}"],
+            )
