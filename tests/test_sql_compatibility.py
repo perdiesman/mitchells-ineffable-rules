@@ -654,33 +654,56 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertEqual(rule.fix(source, "generic.sql", {}), source)
         self.assertEqual(rule.check(source, "generic.sql", {}), [])
 
-    def test_nullable_equality_accepts_reversed_equality_operands(self):
+    def test_nullable_equality_preserves_reversed_equality_operands(self):
         source = (
             "((left_item.owner_id IS NULL AND right_item.owner_id IS NULL) OR "
             "right_item.owner_id = left_item.owner_id)"
         )
-        expected = (
-            "COALESCE(right_item.owner_id, -1) = "
-            "COALESCE(left_item.owner_id, -1)"
-        )
+        expected = source
 
         rule = NullCoalesceRule()
 
         self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
 
-    def test_nullable_equality_unwraps_parenthesized_equality_branch(self):
+    def test_nullable_equality_preserves_parenthesized_equality_branch(self):
         source = (
             "((left_item.owner_id IS NULL AND right_item.owner_id IS NULL) OR "
             "(right_item.owner_id = left_item.owner_id))"
         )
-        expected = (
-            "COALESCE(right_item.owner_id, -1) = "
-            "COALESCE(left_item.owner_id, -1)"
-        )
+        expected = source
 
         rule = NullCoalesceRule()
 
         self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
+
+    def test_nullable_equality_keeps_null_distinct_from_minus_one(self):
+        import sqlite3
+
+        source = (
+            "left_value = right_value OR (left_value IS NULL AND right_value IS NULL)"
+        )
+        rule = NullCoalesceRule()
+        fixed = rule.fix(source, "generic.sql", {})
+        self.assertEqual(fixed, source)
+        with sqlite3.connect(":memory:") as connection:
+            for left in (None, -1, 0, 1):
+                for right in (None, -1, 0, 1):
+                    with self.subTest(left=left, right=right):
+                        query = (
+                            "SELECT ("
+                            + fixed
+                            + ") FROM (SELECT ? AS left_value, ? AS right_value)"
+                        )
+                        actual = connection.execute(query, (left, right)).fetchone()[0]
+                        expected = (
+                            1
+                            if left is None and right is None
+                            else None
+                            if left is None or right is None
+                            else int(left == right)
+                        )
+                        self.assertEqual(actual, expected)
+        self.assertFalse(rule.check(fixed, "generic.sql", {}))
 
     def test_boolean_null_fallback_does_not_use_numeric_coalesce(self):
         source = "enabled IS NULL OR enabled = true"

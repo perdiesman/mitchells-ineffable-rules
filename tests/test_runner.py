@@ -3781,7 +3781,7 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, xml_content)
         self.assertFalse(first.diagnostics)
 
-    def test_xml_mybatis_rewrites_reversed_nullable_equality(self):
+    def test_xml_mybatis_preserves_reversed_nullable_equality(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
             '    <select id="items">\n'
@@ -3795,13 +3795,19 @@ class TestRunnerIntegration(unittest.TestCase):
         expected = (
             '<mapper namespace="GenericMapper">\n'
             '    <select id="items">\n'
-            '        SELECT item.item_id\n'
-            '        FROM\n'
-            '            sample_item item\n'
-            '            JOIN sample_owner owner ON item.owner_id = owner.id\n'
-            '                AND coalesce(owner.group_id, -1) = coalesce(item.group_id, -1);\n'
-            '    </select>\n'
-            '</mapper>'
+            "        SELECT item.item_id\n"
+            "        FROM\n"
+            "            sample_item item\n"
+            "            JOIN sample_owner owner ON item.owner_id = owner.id\n"
+            "                AND (\n"
+            "                    (\n"
+            "                        item.group_id IS NULL\n"
+            "                        AND owner.group_id IS NULL\n"
+            "                    )\n"
+            "                    OR owner.group_id = item.group_id\n"
+            "                );\n"
+            "    </select>\n"
+            "</mapper>"
         )
         config = Config()
         config.profile = "commit"
@@ -3814,7 +3820,7 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
-    def test_xml_mybatis_rewrites_nullable_equality_inside_dynamic_join(self):
+    def test_xml_mybatis_preserves_nullable_equality_inside_dynamic_join(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
             '    <select id="items">\n'
@@ -3831,14 +3837,21 @@ class TestRunnerIntegration(unittest.TestCase):
         expected = (
             '<mapper namespace="GenericMapper">\n'
             '    <select id="items">\n'
-            '        SELECT a.item_id\n'
-            '        FROM\n'
-            '            sample_item a\n'
+            "        SELECT a.item_id\n"
+            "        FROM\n"
+            "            sample_item a\n"
             '            <if test="enabled">\n'
-                '                JOIN sample_owner b ON a.owner_id = b.owner_id AND coalesce(b.group_id, -1) = coalesce(a.group_id, -1)\n'
-            '            </if>\n'
-            '    </select>\n'
-            '</mapper>'
+            "                JOIN sample_owner b ON a.owner_id = b.owner_id\n"
+            "                    AND (\n"
+            "                        (\n"
+            "                            a.group_id IS NULL\n"
+            "                            AND b.group_id IS NULL\n"
+            "                        )\n"
+            "                        OR b.group_id = a.group_id\n"
+            "                    )\n"
+            "            </if>\n"
+            "    </select>\n"
+            "</mapper>"
         )
         config = Config()
         config.profile = "commit"

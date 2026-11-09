@@ -1,6 +1,6 @@
 # IR-null-coalesce
 
-Standardize nullable equality predicates to COALESCE(x, -1) form.
+Standardize isolated explicit -1 fallback predicates to COALESCE(x, -1); preserve nullable-column equality and surrounding boolean precedence.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
@@ -12,22 +12,29 @@ Standardize nullable equality predicates to COALESCE(x, -1) form.
 - **Configuration Options**:
   - `enabled`: `true`
 
-#### ❌ Violating Example #1
+#### ❌ Violating Example
 ```sql
 SELECT * FROM users WHERE active = -1 OR active IS NULL;
 ```
 
-####  Correct Example #1
+####  Correct Example
 ```sql
 SELECT * FROM users WHERE COALESCE(active, -1) = -1;
 ```
 
-#### ❌ Violating Example #2
+#### Additional Validations
 ```sql
 SELECT * FROM t1 JOIN t2 ON t1.id = t2.id OR (t1.id IS NULL AND t2.id IS NULL);
 ```
 
-####  Correct Example #2
 ```sql
-SELECT * FROM t1 JOIN t2 ON COALESCE(t1.id, -1) = COALESCE(t2.id, -1);
+SELECT * FROM items WHERE enabled AND owner_id = -1 OR owner_id IS NULL;
+```
+
+```sql
+SELECT * FROM items WHERE owner_id = -1 OR owner_id IS NULL AND enabled;
+```
+
+```sql
+SELECT * FROM items WHERE NOT owner_id = -1 OR owner_id IS NULL;
 ```

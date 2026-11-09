@@ -1,13 +1,15 @@
-from typing import List, Dict, Any
+from typing import Any, ClassVar
+
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.rules.sql.sql_utils import tokenize_sql
+
 
 class NullCoalesceRule(BaseRule):
     commit_profile = True
     commit_semantic_rewrite = True
     embedded_safe = True
     rule_id = "IR-null-coalesce"
-    description = "Standardize nullable equality predicates to COALESCE(x, -1) form."
+    description = "Standardize isolated explicit -1 fallback predicates to COALESCE(x, -1); preserve nullable-column equality and surrounding boolean precedence."
     category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
@@ -18,16 +20,17 @@ class NullCoalesceRule(BaseRule):
     examples = [
         {
             "violating": "SELECT * FROM users WHERE active = -1 OR active IS NULL;",
-            "correct": "SELECT * FROM users WHERE COALESCE(active, -1) = -1;"
-        },
-        {
-            "violating": "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id OR (t1.id IS NULL AND t2.id IS NULL);",
-            "correct": "SELECT * FROM t1 JOIN t2 ON COALESCE(t1.id, -1) = COALESCE(t2.id, -1);"
+            "correct": "SELECT * FROM users WHERE COALESCE(active, -1) = -1;",
         }
     ]
-    additional_validations = []
+    additional_validations: ClassVar[list[str]] = [
+        "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id OR (t1.id IS NULL AND t2.id IS NULL);",
+        "SELECT * FROM items WHERE enabled AND owner_id = -1 OR owner_id IS NULL;",
+        "SELECT * FROM items WHERE owner_id = -1 OR owner_id IS NULL AND enabled;",
+        "SELECT * FROM items WHERE NOT owner_id = -1 OR owner_id IS NULL;",
+    ]
 
-    def _find_violations(self, content: str) -> List[dict]:
+    def _find_violations(self, content: str) -> list[dict]:
         tokens = tokenize_sql(content)
         violations = []
         n = len(tokens)
@@ -56,154 +59,7 @@ class NullCoalesceRule(BaseRule):
 
         i = 0
         while i < num_active:
-            # 1. Try to match: a = b OR (a IS NULL AND b IS NULL) or without parens
-            op1_str, next_idx = parse_operand(i)
-            if op1_str and next_idx < num_active:
-                t_eq = active[next_idx]
-                if t_eq["type"] == "OPERATOR" and t_eq["value"] == "=":
-                    op2_str, next_idx2 = parse_operand(next_idx + 1)
-                    if op2_str and next_idx2 < num_active:
-                        t_or = active[next_idx2]
-                        if t_or["type"] == "KEYWORD" and t_or["value"].upper() == "OR":
-                            has_parens = False
-                            check_idx = next_idx2 + 1
-                            if check_idx < num_active and active[check_idx]["type"] == "PAREN" and active[check_idx]["value"] == "(":
-                                has_parens = True
-                                check_idx += 1
-                                
-                            op1_check, next_check = parse_operand(check_idx)
-                            if op1_check and op1_check.lower() == op1_str.lower() and next_check < num_active:
-                                t_is = active[next_check]
-                                if t_is["type"] == "KEYWORD" and t_is["value"].upper() == "IS" and next_check + 2 < num_active:
-                                    t_null = active[next_check + 1]
-                                    if t_null["type"] == "KEYWORD" and t_null["value"].upper() == "NULL":
-                                        t_and = active[next_check + 2]
-                                        if t_and["type"] == "KEYWORD" and t_and["value"].upper() == "AND":
-                                            op2_check, next_check2 = parse_operand(next_check + 3)
-                                            if op2_check and op2_check.lower() == op2_str.lower() and next_check2 < num_active:
-                                                t_is2 = active[next_check2]
-                                                if t_is2["type"] == "KEYWORD" and t_is2["value"].upper() == "IS" and next_check2 + 1 < num_active:
-                                                    t_null2 = active[next_check2 + 1]
-                                                    if t_null2["type"] == "KEYWORD" and t_null2["value"].upper() == "NULL":
-                                                        end_idx = next_check2 + 2
-                                                        if has_parens:
-                                                            if end_idx < num_active and active[end_idx]["type"] == "PAREN" and active[end_idx]["value"] == ")":
-                                                                end_idx += 1
-                                                            else:
-                                                                end_idx = None
-                                                        
-                                                        if end_idx is not None:
-                                                            violations.append({
-                                                                "start_offset": active[i]["start"],
-                                                                "end_offset": active[end_idx - 1]["end"],
-                                                                "line": active[i]["line"],
-                                                                "replacement": f"COALESCE({op1_str}, -1) = COALESCE({op2_str}, -1)"
-                                                            })
-                                                            i = end_idx
-                                                            continue
-
-            # 2. Try to match reverse pattern: (a IS NULL AND b IS NULL) OR a = b
-            pattern_start = i
-            outer_wrapper = False
-            has_parens = False
-            check_idx = i
-            if (
-                check_idx + 1 < num_active
-                and active[check_idx]["type"] == "PAREN"
-                and active[check_idx]["value"] == "("
-                and active[check_idx + 1]["type"] == "PAREN"
-                and active[check_idx + 1]["value"] == "("
-            ):
-                # The complete OR expression is often wrapped once more when
-                # it appears after JOIN ... ON. Keep that wrapper in the
-                # replacement range so the semantic coalesce rewrite is not
-                # blocked by the nested opening parenthesis.
-                outer_wrapper = True
-                check_idx += 1
-            if check_idx < num_active and active[check_idx]["type"] == "PAREN" and active[check_idx]["value"] == "(":
-                has_parens = True
-                check_idx += 1
-                
-            op1_str, next_idx = parse_operand(check_idx)
-            if op1_str and next_idx < num_active:
-                t_is = active[next_idx]
-                if t_is["type"] == "KEYWORD" and t_is["value"].upper() == "IS" and next_idx + 2 < num_active:
-                    t_null = active[next_idx + 1]
-                    if t_null["type"] == "KEYWORD" and t_null["value"].upper() == "NULL":
-                        t_and = active[next_idx + 2]
-                        if t_and["type"] == "KEYWORD" and t_and["value"].upper() == "AND":
-                            op2_str, next_idx2 = parse_operand(next_idx + 3)
-                            if op2_str and next_idx2 < num_active:
-                                t_is2 = active[next_idx2]
-                                if t_is2["type"] == "KEYWORD" and t_is2["value"].upper() == "IS" and next_idx2 + 1 < num_active:
-                                    t_null2 = active[next_idx2 + 1]
-                                    if t_null2["type"] == "KEYWORD" and t_null2["value"].upper() == "NULL":
-                                        end_idx = next_idx2 + 2
-                                        if has_parens:
-                                            if end_idx < num_active and active[end_idx]["type"] == "PAREN" and active[end_idx]["value"] == ")":
-                                                end_idx += 1
-                                            else:
-                                                end_idx = None
-                                        
-                                        if end_idx is not None and end_idx < num_active:
-                                            t_or = active[end_idx]
-                                            if t_or["type"] == "KEYWORD" and t_or["value"].upper() == "OR":
-                                                equality_start = end_idx + 1
-                                                equality_parens = bool(
-                                                    equality_start < num_active
-                                                    and active[equality_start]["type"] == "PAREN"
-                                                    and active[equality_start]["value"] == "("
-                                                )
-                                                if equality_parens:
-                                                    equality_start += 1
-                                                op1_check, next_check = parse_operand(equality_start)
-                                                if op1_check and next_check < num_active:
-                                                    t_eq = active[next_check]
-                                                    if t_eq["type"] == "OPERATOR" and t_eq["value"] == "=":
-                                                        op2_check, next_check2 = parse_operand(next_check + 1)
-                                                        equality_matches = (
-                                                            op2_check
-                                                            and {
-                                                                op1_check.lower(),
-                                                                op2_check.lower(),
-                                                            }
-                                                            == {
-                                                                op1_str.lower(),
-                                                                op2_str.lower(),
-                                                            }
-                                                        )
-                                                        if equality_matches:
-                                                            replacement_end = next_check2
-                                                            if equality_parens:
-                                                                if (
-                                                                    replacement_end < num_active
-                                                                    and active[replacement_end]["type"] == "PAREN"
-                                                                    and active[replacement_end]["value"] == ")"
-                                                                ):
-                                                                    replacement_end += 1
-                                                                else:
-                                                                    i += 1
-                                                                    continue
-                                                            if outer_wrapper:
-                                                                if (
-                                                                    replacement_end < num_active
-                                                                    and active[replacement_end]["type"] == "PAREN"
-                                                                    and active[replacement_end]["value"] == ")"
-                                                                ):
-                                                                    replacement_end += 1
-                                                                else:
-                                                                    i += 1
-                                                                    continue
-                                                            violations.append({
-                                                                "start_offset": active[pattern_start]["start"],
-                                                                "end_offset": active[replacement_end - 1]["end"],
-                                                                "line": active[pattern_start]["line"],
-                                                                "replacement": f"COALESCE({op1_check}, -1) = COALESCE({op2_check}, -1)"
-                                                            })
-                                                            i = replacement_end
-                                                            continue
-
-            # 3. Match: x = v OR x IS NULL
+            # Match only an explicit -1 fallback, never two nullable columns.
             op1_str, next_idx = parse_operand(i)
             if op1_str and next_idx < num_active:
                 t_eq = active[next_idx]
@@ -227,7 +83,7 @@ class NullCoalesceRule(BaseRule):
                                         i = next_check + 2
                                         continue
 
-            # 4. Match: x IS NULL OR x = v
+            # Match the same explicit fallback in reverse order.
             op1_str, next_idx = parse_operand(i)
             if op1_str and next_idx < num_active:
                 t_is = active[next_idx]
@@ -251,10 +107,31 @@ class NullCoalesceRule(BaseRule):
                                         i = next_check2
                                         continue
             i += 1
-            
-        return violations
 
-    def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
+        safe = []
+        for item in violations:
+            before = next(
+                (
+                    token
+                    for token in reversed(active)
+                    if token["end"] <= item["start_offset"]
+                ),
+                None,
+            )
+            after = next(
+                (token for token in active if token["start"] >= item["end_offset"]),
+                None,
+            )
+            if (
+                before is None
+                or before["value"].upper() in {"WHERE", "ON", "HAVING", "SELECT", "("}
+            ) and (after is None or after["value"] in {")", ";"}):
+                safe.append(item)
+        return safe
+
+    def check(
+        self, content: str, file_path: str, rule_config: dict[str, Any]
+    ) -> list[Violation]:
         violations = []
         lines = content.splitlines()
         offending = self._find_violations(content)
@@ -271,7 +148,7 @@ class NullCoalesceRule(BaseRule):
             )
         return violations
 
-    def fix(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> str:
+    def fix(self, content: str, file_path: str, rule_config: dict[str, Any]) -> str:
         offending = self._find_violations(content)
         if not offending:
             return content
