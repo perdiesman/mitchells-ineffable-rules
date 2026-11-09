@@ -48,7 +48,7 @@ jobs:
 
       - name: Verify container dependency lock
         run: |
-          uv export --frozen --extra all --no-dev --no-emit-project --format requirements-txt --output-file "$RUNNER_TEMP/requirements-docker.txt"
+          uv export --frozen --extra all --no-dev --no-emit-project --no-header --format requirements-txt --output-file "$RUNNER_TEMP/requirements-docker.txt"
           diff -u requirements-docker.txt "$RUNNER_TEMP/requirements-docker.txt"
 
       - name: Run the complete unit suite

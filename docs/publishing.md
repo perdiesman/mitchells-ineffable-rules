@@ -76,5 +76,5 @@ Python runtime dependencies are hash-locked in `requirements-docker.txt`. After
 updating `uv.lock`, regenerate that file with:
 
 ```bash
-uv export --frozen --extra all --no-dev --no-emit-project --format requirements-txt --output-file requirements-docker.txt
+uv export --frozen --extra all --no-dev --no-emit-project --no-header --format requirements-txt --output-file requirements-docker.txt
 ```
