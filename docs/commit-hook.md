@@ -83,6 +83,11 @@ The container runs without network access, Linux capabilities, or privilege esca
 
 External rule and provider directories used by Docker mode must be inside the mounted repository. The batch exchange accepts UTF-8 regular files; unsupported extensions, symlinks, submodules, and non-UTF-8 content are skipped just as non-source inputs.
 
+Published images are available at `ghcr.io/perdiesman/mir-linter:vX.Y.Z`, with
+versions matching the PyPI package. Pin the manifest digest in consumer hooks and
+pull the image during setup. The hook never pulls during a commit. See the
+[publishing guide](publishing.md#versioned-docker-images) for digest lookup.
+
 ## Optional configuration
 
 Normal command-line behavior remains unchanged. The hook's commit profile focuses on conservative SQL token formatting, XML validity/attribute quoting, MyBatis source-mapped SQL, Trellis directives, and syntax-preserving Java layout. Project overrides still use `.ir-config.yaml`:

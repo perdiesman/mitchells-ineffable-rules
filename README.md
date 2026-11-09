@@ -403,12 +403,12 @@ class MyXmlRule(BaseRule):
 
 ## Publishing to PyPI
 
-Releases are published from `main` through GitHub Actions and PyPI Trusted Publishing. Publishing a GitHub Release with a matching `vX.Y.Z` tag runs the complete test and documentation checks, validates the distributions, smoke-tests the wheel, and uploads without a stored API token. Refer to the [PyPI Publishing Guide](docs/publishing.md) for the one-time publisher registration and release procedure.
+Releases are published from `main` through GitHub Actions and PyPI Trusted Publishing. Each release also publishes Linux AMD64 and ARM64 images at `ghcr.io/perdiesman/mir-linter:vX.Y.Z`, matching the package version. Publishing a GitHub Release with a matching `vX.Y.Z` tag runs the complete test and documentation checks, validates the distributions, smoke-tests the wheel, and uploads without a stored API token. Refer to the [PyPI Publishing Guide](docs/publishing.md) for the one-time publisher registration and release procedure.
 
 ---
 
 *This package has been developed with **Antigravity** and **OpenAI Codex**.*
 
-*Total Cumulative Development Time: ~72.8 hours*
+*Total Cumulative Development Time: ~73.3 hours*
 
-*Last Developer Session: 2026-10-13T19:59:10Z*
+*Last Developer Session: 2026-11-09T15:50:56Z*

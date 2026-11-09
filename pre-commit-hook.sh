@@ -97,7 +97,7 @@ run_docker_mir() {
         image=$(git config --get mir.dockerImage || true)
     fi
     image=${image:-mir-linter:latest}
-    docker run --rm --network none --read-only \
+    docker run --rm --pull never --network none --read-only \
         --cap-drop ALL --security-opt no-new-privileges \
         --user "$(id -u):$(id -g)" \
         --env HOME=/tmp --env RUFF_CACHE_DIR=/tmp/ruff-cache \

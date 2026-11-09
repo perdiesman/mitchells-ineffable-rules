@@ -89,6 +89,7 @@ class TestDockerCommitHook(unittest.TestCase):
             self.assertIn(f"{root}:/workspace:ro", arguments)
             self.assertIn("/workspace/.git:ro", arguments)
             self.assertIn("--network\nnone", arguments)
+            self.assertIn("--pull\nnever", arguments)
 
             source.write_text("select item_id from sample_table;\n", encoding="utf-8")
             self.git(root, "add", "sample.sql")

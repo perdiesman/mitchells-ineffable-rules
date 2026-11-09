@@ -52,3 +52,29 @@ Both installations provide the `mir` and `mir-linter` commands:
 mir --version
 mir-linter --version
 ```
+
+## Versioned Docker images
+
+Every published release also builds Linux AMD64 and ARM64 images at
+`ghcr.io/perdiesman/mir-linter:vX.Y.Z`. The image version matches the PyPI package.
+The container job runs only after the release checks pass and uses the workflow's
+GitHub token with `packages: write`; no registry password is stored.
+
+The GHCR package must be public so consumers can pull without signing in. On its
+first publication, check the package visibility and set it to public if needed.
+The workflow verifies an anonymous pull and the container's CLI version.
+
+Consumers should pin both the release tag and the manifest digest printed by:
+
+```bash
+docker buildx imagetools inspect ghcr.io/perdiesman/mir-linter:vX.Y.Z
+```
+
+Pull the pinned image during setup. The commit hook uses `--pull never` and runs
+with networking disabled; it cannot download a missing image during a commit.
+Python runtime dependencies are hash-locked in `requirements-docker.txt`. After
+updating `uv.lock`, regenerate that file with:
+
+```bash
+uv export --frozen --extra all --no-dev --no-emit-project --format requirements-txt --output-file requirements-docker.txt
+```

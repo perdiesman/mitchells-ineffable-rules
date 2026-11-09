@@ -64,6 +64,26 @@ class TestPublishWorkflow(unittest.TestCase):
             )
         )
 
+    def test_container_release_is_versioned_and_requires_validation(self):
+        container = self.workflow["jobs"]["container"]
+        self.assertEqual(container["needs"], "build")
+        self.assertEqual(
+            container["permissions"], {"contents": "read", "packages": "write"}
+        )
+        publish = next(
+            step
+            for step in container["steps"]
+            if step["name"] == "Build and publish container"
+        )
+        self.assertEqual(publish["with"]["platforms"], "linux/amd64,linux/arm64")
+        self.assertEqual(
+            publish["with"]["tags"],
+            "ghcr.io/perdiesman/mir-linter:${{ github.event.release.tag_name }}",
+        )
+        verification = container["steps"][-1]["run"]
+        self.assertIn("docker logout ghcr.io", verification)
+        self.assertIn("docker pull", verification)
+
 
 if __name__ == "__main__":
     unittest.main()
