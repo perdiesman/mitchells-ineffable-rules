@@ -1,6 +1,6 @@
 # IR-trailing-whitespace
 
-Remove spaces and tabs at the ends of SQL lines.
+Remove spaces and tabs at the ends of SQL lines without changing quoted literal or identifier contents.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes

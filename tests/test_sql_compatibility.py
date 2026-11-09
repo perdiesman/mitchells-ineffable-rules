@@ -676,6 +676,19 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
 
+    def test_trailing_whitespace_preserves_multiline_literals(self):
+        for source in (
+            "SELECT 'first   \nsecond';   \n",
+            'SELECT "first   \nsecond";   \n',
+            "SELECT $value$first   \nsecond$value$;   \n",
+        ):
+            with self.subTest(source=source):
+                rule = TrailingWhitespaceRule()
+                fixed = rule.fix(source, "generic.sql", {})
+                self.assertEqual(fixed, source.replace(";   \n", ";\n"))
+                self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
+                self.assertFalse(rule.check(fixed, "generic.sql", {}))
+
     def test_nullable_equality_keeps_null_distinct_from_minus_one(self):
         import sqlite3
 
