@@ -21,7 +21,6 @@ from mir.rules.xml.xml_line_length import XmlLineLengthRule
 from mir.rules.xml.xml_indent import XmlIndentRule
 from mir.rules.xml.xml_utils import tokenize_xml
 from mir.rules.xml.xml_sql_entities import XmlSqlEntitiesRule
-from mir.rules.xml.xml_utils import tokenize_xml
 
 class TestRunnerIntegration(unittest.TestCase):
     def test_xml_sql_entities_encode_text_operators_only(self):
@@ -445,6 +444,38 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first, expected)
         self.assertEqual(second, expected)
         self.assertFalse(rule.check(first, "generic.xml", config))
+
+    def test_dynamic_sql_respects_disabled_expression_rewrites(self):
+        source = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            "        SELECT item_id FROM sample_item WHERE\n"
+            '        <if test="include">(owner_id = #{ownerId}) AND (fallback_id = -1 OR fallback_id IS NULL)</if>\n'
+            "    </select>\n"
+            "</mapper>"
+        )
+        for disabled in (
+            ["IR-null-coalesce", "IR-paren-single", "IR-paren-same-op"],
+            ["sql:IR-null-coalesce", "sql:IR-paren-single", "sql:IR-paren-same-op"],
+        ):
+            with self.subTest(disabled=disabled):
+                config = Config()
+                config.fix = True
+                config.profile = "commit"
+                config.rules_to_disable = disabled
+                result = process_document(config, source, "generic.xml", "xml")
+                self.assertFalse(result.diagnostics)
+                self.assertIn("(owner_id = #{ownerId})", result.content)
+                self.assertIn(
+                    "(fallback_id = -1 OR fallback_id IS NULL)", result.content
+                )
+                self.assertNotIn("coalesce(", result.content.lower())
+                self.assertEqual(
+                    process_document(
+                        config, result.content, "generic.xml", "xml"
+                    ).content,
+                    result.content,
+                )
 
     def test_xml_indent_preserves_multiline_attribute_values(self):
         source = '<root>\n  <entry value="one\n  two\n    three" />\n</root>'

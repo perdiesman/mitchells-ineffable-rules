@@ -4,7 +4,11 @@ from typing import List, Dict, Any
 from mir.engine.rule_interface import BaseRule, Violation
 from mir.engine.rules_loader import load_rules_for_language
 from mir.rules.xml.xml_utils import tokenize_xml
-from mir.engine.embedded_bridge import check_embedded_content, fix_embedded_content, xml_encode
+from mir.engine.embedded_bridge import (
+    check_embedded_content,
+    get_guest_rules,
+    xml_encode,
+)
 
 
 def mapped_offsets_in_ranges(mapping: List[int], ranges: List[tuple]) -> set[int]:
@@ -5574,10 +5578,7 @@ class XmlMybatisSqlRule(BaseRule):
                     },
                     "mybatis_nested_dynamic_offsets": mapped_offsets_in_ranges(
                         mapping,
-                        [
-                            (start, end)
-                            for start, end, _ in dynamic_indent_ranges
-                        ],
+                        [(start, end) for start, end, _ in dynamic_indent_ranges],
                     ),
                     "mybatis_foreach_offsets": mapped_offsets_in_ranges(
                         mapping, foreach_ranges
@@ -5600,6 +5601,12 @@ class XmlMybatisSqlRule(BaseRule):
                 bridge_state["source_mapped_subquery_compaction"] = bool(
                     bridge_state["mybatis_dynamic_indent_ranges"]
                 )
+                enabled_guest_ids = {
+                    rule.rule_id
+                    for rule in get_guest_rules(
+                        "sql", inner_config, require_embedded_safe=True
+                    )
+                }
                 null_source_edits, null_fixed_text = (
                     dynamic_null_coalesce_source_edits(
                         sql_text,
@@ -5607,6 +5614,7 @@ class XmlMybatisSqlRule(BaseRule):
                         tag_ranges,
                     )
                     if bridge_state["mybatis_dynamic_indent_ranges"]
+                    and "IR-null-coalesce" in enabled_guest_ids
                     else ([], sql_text)
                 )
                 null_source_edits = [
@@ -5624,6 +5632,7 @@ class XmlMybatisSqlRule(BaseRule):
                     )
                     if (
                         bridge_state["mybatis_dynamic_indent_ranges"]
+                        and "IR-paren-single" in enabled_guest_ids
                         and not null_source_edits
                     )
                     else ([], sql_text)
