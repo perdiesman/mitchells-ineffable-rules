@@ -676,6 +676,19 @@ class TestSqlCompatibility(unittest.TestCase):
 
         self.assertEqual(rule.fix(source, "generic.sql", {}), expected)
 
+    def test_update_layout_keeps_incomplete_assignment_lists(self):
+        from mir.rules.sql.update_layout import UpdateLayoutRule
+
+        rule = UpdateLayoutRule()
+        for source in (
+            "UPDATE sample_item SET owner_id = 1, WHERE item_id = 2;",
+            "UPDATE sample_item SET , owner_id = 1 WHERE item_id = 2;",
+            "UPDATE sample_item SET owner_id = 1,, enabled = TRUE WHERE item_id = 2;",
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(rule.fix(source, "generic.sql", {}), source)
+                self.assertFalse(rule.check(source, "generic.sql", {}))
+
     def test_trailing_whitespace_preserves_multiline_literals(self):
         for source in (
             "SELECT 'first   \nsecond';   \n",

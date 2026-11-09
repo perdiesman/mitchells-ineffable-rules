@@ -6,7 +6,7 @@ class UpdateLayoutRule(BaseRule):
     commit_profile = True
     embedded_safe = True
     rule_id = "IR-update-layout"
-    description = "Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent assignments."
+    description = "Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent assignments; leave incomplete assignment lists unchanged."
     category = "data-modification"
     is_fixable = "yes"
     enabled_by_default = True
@@ -132,6 +132,15 @@ class UpdateLayoutRule(BaseRule):
                 for tok in stmt_tokens:
                     if tok["start"] >= fields_start and tok["end"] <= fields_end:
                         fields_tokens.append(tok)
+
+                active_fields = [
+                    tok
+                    for tok in fields_tokens
+                    if tok["type"] not in {"WHITESPACE", "COMMENT"}
+                ]
+                if active_fields and active_fields[-1]["type"] == "COMMA":
+                    i = statement_end_idx
+                    continue
                         
                 # Split fields by commas
                 fields = []
@@ -145,10 +154,13 @@ class UpdateLayoutRule(BaseRule):
                             paren_level = max(0, paren_level - 1)
                             
                         if paren_level == 0 and tok["type"] == "COMMA":
-                            f_str = content[fields_start:tok["start"]].strip()
+                            f_str = content[fields_start : tok["start"]].strip()
                             fields_start = tok["end"]
                             if f_str:
                                 fields.append(f_str)
+                            else:
+                                fields = []
+                                break
                         elif tok == fields_tokens[-1]:
                             f_str = content[fields_start:fields_end].strip()
                             if f_str:

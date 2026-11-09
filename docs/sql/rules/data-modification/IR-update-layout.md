@@ -1,6 +1,6 @@
 # IR-update-layout
 
-Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent assignments.
+Format and wrap long UPDATE statements: align SET and WHERE with UPDATE, indent assignments; leave incomplete assignment lists unchanged.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes
