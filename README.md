@@ -192,7 +192,7 @@ git config mir.dockerImage mir-linter:latest
 
 Git remains on the host. The hook sends exact staged blobs and changed-line diffs through a temporary batch exchange, hides `.git` from the container, and writes accepted results back to the index. The repository is read-only inside the container, apart from the isolated exchange directory.
 
-The hook selects supported staged files itself; do not pass the output of `git diff` as filenames.
+The hook selects supported staged files itself; do not pass the output of `git diff` as filenames. Stylesheets and HTML use full Prettier output only when its edits stay within staged, enabled lines; otherwise the hook reports the scope conflict.
 
 ---
 
@@ -411,6 +411,6 @@ Releases are published from `main` through GitHub Actions and PyPI Trusted Publi
 
 *This package has been developed with **Antigravity** and **OpenAI Codex**.*
 
-*Total Cumulative Development Time: ~73.8 hours*
+*Total Cumulative Development Time: ~74.0 hours*
 
-*Last Developer Session: 2026-11-09T16:20:33Z*
+*Last Developer Session: 2026-11-09T16:33:09Z*

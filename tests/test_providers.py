@@ -130,6 +130,64 @@ class TestProviders(unittest.TestCase):
         self.assertEqual(result.version, "3.6.2")
         self.assertEqual(request.call_args.args[2]["path"], "/tmp/sample.ts")
 
+    def test_prettier_formats_selected_styles_and_html_without_ranges(self):
+        for language, source, formatted in (
+            ("css", ".sample{color:red;}\n", ".sample {\n  color: red;\n}\n"),
+            (
+                "html",
+                "<section><div>value</div></section>\n",
+                "<section>\n  <div>value</div>\n</section>\n",
+            ),
+        ):
+            with self.subTest(language=language):
+                context = ProviderContext(
+                    "/tmp/sample", language, frozenset({1}), True, True, "commit", {}
+                )
+                with (
+                    patch(
+                        "mir.providers.prettier.resolve_executable",
+                        return_value="/project/node_modules/.bin/prettier",
+                    ),
+                    patch(
+                        "mir.providers.prettier.node_request",
+                        return_value={"content": formatted, "version": "3.8.1"},
+                    ) as request,
+                ):
+                    result = PrettierProvider().run(source, context, {})
+                self.assertFalse(result.diagnostics)
+                self.assertEqual(result.content, formatted)
+                self.assertNotIn("options", request.call_args.args[2])
+
+    def test_prettier_rejects_styles_outside_staged_or_enabled_lines(self):
+        source = ".sample {\n  color:red;\n  margin:0;\n}\n"
+        formatted = ".sample {\n  color: red;\n  margin: 0;\n}\n"
+        for selected, disabled in (
+            (frozenset({2}), {}),
+            (frozenset({2, 3}), {"all": frozenset({3})}),
+        ):
+            with self.subTest(selected=selected, disabled=disabled):
+                context = ProviderContext(
+                    "/tmp/sample.scss", "css", selected, True, True, "commit", disabled
+                )
+                with (
+                    patch(
+                        "mir.providers.prettier.resolve_executable",
+                        return_value="/project/node_modules/.bin/prettier",
+                    ),
+                    patch(
+                        "mir.providers.prettier.node_request",
+                        return_value={"content": formatted, "version": "3.8.1"},
+                    ),
+                ):
+                    result = PrettierProvider().run(source, context, {})
+                self.assertEqual(result.content, source)
+                self.assertTrue(
+                    any(
+                        "outside the staged or enabled scope" in message
+                        for message in result.diagnostics
+                    )
+                )
+
     def test_eslint_bridge_applies_reported_fix(self):
         context = ProviderContext(
             "/tmp/sample.ts", "typescript", frozenset(), False, True, None, {}

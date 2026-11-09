@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 from pathlib import Path
 from typing import Any, Dict
 
@@ -74,16 +75,20 @@ class PrettierProvider(BaseProvider):
         disabled = set(context.disabled_lines.get("prettier", frozenset())) | set(
             context.disabled_lines.get("all", frozenset())
         )
+        candidates = (
+            set(context.selected_lines)
+            if context.restricted
+            else set(range(1, len(content.splitlines()) + 1))
+        )
+        candidates.difference_update(disabled)
+        full_format = context.language in {"css", "html"}
         if context.restricted or disabled:
-            candidates = (
-                set(context.selected_lines)
-                if context.restricted
-                else set(range(1, len(content.splitlines()) + 1))
-            )
-            candidates.difference_update(disabled)
             ranges = list(reversed(contiguous_ranges(candidates)))
         else:
             ranges = [(0, 0)]
+        if full_format:
+            # Prettier silently ignores partial ranges for styles and HTML.
+            ranges = [(0, 0)] if candidates or not content else []
         current = content
         version = None
         for start, end in ranges:
@@ -111,6 +116,23 @@ class PrettierProvider(BaseProvider):
             if response.get("ignored"):
                 return content, version
             current = str(response.get("content", current))
+        if full_format and (context.restricted or disabled) and current != content:
+            changes = difflib.SequenceMatcher(
+                None,
+                content.splitlines(keepends=True),
+                current.splitlines(keepends=True),
+                autojunk=False,
+            )
+            for kind, start, end, _, _ in changes.get_opcodes():
+                if kind == "equal":
+                    continue
+                affected = (
+                    set(range(start + 1, end + 1)) if start != end else {max(1, start)}
+                )
+                if not affected.issubset(candidates):
+                    raise NodeBridgeError(
+                        "Prettier formatting would change lines outside the staged or enabled scope; format and stage the file with the project's locked Prettier before committing"
+                    )
         return current, version
 
     def run(

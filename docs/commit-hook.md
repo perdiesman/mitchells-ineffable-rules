@@ -109,6 +109,11 @@ languages:
 
 External rules remain supported with `include_dirs` and `rule_mode`. A SQL rule must explicitly set `commit_profile = True`, and must also set `embedded_safe = True` for MyBatis or `trellis_safe = True` for Trellis before it can run in those contexts.
 
+Prettier does not support range formatting for stylesheets or HTML. MIR formats
+these snapshots in memory and accepts the result only when every changed source
+line is staged and enabled. If formatting would reach other lines, the hook stops
+with instructions to format and stage the file using its locked Prettier.
+
 ## Partial staging behavior
 
 - Non-overlapping unstaged edits are preserved in the working tree while the staged blob is formatted.
