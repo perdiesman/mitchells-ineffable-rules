@@ -4502,7 +4502,15 @@ class XmlMybatisSqlRule(BaseRule):
         in_tag = False
         tag_start = None
         for tok in tokens:
-            if tok["type"] in ("TAG_OPEN_START", "TAG_CLOSE_START", "XML_DECL_START", "DOCTYPE_START", "COMMENT_START"):
+            if tok["type"] in {"COMMENT", "DECLARATION"}:
+                tag_ranges.append((tok["start"], tok["end"]))
+            elif tok["type"] in (
+                "TAG_OPEN_START",
+                "TAG_CLOSE_START",
+                "XML_DECL_START",
+                "DOCTYPE_START",
+                "COMMENT_START",
+            ):
                 if not in_tag:
                     in_tag = True
                     tag_start = tok["start"]
@@ -5468,7 +5476,15 @@ class XmlMybatisSqlRule(BaseRule):
         in_tag = False
         tag_start = None
         for tok in tokens:
-            if tok["type"] in ("TAG_OPEN_START", "TAG_CLOSE_START", "XML_DECL_START", "DOCTYPE_START", "COMMENT_START"):
+            if tok["type"] in {"COMMENT", "DECLARATION"}:
+                tag_ranges.append((tok["start"], tok["end"]))
+            elif tok["type"] in (
+                "TAG_OPEN_START",
+                "TAG_CLOSE_START",
+                "XML_DECL_START",
+                "DOCTYPE_START",
+                "COMMENT_START",
+            ):
                 if not in_tag:
                     in_tag = True
                     tag_start = tok["start"]
@@ -6517,12 +6533,10 @@ class XmlMybatisSqlRule(BaseRule):
             all_xml_edits = [
                 edit
                 for edit in all_xml_edits
-                if edit in atomic_static_edits or not any(
+                if edit in atomic_static_edits
+                or not any(
                     max(edit[0], owned[0]) < min(edit[1], owned[1])
-                    or (
-                        edit[0] == edit[1]
-                        and owned[0] <= edit[0] <= owned[1]
-                    )
+                    or (edit[0] == edit[1] and owned[0] <= edit[0] <= owned[1])
                     for owned in owned_where_edits
                 )
             ]
@@ -6530,7 +6544,21 @@ class XmlMybatisSqlRule(BaseRule):
         if not all_xml_edits:
             return content
 
-        resolved_edits = resolve_source_edits(all_xml_edits)
+        # SQL layout must not consume XML comments omitted from guest SQL.
+        comments = [token for token in tokens if token["type"] == "COMMENT"]
+        resolved_edits = resolve_source_edits(
+            [
+                (start, end, replacement)
+                for start, end, replacement in all_xml_edits
+                if not any(
+                    start < comment["end"]
+                    and end > comment["start"]
+                    or start == end
+                    and comment["start"] <= start < comment["end"]
+                    for comment in comments
+                )
+            ]
+        )
         # At one source offset, replace the existing range before inserting
         # indentation. Applying the insertion first shifts the replacement
         # onto the new spaces and can produce text such as ``FROM    from``.

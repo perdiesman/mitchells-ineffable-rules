@@ -445,6 +445,47 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second, expected)
         self.assertFalse(rule.check(first, "generic.xml", config))
 
+    def test_mybatis_cte_layout_preserves_xml_comments(self):
+        source = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="items">\n'
+            "        WITH expected_items AS (\n"
+            "            <!-- Keep this explanation of the query. -->\n"
+            "            SELECT\n"
+            "                item_id,\n"
+            "                owner_id\n"
+            "            FROM sample_item\n"
+            "        )\n"
+            "        SELECT item_id, owner_id FROM expected_items\n"
+            "    </select>\n"
+            "</mapper>"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+        from mir.rules.xml.xml_mybatis_sql import XmlMybatisSqlRule
+
+        comment_start = source.index("<!--")
+        comment_end = source.index("-->") + 3
+        with patch(
+            "mir.rules.xml.xml_mybatis_sql.sql_trailing_whitespace_source_edits",
+            return_value=[(comment_start, comment_end, "")],
+        ):
+            fixed = XmlMybatisSqlRule().fix(
+                source, "generic.xml", {"_profile": "commit"}
+            )
+        self.assertIn(source[comment_start:comment_end], fixed)
+        result = process_document(config, source, "generic.xml", "xml")
+        self.assertFalse(result.diagnostics)
+        comments = lambda text: [
+            token["value"] for token in tokenize_xml(text) if token["type"] == "COMMENT"
+        ]
+        self.assertEqual(comments(result.content), comments(source))
+        self.assertEqual(
+            process_document(config, result.content, "generic.xml", "xml").content,
+            result.content,
+        )
+
     def test_dynamic_sql_respects_disabled_expression_rewrites(self):
         source = (
             '<mapper namespace="GenericMapper">\n'
