@@ -19,6 +19,7 @@ from mir.rules.xml.xml_mybatis_sql import (
 )
 from mir.rules.xml.xml_line_length import XmlLineLengthRule
 from mir.rules.xml.xml_indent import XmlIndentRule
+from mir.rules.xml.xml_utils import tokenize_xml
 from mir.rules.xml.xml_sql_entities import XmlSqlEntitiesRule
 from mir.rules.xml.xml_utils import tokenize_xml
 
@@ -444,6 +445,20 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(first, expected)
         self.assertEqual(second, expected)
         self.assertFalse(rule.check(first, "generic.xml", config))
+
+    def test_xml_indent_preserves_multiline_attribute_values(self):
+        source = '<root>\n  <entry value="one\n  two\n    three" />\n</root>'
+        rule = XmlIndentRule()
+        fixed = rule.fix(source, "generic.xml", {})
+        values = lambda text: [
+            token["value"]
+            for token in tokenize_xml(text)
+            if token["type"] == "ATTR_VALUE"
+        ]
+        self.assertEqual(values(fixed), values(source))
+        self.assertIn("    <entry", fixed)
+        self.assertEqual(rule.fix(fixed, "generic.xml", {}), fixed)
+        self.assertFalse(rule.check(fixed, "generic.xml", {}))
 
     def test_xml_mybatis_where_container_aligns_after_join_conditions(self):
         xml_content = (

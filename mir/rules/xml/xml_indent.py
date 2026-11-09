@@ -270,7 +270,7 @@ class XmlIndentRule(BaseRule):
         "align physical predicates beneath static MyBatis WHERE clauses, "
         "indent SELECT and ORDER BY lists containing nested dynamic branches, "
         "and keep a SQL statement terminator attached to its preceding foreach "
-        "closing tag."
+        "closing tag. Multiline attribute values remain byte-for-byte intact."
     )
     category = "general"
     is_fixable = "yes"
@@ -1841,7 +1841,22 @@ class XmlIndentRule(BaseRule):
                     "closing-tag line when it fits."
                 ),
             })
-        return violations
+        # Attribute whitespace is part of the parsed value, including newlines.
+        attributes = [token for token in tokens if token["type"] == "ATTR_VALUE"]
+        return [
+            item
+            for item in violations
+            if not any(
+                attribute["start"] <= item["start_offset"] < attribute["end"]
+                or item["start_offset"] < attribute["start"] < item["end_offset"]
+                for attribute in attributes
+                if not (
+                    item["start_offset"] <= attribute["start"]
+                    and item["end_offset"] >= attribute["end"]
+                    and attribute["value"] in item["replacement"]
+                )
+            )
+        ]
 
     def check(self, content: str, file_path: str, rule_config: Dict[str, Any]) -> List[Violation]:
         indent_size = self.get_config_value(rule_config, "indent_size", 4)
