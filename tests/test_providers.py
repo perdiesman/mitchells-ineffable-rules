@@ -130,6 +130,37 @@ class TestProviders(unittest.TestCase):
         self.assertEqual(result.version, "3.6.2")
         self.assertEqual(request.call_args.args[2]["path"], "/tmp/sample.ts")
 
+    def test_prettier_selected_final_line_includes_its_line_ending(self):
+        for ending in ("", "\n", "\r\n"):
+            for selected in (frozenset({2}), frozenset({1, 2})):
+                with self.subTest(ending=repr(ending), selected=selected):
+                    source = "const first = 1;\nconst last = 2;" + ending
+                    context = ProviderContext(
+                        "/tmp/sample.ts",
+                        "typescript",
+                        selected,
+                        True,
+                        True,
+                        "commit",
+                        {},
+                    )
+                    with (
+                        patch(
+                            "mir.providers.prettier.resolve_executable",
+                            return_value="/project/node_modules/.bin/prettier",
+                        ),
+                        patch(
+                            "mir.providers.prettier.node_request",
+                            return_value={"content": source, "version": "3.8.1"},
+                        ) as request,
+                    ):
+                        result = PrettierProvider().run(source, context, {})
+                    self.assertFalse(result.diagnostics)
+                    self.assertEqual(result.content, source)
+                    self.assertEqual(
+                        request.call_args.args[2]["options"]["rangeEnd"], len(source)
+                    )
+
     def test_prettier_formats_selected_styles_and_html_without_ranges(self):
         for language, source, formatted in (
             ("css", ".sample{color:red;}\n", ".sample {\n  color: red;\n}\n"),

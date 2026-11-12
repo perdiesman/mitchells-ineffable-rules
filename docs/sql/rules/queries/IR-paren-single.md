@@ -88,6 +88,14 @@ INSERT INTO sample_item (item_id) VALUES (:item_id) ON CONFLICT (item_id) DO NOT
 ```
 
 ```sql
+INSERT INTO sample_item (item_id) VALUES (:first_id), (:second_id);
+```
+
+```sql
+SELECT * FROM (VALUES ('first'), ('second')) AS sample_item(name);
+```
+
+```sql
 SELECT item_id FROM sample_item WHERE NOT (enabled AND visible);
 ```
 

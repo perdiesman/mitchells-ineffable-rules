@@ -46,6 +46,8 @@ Set `required_version` to an exact version when reproducible output must be enfo
 
 For commit hooks, use `mir --staged --fix`. That limits work to staged files and authorized changed ranges. Whole-repository review runs are intentionally more expensive, especially when ESLint performs type-aware analysis.
 
+A selected Prettier range that reaches the final line includes its line ending. This keeps formatting stable with LF, CRLF, and missing final newlines while retaining the selected range.
+
 The Docker-backed commit hook provides Ruff in the MIR image and a Node.js runtime for project-local Prettier and ESLint installations. It mounts the consumer repository read-only, so provider executables and configuration remain discoverable without allowing the container to modify project files directly. See the [staged commit hook guide](commit-hook.md#docker-backed-hook) for setup and index-safety details.
 
 ## Adding a provider

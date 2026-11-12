@@ -103,6 +103,28 @@ class TestSqlCompatibility(unittest.TestCase):
         self.assertIn("row_number() OVER (", keyword_fixed)
         self.assertIn("PARTITION BY", keyword_fixed)
 
+    def test_single_column_values_rows_keep_required_parentheses(self):
+        rule = ParenSingleRule()
+        for source in (
+            "INSERT INTO sample_item (name) VALUES ('first'), ('second'), ('third');",
+            "SELECT * FROM (VALUES ('first'), /* keep */ ('second')) AS sample(name);",
+            "VALUES ((SELECT value FROM (VALUES (1), (2)) AS sample(value))), (3);",
+        ):
+            with self.subTest(source=source):
+                fixed = rule.fix(source, "generic.sql", {})
+                self.assertEqual(fixed, source)
+                self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+                self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
+
+    def test_values_row_context_ends_before_other_expressions(self):
+        source = "SELECT * FROM (VALUES (1), (2)) AS sample(value) WHERE (value = 1);"
+        expected = "SELECT * FROM (VALUES (1), (2)) AS sample(value) WHERE value = 1;"
+        rule = ParenSingleRule()
+        fixed = rule.fix(source, "generic.sql", {})
+        self.assertEqual(fixed, expected)
+        self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+        self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
+
     def test_constraint_parentheses_are_not_removed(self):
         source = (
             "CREATE TABLE sample_item (\n"

@@ -49,6 +49,8 @@ class ParenSingleRule(BaseRule):
         "SELECT item_id FROM sample_item JOIN sample_owner USING (owner_id);",
         "SELECT (covered_count::NUMERIC / total_count) - 1 FROM sample_item;",
         "INSERT INTO sample_item (item_id) VALUES (:item_id) ON CONFLICT (item_id) DO NOTHING;",
+        "INSERT INTO sample_item (item_id) VALUES (:first_id), (:second_id);",
+        "SELECT * FROM (VALUES ('first'), ('second')) AS sample_item(name);",
         "SELECT item_id FROM sample_item WHERE NOT (enabled AND visible);",
         "SELECT CASE WHEN (sum(item_count) IS NULL) THEN false ELSE true END FROM sample_item;",
         "SELECT (payload ->> 'itemId')::INTEGER FROM sample_item;",
@@ -75,9 +77,24 @@ class ParenSingleRule(BaseRule):
         tokens = tokenize_sql(content)
         violations = []
         n = len(tokens)
-        
+        values_depths = set()
+        values_rows = set()
+        # Every VALUES row needs its parentheses, including single-column rows.
+        for index, (token, depth) in enumerate(zip(tokens, get_token_depths(tokens))):
+            if token["type"] == "KEYWORD" and token["value"].upper() == "VALUES":
+                values_depths.add(depth)
+            elif token["type"] == "PAREN":
+                if token["value"] == "(" and depth in values_depths:
+                    values_rows.add(index)
+                elif token["value"] == ")":
+                    values_depths.discard(depth + 1)
+            elif token["type"] not in {"WHITESPACE", "COMMENT", "COMMA"}:
+                values_depths.discard(depth)
+
         for i, tok in enumerate(tokens):
             if tok["type"] == "PAREN" and tok["value"] == "(":
+                if i in values_rows:
+                    continue
                 close_idx = find_matching_paren(tokens, i)
                 if close_idx is None:
                     continue

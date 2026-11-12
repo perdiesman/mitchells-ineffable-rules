@@ -102,8 +102,12 @@ class PrettierProvider(BaseProvider):
                 payload["config"] = configured
             if start:
                 range_start = offset_for_location(current, start, 1)
-                range_end = offset_for_location(
-                    current, end, len(current.splitlines()[end - 1]) + 1
+                range_end = (
+                    len(current)
+                    if end == len(current.splitlines())
+                    else offset_for_location(
+                        current, end, len(current.splitlines()[end - 1]) + 1
+                    )
                 )
                 payload["options"] = {"rangeStart": range_start, "rangeEnd": range_end}
             response = node_request(
