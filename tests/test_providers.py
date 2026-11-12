@@ -219,6 +219,96 @@ class TestProviders(unittest.TestCase):
                     )
                 )
 
+    def test_prettier_ranges_use_utf16_offsets_after_non_bmp_text(self):
+        source = "// 😀\nconst value = 1;\n"
+        context = ProviderContext(
+            "/tmp/sample.ts", "typescript", frozenset({2}), True, True, "commit", {}
+        )
+        with (
+            patch(
+                "mir.providers.prettier.resolve_executable",
+                return_value="/project/node_modules/.bin/prettier",
+            ),
+            patch(
+                "mir.providers.prettier.node_request",
+                return_value={"content": source, "version": "3.8.1"},
+            ) as request,
+        ):
+            result = PrettierProvider().run(source, context, {})
+        self.assertFalse(result.diagnostics)
+        self.assertEqual(result.content, source)
+        self.assertEqual(
+            request.call_args.args[2]["options"],
+            {
+                "rangeStart": 6,
+                "rangeEnd": 23,
+            },
+        )
+
+    def test_eslint_fix_after_non_bmp_text_preserves_surrounding_source(self):
+        source = "// 😀\nvar value = 1;\n"
+        context = ProviderContext(
+            "/tmp/sample.ts", "typescript", frozenset({2}), True, True, "commit", {}
+        )
+        violation = {
+            "messages": [
+                {
+                    "ruleId": "prefer-const",
+                    "message": "Use const.",
+                    "line": 2,
+                    "column": 1,
+                    "severity": 2,
+                    "fix": {"range": [6, 9], "text": "const"},
+                }
+            ],
+            "version": "9.39.4",
+        }
+        clean = {"messages": [], "version": "9.39.4"}
+        with (
+            patch(
+                "mir.providers.eslint.resolve_executable",
+                return_value="/project/node_modules/.bin/eslint",
+            ),
+            patch(
+                "mir.providers.eslint.node_request",
+                side_effect=[violation, clean, clean],
+            ),
+        ):
+            result = EslintProvider().run(source, context, {})
+        self.assertFalse(result.diagnostics)
+        self.assertEqual(result.content, "// 😀\nconst value = 1;\n")
+
+    def test_eslint_rejects_invalid_utf16_fix_ranges_without_changing_source(self):
+        source = "// 😀\nvar value = 1;\n"
+        context = ProviderContext(
+            "/tmp/sample.ts", "typescript", frozenset({2}), True, True, "commit", {}
+        )
+        for offsets in ([-1, 9], [6, 1000], [4, 9]):
+            with self.subTest(offsets=offsets):
+                response = {
+                    "messages": [
+                        {
+                            "ruleId": "prefer-const",
+                            "message": "Use const.",
+                            "line": 2,
+                            "column": 1,
+                            "severity": 2,
+                            "fix": {"range": offsets, "text": "const"},
+                        }
+                    ],
+                    "version": "9.39.4",
+                }
+                with (
+                    patch(
+                        "mir.providers.eslint.resolve_executable",
+                        return_value="/project/node_modules/.bin/eslint",
+                    ),
+                    patch("mir.providers.eslint.node_request", return_value=response),
+                ):
+                    result = EslintProvider().run(source, context, {})
+                self.assertTrue(result.diagnostics)
+                self.assertEqual(result.content, source)
+
     def test_eslint_bridge_applies_reported_fix(self):
         context = ProviderContext(
             "/tmp/sample.ts", "typescript", frozenset(), False, True, None, {}

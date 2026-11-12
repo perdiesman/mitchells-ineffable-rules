@@ -26,6 +26,19 @@ def offset_for_location(content: str, row: int, column: int) -> int:
     )
 
 
+def utf16_offset(content: str, offset: int) -> int:
+    """Translate a Python string index to a JavaScript UTF-16 offset."""
+    return len(content[:offset].encode("utf-16-le")) // 2
+
+
+def codepoint_offset(content: str, offset: int) -> int:
+    """Translate a JavaScript UTF-16 offset to a Python string index."""
+    encoded = content.encode("utf-16-le")
+    if offset < 0 or offset * 2 > len(encoded):
+        raise ValueError("UTF-16 offset is outside the source text")
+    return len(encoded[: offset * 2].decode("utf-16-le"))
+
+
 def selected_edit(
     content: str, edit: ProviderEdit, selected: Iterable[int], restricted: bool
 ) -> bool:

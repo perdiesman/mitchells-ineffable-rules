@@ -17,6 +17,7 @@ from mir.engine.provider_interface import (
 )
 from mir.providers.common import (
     apply_edits,
+    codepoint_offset,
     resolve_executable,
     selected_edit,
     version_diagnostic,
@@ -71,8 +72,8 @@ class EslintProvider(BaseProvider):
             if fix and isinstance(fix.get("range"), list):
                 edits = (
                     ProviderEdit(
-                        int(fix["range"][0]),
-                        int(fix["range"][1]),
+                        codepoint_offset(content, int(fix["range"][0])),
+                        codepoint_offset(content, int(fix["range"][1])),
                         str(fix.get("text") or ""),
                     ),
                 )

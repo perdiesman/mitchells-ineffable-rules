@@ -18,6 +18,7 @@ from mir.providers.common import (
     contiguous_ranges,
     offset_for_location,
     resolve_executable,
+    utf16_offset,
     version_diagnostic,
 )
 from mir.providers.node_bridge import NodeBridgeError, node_request
@@ -109,7 +110,10 @@ class PrettierProvider(BaseProvider):
                         current, end, len(current.splitlines()[end - 1]) + 1
                     )
                 )
-                payload["options"] = {"rangeStart": range_start, "rangeEnd": range_end}
+                payload["options"] = {
+                    "rangeStart": utf16_offset(current, range_start),
+                    "rangeEnd": utf16_offset(current, range_end),
+                }
             response = node_request(
                 "prettier",
                 executable,
