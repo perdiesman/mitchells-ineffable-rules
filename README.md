@@ -75,6 +75,7 @@ A modular, configurable linter and formatter for **SQL, XML, MyBatis, Trellis, J
 MIR requires Python 3.9 or newer. Ensure you have [uv](https://github.com/astral-sh/uv) or a compatible Python installed. Java parsing uses the compiled `tree-sitter` and `tree-sitter-java` wheels declared by the project; it does not invoke a JVM compiler during formatting. Install `mir-linter[python]` for Ruff support. Prettier and ESLint are resolved from the target project's `node_modules/.bin` unless an explicit executable is configured; MIR never downloads tools during a lint run.
 Selected Prettier ranges that reach the end of a file include its final line ending, so repeated staged formatting stays stable. SQL formatting preserves the required parentheses around every `VALUES` row, including single-column and nested rows. MyBatis function arguments supplied by `<choose>` keep their XML structure and use physical argument indentation. Long binary subtraction expressions wrap without splitting unary negative values.
 JavaScript provider offsets are converted between Python string indexes and UTF-16, so emoji before an edit do not shift or corrupt the fix.
+MyBatis dynamic argument layout locates closing parentheses outside SQL comments and literals. Disable it with either `IR-multiline-function-layout` or `sql:IR-multiline-function-layout`.
 
 ### 1. Running Tests
 You can run the full test suite using `uv`:
@@ -415,4 +416,4 @@ Releases are published from `main` through GitHub Actions and PyPI Trusted Publi
 
 *Total Cumulative Development Time: ~76.6 hours*
 
-*Last Developer Session: 2026-11-13T15:17:54Z*
+*Last Developer Session: 2026-11-13T15:19:34Z*

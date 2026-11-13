@@ -2848,10 +2848,14 @@ def multiline_dynamic_function_source_edits(
     rule_id = "IR-multiline-function-layout"
     disabled = rule_config.get("_rules_to_disable", set())
     enabled = rule_config.get("_rules_to_enable", set())
-    if rule_id in disabled or (
-        rule_config.get("_disable_all", False)
-        and rule_id not in enabled
-        and "sql:" + rule_id not in enabled
+    if (
+        rule_id in disabled
+        or "sql:" + rule_id in disabled
+        or (
+            rule_config.get("_disable_all", False)
+            and rule_id not in enabled
+            and "sql:" + rule_id not in enabled
+        )
     ):
         return [], []
     source_start, source_end = source_range
@@ -4502,7 +4506,10 @@ def remove_mybatis_sql_trailing_whitespace(content: str) -> str:
 class XmlMybatisSqlRule(BaseRule):
     commit_profile = True
     rule_id = "IR-xml-mybatis-sql"
-    description = "Format embedded SQL inside MyBatis XML mapper files using SQL rules."
+    description = (
+        "Format embedded SQL inside MyBatis XML mapper files using SQL rules, "
+        "preserving dynamic XML, SQL comments, and literals."
+    )
     category = "queries"
     is_fixable = "yes"
     enabled_by_default = True

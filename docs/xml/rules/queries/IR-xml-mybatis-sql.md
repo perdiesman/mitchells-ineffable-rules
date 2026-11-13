@@ -1,6 +1,6 @@
 # IR-xml-mybatis-sql
 
-Format embedded SQL inside MyBatis XML mapper files using SQL rules.
+Format embedded SQL inside MyBatis XML mapper files using SQL rules, preserving dynamic XML, SQL comments, and literals.
 
 - **Auto-Fixable**: Yes
 - **Enabled by Default**: Yes

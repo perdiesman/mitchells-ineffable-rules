@@ -4527,6 +4527,47 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
 
+    def test_xml_mybatis_dynamic_function_honors_qualified_rule_disable(self):
+        source = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="totals">\n'
+            "        SELECT sum(<choose>\n"
+            '            <when test="useMaximum">maximum_count</when>\n'
+            "            <otherwise>current_count</otherwise>\n"
+            "        </choose>) AS total_count\n"
+            "        FROM sample_item\n"
+            "    </select>\n"
+            "</mapper>"
+        )
+        outputs = []
+        for rule_id in (
+            "IR-multiline-function-layout",
+            "sql:IR-multiline-function-layout",
+        ):
+            with self.subTest(rule_id=rule_id):
+                edits, owned = multiline_dynamic_function_source_edits(
+                    source,
+                    (0, len(source)),
+                    {
+                        "_rules_to_disable": {rule_id},
+                        "_rules_to_enable": {"sql:IR-multiline-function-layout"},
+                        "_disable_all": True,
+                    },
+                )
+                self.assertEqual((edits, owned), ([], []))
+                config = Config()
+                config.profile = "commit"
+                config.fix = True
+                config.rules_to_disable = [rule_id]
+                first = process_document(config, source, "generic.xml", "xml")
+                second = process_document(config, first.content, "generic.xml", "xml")
+                self.assertIn("sum(<choose>", first.content)
+                self.assertEqual(first.content, second.content)
+                self.assertFalse(first.diagnostics)
+                self.assertFalse(second.diagnostics)
+                outputs.append(first.content)
+        self.assertEqual(outputs[0], outputs[1])
+
     def test_xml_mybatis_dynamic_peak_query_preserves_values_and_expressions(self):
         source = (
             '<mapper namespace="sample">\n'
