@@ -332,6 +332,35 @@ def fix_embedded_content(
             
             if extra_fix_args:
                 guest_rule_config.update(extra_fix_args)
+
+            if (
+                rule.rule_id == "IR-where-single"
+                and fixed_text != guest_text
+                and guest_rule_config.get("mybatis_foreach_offsets")
+            ):
+                # Earlier layout rules shift the offsets of XML-owned tokens.
+                before_tokens = [
+                    token
+                    for token in tokenize_sql(guest_text)
+                    if token["type"] not in {"WHITESPACE", "COMMENT"}
+                ]
+                after_tokens = [
+                    token
+                    for token in tokenize_sql(fixed_text)
+                    if token["type"] not in {"WHITESPACE", "COMMENT"}
+                ]
+                if len(before_tokens) != len(after_tokens) or any(
+                    (before["type"], before["value"].lower())
+                    != (after["type"], after["value"].lower())
+                    for before, after in zip(before_tokens, after_tokens)
+                ):
+                    continue
+                original_offsets = guest_rule_config["mybatis_foreach_offsets"]
+                guest_rule_config["mybatis_foreach_offsets"] = {
+                    after["start"]
+                    for before, after in zip(before_tokens, after_tokens)
+                    if before["start"] in original_offsets
+                }
                 
             if rule.rule_id == "IR-comma-style":
                 ignored_comma_offsets = set()

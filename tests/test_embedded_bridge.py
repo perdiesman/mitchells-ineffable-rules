@@ -8,6 +8,8 @@ from mir.engine.embedded_bridge import (
     is_fixed_text_xml_safe,
 )
 from mir.engine.rule_interface import BaseRule
+from mir.rules.sql.from_single import FromSingleRule
+from mir.rules.sql.where_single import WhereSingleRule
 
 
 class FailingEmbeddedRule(BaseRule):
@@ -25,6 +27,26 @@ class FailingEmbeddedRule(BaseRule):
 
 
 class TestEmbeddedBridgeSafety(unittest.TestCase):
+    def test_foreach_offsets_follow_earlier_layout_edits(self):
+        source = "SELECT id\nFROM\n    sample_item\nWHERE\n    item_id IN (#{code})"
+        context = {"mybatis_foreach_offsets": {source.index("#{code}")}}
+        with patch(
+            "mir.engine.embedded_bridge.get_guest_rules",
+            return_value=[FromSingleRule(), WhereSingleRule()],
+        ):
+            fix_embedded_content(
+                "sql",
+                source,
+                list(range(len(source))),
+                "generic.xml",
+                {},
+                extra_fix_args=context,
+            )
+        self.assertEqual(
+            context["fixed_text"],
+            "SELECT id\nFROM sample_item\nWHERE\n    item_id IN (#{code})",
+        )
+
     @patch("mir.engine.embedded_bridge.get_guest_rules", return_value=[FailingEmbeddedRule()])
     def test_embedded_rule_failures_are_not_silenced(self, _guest_rules):
         with self.assertRaisesRegex(RuntimeError, "embedded check failed"):
