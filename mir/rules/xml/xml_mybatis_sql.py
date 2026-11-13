@@ -2716,6 +2716,7 @@ def physical_where_source_edits(
 ) -> List[tuple[int, int, str]]:
     """Format a tag-free physical WHERE suffix after an expanded include."""
     from html import unescape
+    from mir.rules.sql.sql_utils import tokenize_sql
 
     source_start, source_end = source_range
     fragment = content[source_start:source_end]
@@ -2732,6 +2733,15 @@ def physical_where_source_edits(
         source_sql = content[where_start:candidate_end]
         if not source_sql.strip():
             continue
+        if re.match(r"<foreach\b", content[candidate_end:source_end], re.IGNORECASE):
+            active = [
+                token
+                for token in tokenize_sql(unescape(source_sql))
+                if token["type"] not in {"WHITESPACE", "COMMENT"}
+            ]
+            if active and active[-1]["value"].upper() == "IN":
+                # The XML-owned list is missing from this isolated SQL prefix.
+                continue
         chars = []
         mapping = []
         cursor = 0
@@ -4508,7 +4518,7 @@ class XmlMybatisSqlRule(BaseRule):
     rule_id = "IR-xml-mybatis-sql"
     description = (
         "Format embedded SQL inside MyBatis XML mapper files using SQL rules, "
-        "preserving dynamic XML, SQL comments, and literals."
+        "preserving dynamic XML, SQL comments, literals, and incomplete dynamic predicate layout."
     )
     category = "queries"
     is_fixable = "yes"

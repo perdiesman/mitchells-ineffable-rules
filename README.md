@@ -76,6 +76,7 @@ MIR requires Python 3.9 or newer. Ensure you have [uv](https://github.com/astral
 Selected Prettier ranges that reach the end of a file include its final line ending, so repeated staged formatting stays stable. SQL formatting preserves the required parentheses around every `VALUES` row, including single-column and nested rows. MyBatis function arguments supplied by `<choose>` keep their XML structure and use physical argument indentation. Long binary subtraction expressions wrap without splitting unary negative values.
 JavaScript provider offsets are converted between Python string indexes and UTF-16, so emoji before an edit do not shift or corrupt the fix.
 MyBatis dynamic argument layout locates closing parentheses outside SQL comments and literals. Disable it with either `IR-multiline-function-layout` or `sql:IR-multiline-function-layout`.
+Nested boolean groups keep their own layout. MyBatis `IN` predicates continued by `<foreach>` retain XML-owned layout so repeated formatting converges.
 
 ### 1. Running Tests
 You can run the full test suite using `uv`:
@@ -416,4 +417,4 @@ Releases are published from `main` through GitHub Actions and PyPI Trusted Publi
 
 *Total Cumulative Development Time: ~76.8 hours*
 
-*Last Developer Session: 2026-11-13T15:28:35Z*
+*Last Developer Session: 2026-11-13T15:29:52Z*

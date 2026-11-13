@@ -4336,6 +4336,39 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertEqual(second.content, expected)
         self.assertFalse(first.diagnostics)
 
+    def test_xml_mybatis_incomplete_where_before_foreach_keeps_xml_layout(self):
+        source = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <sql id="base">SELECT item_id FROM sample_item</sql>\n'
+            '    <select id="items">\n'
+            '        SELECT * FROM (<include refid="base" />) items\n'
+            "        WHERE item_id IN (\n"
+            "            SELECT id FROM sample_county\n"
+            "            WHERE\n"
+            "                geoid IN\n"
+            '                    <foreach open="(" close=")" collection="codes" item="code" separator=",">\n'
+            "                        #{code}\n"
+            "                    </foreach>\n"
+            "        )\n"
+            "    </select>\n"
+            "</mapper>"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+        first = process_document(config, source, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+        self.assertEqual(first.content, second.content)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+        self.assertFalse(first.violations)
+        self.assertFalse(second.violations)
+        self.assertRegex(first.content, r"WHERE\n[ ]+geoid IN\n[ ]+<foreach")
+        self.assertEqual(
+            get_mybatis_protected_signatures(source),
+            get_mybatis_protected_signatures(first.content),
+        )
+
     def test_xml_mybatis_keeps_fitting_inline_foreach_condition(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'
