@@ -41,6 +41,20 @@ from mir.rules.sql.window_layout import WindowLayoutRule
 
 
 class TestSqlCompatibility(unittest.TestCase):
+    def test_nested_join_boolean_group_keeps_its_own_layout(self):
+        source = (
+            "SELECT a.id FROM a JOIN b ON (\n"
+            "    a.id = b.id\n"
+            "    OR (\n"
+            "        a.value IS NULL\n"
+            "        AND b.value IS NULL\n"
+            "    )\n"
+            ");"
+        )
+        rule = ParenMultiRule()
+        self.assertEqual(rule.fix(source, "sample.sql", {}), source)
+        self.assertFalse(rule.check(source, "sample.sql", {}))
+
     def test_delete_target_stays_with_delete_from(self):
         source = "DELETE\nFROM\n    sample_item\nWHERE item_id = :item_id;"
         expected = "DELETE FROM sample_item\nWHERE item_id = :item_id;"

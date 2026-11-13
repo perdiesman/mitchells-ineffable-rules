@@ -11,7 +11,7 @@ from mir.rules.sql.sql_utils import (
 class ParenMultiRule(BaseRule):
     commit_profile = True
     rule_id = "IR-paren-multi"
-    description = "Parenthesized logical conditions stay inline when they fit; longer groups put each condition on its own indented line."
+    description = "Parenthesized logical conditions stay inline when they fit; longer groups put each condition on its own indented line. Nested groups keep their own layout."
     category = "queries"
     is_fixable = "yes"
     enabled_by_default = True
@@ -28,6 +28,15 @@ class ParenMultiRule(BaseRule):
     additional_validations = [
         "SELECT item_id FROM sample_item WHERE NOT EXISTS (SELECT 1 FROM sample_child);",
         "SELECT item_id FROM sample_item WHERE (created_at BETWEEN :start AND :end);",
+        (
+            "SELECT a.id FROM a JOIN b ON (\n"
+            "    a.id = b.id\n"
+            "    OR (\n"
+            "        a.value IS NULL\n"
+            "        AND b.value IS NULL\n"
+            "    )\n"
+            ");"
+        ),
     ]
 
     def _find_violations(
@@ -225,10 +234,12 @@ class ParenMultiRule(BaseRule):
                                 None,
                             )
                             if last_active is not None:
+                                # Child groups and calls own their internal layout.
                                 for index in range(kw_idx + 1, last_active):
                                     item = tokens[index]
                                     if (
                                         item["type"] == "WHITESPACE"
+                                        and depths[index] == depths[i] + 1
                                         and item["value"] != " "
                                     ):
                                         violations.append({
