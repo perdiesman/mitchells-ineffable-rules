@@ -50,7 +50,22 @@ Long additive expressions should wrap before an operator, with all continuation 
         + third_measure_with_a_long_name + fourth_measure
 ```
 
+#### ❌ Violating Example #4
+```sql
+                        recorded_at > #{selectedTime}::TIMESTAMP WITH TIME ZONE - window_hours * INTERVAL '1 hour'
+```
+
+####  Correct Example #4
+```sql
+                        recorded_at > #{selectedTime}::TIMESTAMP WITH TIME ZONE
+                            - window_hours * INTERVAL '1 hour'
+```
+
 #### Additional Validations
 ```sql
 SELECT first_measure + second_measure FROM sample_measure;
+```
+
+```sql
+SELECT -very_long_negative_literal_operand_that_must_not_be_split_from_its_unary_sign;
 ```

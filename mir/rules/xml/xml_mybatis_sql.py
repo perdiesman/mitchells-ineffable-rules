@@ -1280,6 +1280,7 @@ def host_semantic_source_edits(
 
     from mir.rules.sql.boolean_comparison import BooleanComparisonRule
     from mir.rules.sql.between import BetweenRule
+    from mir.rules.sql.datatype_format import DataTypeFormatRule
     from mir.rules.sql.parenthesized_expression_wrap import (
         ParenthesizedExpressionWrapRule,
     )
@@ -1295,6 +1296,7 @@ def host_semantic_source_edits(
         RedundantKeywordsRule(),
         TableAliasAsRule(),
         BetweenRule(),
+        DataTypeFormatRule(),
         ParenthesizedExpressionWrapRule(),
     ):
         if rule.rule_id in disabled or (disable_all and rule.rule_id not in enabled):
@@ -2835,29 +2837,45 @@ def has_include_relation_before(
     ))
 
 
-def multiline_foreach_function_source_edits(
+def multiline_dynamic_function_source_edits(
     content: str,
     source_range: tuple[int, int],
-) -> List[tuple[int, int, str]]:
-    """Put a multiline foreach argument on its own function-call line."""
+    rule_config: dict,
+) -> tuple[list[tuple[int, int, str]], list[tuple[int, int]]]:
+    """Put a multiline foreach or choose argument on its own function-call line."""
+    from mir.rules.sql.sql_utils import tokenize_sql
+
+    rule_id = "IR-multiline-function-layout"
+    disabled = rule_config.get("_rules_to_disable", set())
+    enabled = rule_config.get("_rules_to_enable", set())
+    if rule_id in disabled or (
+        rule_config.get("_disable_all", False)
+        and rule_id not in enabled
+        and "sql:" + rule_id not in enabled
+    ):
+        return [], []
     source_start, source_end = source_range
-    fragment = content[source_start:source_end]
     edits = []
-    pattern = re.compile(
-        r"<foreach\b[^>]*>.*?</foreach>",
-        re.IGNORECASE | re.DOTALL,
-    )
-    for match in pattern.finditer(fragment):
-        if "\n" not in match.group(0):
+    owned_ranges = []
+    fragment = content[source_start:source_end]
+    tokens = tokenize_xml(fragment)
+    elements = get_all_elements_recursively(parse_xml_elements(tokens))
+    for element in elements:
+        if (
+            element["tag"] not in {"foreach", "choose"}
+            or "\n" not in fragment[element["start_offset"] : element["end_offset"]]
+        ):
             continue
-        open_start = source_start + match.start()
-        close_start = content.rfind(
-            "</foreach>",
-            open_start,
-            source_start + match.end(),
+        if element["tag"] == "choose" and content[
+            source_start + element["end_offset"] : source_end
+        ].lstrip().startswith(","):
+            continue
+        open_start = source_start + element["start_offset"]
+        close_start = source_start + next(
+            token["start"]
+            for token in reversed(tokens[element["start_idx"] : element["end_idx"]])
+            if token["type"] == "TAG_CLOSE_START"
         )
-        if close_start == -1:
-            continue
         open_line_start = content.rfind("\n", 0, open_start) + 1
         gap_start = open_start
         while gap_start > open_line_start and content[gap_start - 1] in " \t":
@@ -2873,14 +2891,35 @@ def multiline_foreach_function_source_edits(
             if content[gap_start - 1] != "(":
                 continue
             source_line = content[open_line_start:gap_start]
+        if element["tag"] == "choose":
+            prefix_tokens = [
+                token
+                for token in tokenize_sql(source_line)
+                if token["type"] not in {"WHITESPACE", "COMMENT"}
+            ]
+            if (
+                len(prefix_tokens) < 2
+                or prefix_tokens[-1]["type"] != "PAREN"
+                or prefix_tokens[-1]["value"] != "("
+                or not (
+                    prefix_tokens[-2]["type"] == "IDENTIFIER"
+                    or (
+                        prefix_tokens[-2]["type"] == "KEYWORD"
+                        and prefix_tokens[-2]["value"].upper()
+                        in {"COALESCE", "NULLIF", "VALUES"}
+                    )
+                )
+            ):
+                continue
+        function_line_start = (
+            previous_start if opener_is_previous_line else open_line_start
+        )
         base_indent = source_line[:
             len(source_line) - len(source_line.lstrip(" \t"))
         ]
         argument_indent = base_indent + "    "
         expected_gap = (
-            argument_indent
-            if opener_is_previous_line
-            else "\n" + argument_indent
+            argument_indent if opener_is_previous_line else "\n" + argument_indent
         )
         if content[gap_start:open_start] != expected_gap:
             edits.append((gap_start, open_start, expected_gap))
@@ -2889,13 +2928,14 @@ def multiline_foreach_function_source_edits(
         close_prefix = content[close_line_start:close_start]
         if not close_prefix.strip() and close_prefix != argument_indent:
             edits.append((close_line_start, close_start, argument_indent))
-        close_tag_end = close_start + len("</foreach>")
+        close_tag_end = source_start + element["end_offset"]
         close_line_end = content.find("\n", close_tag_end)
         if close_line_end == -1:
             close_line_end = source_end
         trailing = content[close_tag_end:close_line_end]
         function_close = re.fullmatch(r"([^)]*)\)([^)]*)", trailing)
         close_search_start = close_tag_end
+        needs_newline = True
         if function_close is None and not trailing.strip() and close_line_end < source_end:
             following_line_start = close_line_end + 1
             following_line_end = content.find("\n", following_line_start)
@@ -2908,11 +2948,13 @@ def multiline_foreach_function_source_edits(
                 len(following_line) - len(following_body)
             )
             if function_close is not None and not function_close.group(1).strip():
-                function_close = None
+                needs_newline = False
         if function_close is not None:
             close_offset = close_search_start + len(function_close.group(1))
-            edits.append((close_offset, close_offset, "\n" + base_indent))
-    return edits
+            owned_ranges.append((function_line_start, close_offset + 1))
+            if needs_newline:
+                edits.append((close_offset, close_offset, "\n" + base_indent))
+    return edits, owned_ranges
 
 
 def resolve_source_edits(
@@ -4461,12 +4503,41 @@ class XmlMybatisSqlRule(BaseRule):
     examples = [
         {
             "violating": '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        select my_column from my_schema.my_table t\n    </select>\n</mapper>',
-            "correct": '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT my_column FROM my_schema.my_table t\n    </select>\n</mapper>'
+            "correct": '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT my_column FROM my_schema.my_table t\n    </select>\n</mapper>',
         },
         {
             "violating": '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT id\n            , name\n        FROM users\n        <if test="distinct">\n            , distinct_val\n        </if>\n    </select>\n</mapper>',
-            "correct": '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT\n            id,\n            name\n        FROM users\n        <if test="distinct">\n            , distinct_val\n        </if>\n    </select>\n</mapper>'
-        }
+            "correct": '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT\n            id,\n            name\n        FROM users\n        <if test="distinct">\n            , distinct_val\n        </if>\n    </select>\n</mapper>',
+        },
+        {
+            "violating": (
+                '<mapper namespace="GenericMapper">\n'
+                '    <select id="totals">\n'
+                "        SELECT\n"
+                "            sum(\n"
+                "                <choose>\n"
+                '                    <when test="useMaximum">maximum_count</when>\n'
+                "                    <otherwise>current_count</otherwise>\n"
+                "                </choose>) AS total_count\n"
+                "        FROM sample_item\n"
+                "    </select>\n"
+                "</mapper>"
+            ),
+            "correct": (
+                '<mapper namespace="GenericMapper">\n'
+                '    <select id="totals">\n'
+                "        SELECT\n"
+                "            sum(\n"
+                "                <choose>\n"
+                '                    <when test="useMaximum">maximum_count</when>\n'
+                "                    <otherwise>current_count</otherwise>\n"
+                "                </choose>\n"
+                "            ) AS total_count\n"
+                "        FROM sample_item\n"
+                "    </select>\n"
+                "</mapper>"
+            ),
+        },
     ]
     additional_validations = [
         '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">\n<mapper namespace="my_namespace.MyMapper">\n    <select id="selectListByQuery">\n        SELECT my_column FROM my_schema.my_table t\n    </select>\n</mapper>',
@@ -4649,10 +4720,11 @@ class XmlMybatisSqlRule(BaseRule):
                     dynamic_indent_ranges,
                     inner_config,
                 )
-                foreach_function_edits = (
-                    multiline_foreach_function_source_edits(
+                dynamic_function_edits, dynamic_function_ranges = (
+                    multiline_dynamic_function_source_edits(
                         content,
                         (el["start_offset"], el["end_offset"]),
+                        inner_config,
                     )
                 )
                 changed_post_choose_edits = [
@@ -4700,35 +4772,38 @@ class XmlMybatisSqlRule(BaseRule):
                     first_start = min(
                         start for start, _, _ in changed_between_edits
                     )
-                    violations.append({
-                        "rule_id": "IR-where-multi",
-                        "line": content.count("\n", 0, first_start) + 1,
-                        "message": (
-                            "[MyBatis SQL: IR-where-multi] Keep BETWEEN "
-                            "delimiter layout within the physical line limit."
-                        ),
-                        "is_fixable": True,
-                    })
-                changed_foreach_function_edits = [
-                    edit
-                    for edit in foreach_function_edits
-                    if content[edit[0]:edit[1]] != edit[2]
-                ]
-                if changed_foreach_function_edits:
-                    first_start = min(
-                        start
-                        for start, _, _ in changed_foreach_function_edits
+                    violations.append(
+                        {
+                            "rule_id": "IR-where-multi",
+                            "line": content.count("\n", 0, first_start) + 1,
+                            "message": (
+                                "[MyBatis SQL: IR-where-multi] Keep BETWEEN "
+                                "delimiter layout within the physical line limit."
+                            ),
+                            "is_fixable": True,
+                        }
                     )
-                    violations.append({
-                        "rule_id": "IR-multiline-function-layout",
-                        "line": content.count("\n", 0, first_start) + 1,
-                        "message": (
-                            "[MyBatis SQL: IR-multiline-function-layout] "
-                            "Put a multiline foreach argument on its own "
-                            "indented line."
-                        ),
-                        "is_fixable": True,
-                    })
+                changed_dynamic_function_edits = [
+                    edit
+                    for edit in dynamic_function_edits
+                    if content[edit[0] : edit[1]] != edit[2]
+                ]
+                if changed_dynamic_function_edits:
+                    first_start = min(
+                        start for start, _, _ in changed_dynamic_function_edits
+                    )
+                    violations.append(
+                        {
+                            "rule_id": "IR-multiline-function-layout",
+                            "line": content.count("\n", 0, first_start) + 1,
+                            "message": (
+                                "[MyBatis SQL: IR-multiline-function-layout] "
+                                "Put a multiline dynamic argument on its own "
+                                "indented line."
+                            ),
+                            "is_fixable": True,
+                        }
+                    )
                 dynamic_body_edits = dynamic_body_indent_source_edits(
                     content,
                     (el["start_offset"], el["end_offset"]),
@@ -5369,21 +5444,25 @@ class XmlMybatisSqlRule(BaseRule):
                         # when a consumer appends another condition.
                         continue
                     if (
-                        (
-                            ev["rule_id"] in {
-                                "IR-table-function-indent",
-                                "IR-subquery-indent",
-                            }
-                            and has_dynamic_choose
-                        )
-                        or (
-                            ev["rule_id"]
-                            == "IR-multiline-function-layout"
-                            and has_dynamic_values_choose
-                        )
+                        ev["rule_id"]
+                        in {
+                            "IR-table-function-indent",
+                            "IR-subquery-indent",
+                        }
+                        and has_dynamic_choose
+                    ) or (
+                        ev["rule_id"] == "IR-multiline-function-layout"
+                        and has_dynamic_values_choose
                     ):
                         # Mutually exclusive XML branches cannot be assigned
                         # one meaningful guest-SQL indentation depth.
+                        continue
+                    if ev["rule_id"] == "IR-multiline-function-layout" and any(
+                        start <= ev["mapped_offset"] < end
+                        for start, end in dynamic_function_ranges
+                    ):
+                        # The physical XML helper owns these arguments; expanded
+                        # mutually exclusive branches are not adjacent SQL arguments.
                         continue
                     if (
                         ev["rule_id"] == "IR-as-spacing"
@@ -5717,10 +5796,11 @@ class XmlMybatisSqlRule(BaseRule):
                     dynamic_indent_ranges,
                     inner_config,
                 )
-                foreach_function_edits = (
-                    multiline_foreach_function_source_edits(
+                dynamic_function_edits, _dynamic_function_ranges = (
+                    multiline_dynamic_function_source_edits(
                         content,
                         (el["start_offset"], el["end_offset"]),
+                        inner_config,
                     )
                 )
                 dynamic_body_edits = dynamic_body_indent_source_edits(
@@ -5798,7 +5878,7 @@ class XmlMybatisSqlRule(BaseRule):
                     post_choose_edits
                     + join_case_edits
                     + between_edits
-                    + foreach_function_edits
+                    + dynamic_function_edits
                     + dynamic_body_edits
                     + dynamic_where_edits
                     + physical_where_edits
@@ -6077,8 +6157,11 @@ class XmlMybatisSqlRule(BaseRule):
                 )
                 protected_source_indent_spans = [
                     (start, end)
-                    for start, end, _ in post_choose_edits + dynamic_body_edits
-                    + join_case_edits + between_edits + foreach_function_edits
+                    for start, end, _ in post_choose_edits
+                    + dynamic_body_edits
+                    + join_case_edits
+                    + between_edits
+                    + dynamic_function_edits
                     + top_level_clause_edits
                     + dynamic_where_edits
                     + physical_where_edits
@@ -6092,9 +6175,7 @@ class XmlMybatisSqlRule(BaseRule):
                 ] + [
                     (start, end)
                     for start, end, replacement in (
-                        dynamic_from_edits
-                        + dynamic_order_edits
-                        + static_order_edits
+                        dynamic_from_edits + dynamic_order_edits + static_order_edits
                     )
                     if content[start:end] != replacement
                 ]
@@ -6122,7 +6203,7 @@ class XmlMybatisSqlRule(BaseRule):
                         post_choose_edits
                         + join_case_edits
                         + between_edits
-                        + foreach_function_edits
+                        + dynamic_function_edits
                         + dynamic_body_edits
                         + dynamic_where_edits
                         + physical_where_edits
@@ -6141,11 +6222,9 @@ class XmlMybatisSqlRule(BaseRule):
                 ) | set(
                     edit
                     for edit in (
-                        dynamic_from_edits
-                        + dynamic_order_edits
-                        + static_order_edits
+                        dynamic_from_edits + dynamic_order_edits + static_order_edits
                     )
-                    if content[edit[0]:edit[1]] != edit[2]
+                    if content[edit[0] : edit[1]] != edit[2]
                 )
                 layout_edits = [
                     edit
@@ -6326,7 +6405,7 @@ class XmlMybatisSqlRule(BaseRule):
                     # from starving a host WHERE or long physical projection.
                     exact_source_edits = set(
                         where_source_edits
-                        + foreach_function_edits
+                        + dynamic_function_edits
                         + long_select_edits
                         + physical_case_edits
                         + long_case_edits

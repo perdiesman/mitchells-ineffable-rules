@@ -75,9 +75,20 @@ class AdditiveWrapRule(BaseRule):
                 "        + third_measure_with_a_long_name + fourth_measure"
             ),
         },
+        {
+            "violating": (
+                "                        recorded_at > #{selectedTime}::TIMESTAMP WITH TIME ZONE"
+                " - window_hours * INTERVAL '1 hour'"
+            ),
+            "correct": (
+                "                        recorded_at > #{selectedTime}::TIMESTAMP WITH TIME ZONE\n"
+                "                            - window_hours * INTERVAL '1 hour'"
+            ),
+        },
     ]
     additional_validations = [
         "SELECT first_measure + second_measure FROM sample_measure;",
+        "SELECT -very_long_negative_literal_operand_that_must_not_be_split_from_its_unary_sign;",
     ]
 
     def _find_continuation_edits(
@@ -421,9 +432,8 @@ class AdditiveWrapRule(BaseRule):
                 else max_length
             )
             if (
-                line.lstrip(" \t").startswith(("+", "||"))
-                and source_text_length(line, rule_config)
-                <= continuation_max_length
+                line.lstrip(" \t").startswith(("+", "-", "||"))
+                and source_text_length(line, rule_config) <= continuation_max_length
             ):
                 continue
             if source_text_length(line, rule_config) <= line_max_length:
@@ -432,7 +442,11 @@ class AdditiveWrapRule(BaseRule):
             line_end = line_start + len(line)
             candidates = []
             for index, token in line_tokens:
-                if token["type"] != "OPERATOR" or token["value"] not in {"+", "||"}:
+                if token["type"] != "OPERATOR" or token["value"] not in {
+                    "+",
+                    "-",
+                    "||",
+                }:
                     continue
                 previous = next(
                     (
@@ -443,6 +457,33 @@ class AdditiveWrapRule(BaseRule):
                     None,
                 )
                 if previous is None or previous["type"] in {"OPERATOR", "COMMA"}:
+                    continue
+                if token["value"] == "-" and (
+                    (previous["type"] == "PAREN" and previous["value"] == "(")
+                    or (
+                        previous["type"] == "KEYWORD"
+                        and previous["value"].upper()
+                        in {
+                            "SELECT",
+                            "WHERE",
+                            "AND",
+                            "OR",
+                            "ON",
+                            "HAVING",
+                            "LIMIT",
+                            "BY",
+                            "RETURNING",
+                            "WHEN",
+                            "THEN",
+                            "ELSE",
+                            "CASE",
+                            "AS",
+                            "SET",
+                            "DEFAULT",
+                            "VALUES",
+                        }
+                    )
+                ):
                     continue
                 candidates.append((index, token, depths[index]))
             if not candidates:

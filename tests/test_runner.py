@@ -4420,6 +4420,101 @@ class TestRunnerIntegration(unittest.TestCase):
         self.assertFalse(first.diagnostics)
         self.assertFalse(second.diagnostics)
 
+    def test_xml_mybatis_choose_function_argument_uses_physical_layout(self):
+        source = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="totals">\n'
+            "        SELECT sum(<choose>\n"
+            '            <when test="useMaximum">maximum_count</when>\n'
+            "            <otherwise>current_count</otherwise>\n"
+            "        </choose>) AS total_count\n"
+            "        FROM sample_item\n"
+            "    </select>\n"
+            "</mapper>"
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="totals">\n'
+            "        SELECT\n"
+            "            sum(\n"
+            "                <choose>\n"
+            '                    <when test="useMaximum">maximum_count</when>\n'
+            "                    <otherwise>current_count</otherwise>\n"
+            "                </choose>\n"
+            "            ) AS total_count\n"
+            "        FROM sample_item\n"
+            "    </select>\n"
+            "</mapper>"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+        first = process_document(config, source, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.violations)
+        self.assertFalse(second.violations)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_mybatis_dynamic_peak_query_preserves_values_and_expressions(self):
+        source = (
+            '<mapper namespace="sample">\n'
+            '    <sql id="mapperCountyIds">\n'
+            '        <foreach collection="countyIds" item="id" open="(" close=")" separator=",">#{id}</foreach>\n'
+            "    </sql>\n"
+            '    <select id="getPeaks" resultType="sample.Peak">\n'
+            "        WITH totals AS MATERIALIZED (\n"
+            "            SELECT run_start_time,\n"
+            "                sum(<choose>\n"
+            "                        <when test=\"peakMethod == 'hourMax'\">hour_outage</when>\n"
+            "                        <otherwise>current_outage</otherwise>\n"
+            "                </choose>) AS outage_count\n"
+            "            FROM sample.county_outages\n"
+            "            WHERE\n"
+            '                county_id IN <include refid="mapperCountyIds" />\n'
+            "                AND run_start_time &gt; #{runStartTime}::TIMESTAMPTZ\n"
+            "                    - INTERVAL '24 hours'\n"
+            "                AND run_start_time &lt;= #{runStartTime}\n"
+            "                <choose>\n"
+            "                    <when test=\"peakMethod == 'hourMax'\">AND hour_outage IS NOT NULL</when>\n"
+            "                    <otherwise>AND current_outage IS NOT NULL</otherwise>\n"
+            "                </choose>\n"
+            "            GROUP BY run_start_time\n"
+            "        )\n"
+            '        SELECT peak.outage_count AS "outageCount", peak.run_start_time AS "occurredAt"\n'
+            "        FROM\n"
+            "            (VALUES (1), (24)) windows(hours)\n"
+            "            LEFT JOIN LATERAL (\n"
+            "                    SELECT outage_count, run_start_time\n"
+            "                    FROM totals\n"
+            "                    WHERE\n"
+            "                        run_start_time &gt; #{runStartTime}::TIMESTAMPTZ - windows.hours * INTERVAL '1 hour'\n"
+            "                    ORDER BY outage_count DESC, run_start_time\n"
+            "                    LIMIT 1\n"
+            "                ) peak ON true\n"
+            "        ORDER BY windows.hours\n"
+            "    </select>\n"
+            "</mapper>\n"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+        first = process_document(config, source, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+        self.assertIn("(VALUES (1), (24))", first.content)
+        self.assertIn("::TIMESTAMP WITH TIME ZONE", first.content)
+        self.assertEqual(
+            get_mybatis_protected_signatures(source),
+            get_mybatis_protected_signatures(first.content),
+        )
+        self.assertEqual(first.content, second.content)
+        self.assertFalse(first.violations)
+        self.assertFalse(second.violations)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
     def test_xml_mybatis_choose_value_is_not_a_synthetic_function_error(self):
         xml_content = (
             '<mapper namespace="GenericMapper">\n'

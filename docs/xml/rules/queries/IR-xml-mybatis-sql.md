@@ -64,6 +64,37 @@ Format embedded SQL inside MyBatis XML mapper files using SQL rules.
 </mapper>
 ```
 
+#### ❌ Violating Example #3
+```xml
+<mapper namespace="GenericMapper">
+    <select id="totals">
+        SELECT
+            sum(
+                <choose>
+                    <when test="useMaximum">maximum_count</when>
+                    <otherwise>current_count</otherwise>
+                </choose>) AS total_count
+        FROM sample_item
+    </select>
+</mapper>
+```
+
+####  Correct Example #3
+```xml
+<mapper namespace="GenericMapper">
+    <select id="totals">
+        SELECT
+            sum(
+                <choose>
+                    <when test="useMaximum">maximum_count</when>
+                    <otherwise>current_count</otherwise>
+                </choose>
+            ) AS total_count
+        FROM sample_item
+    </select>
+</mapper>
+```
+
 #### Additional Validations
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
