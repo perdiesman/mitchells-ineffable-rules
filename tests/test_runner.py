@@ -15,6 +15,7 @@ from mir.rules.xml.xml_mybatis_sql import (
     dynamic_column_layout_edits,
     get_mybatis_protected_signatures,
     join_case_source_edits,
+    multiline_dynamic_function_source_edits,
     physical_case_indent_source_edits,
 )
 from mir.rules.xml.xml_line_length import XmlLineLengthRule
@@ -4441,6 +4442,74 @@ class TestRunnerIntegration(unittest.TestCase):
             '                    <when test="useMaximum">maximum_count</when>\n'
             "                    <otherwise>current_count</otherwise>\n"
             "                </choose>\n"
+            "            ) AS total_count\n"
+            "        FROM sample_item\n"
+            "    </select>\n"
+            "</mapper>"
+        )
+        config = Config()
+        config.profile = "commit"
+        config.fix = True
+        first = process_document(config, source, "generic.xml", "xml")
+        second = process_document(config, first.content, "generic.xml", "xml")
+        self.assertEqual(first.content, expected)
+        self.assertEqual(second.content, expected)
+        self.assertFalse(first.violations)
+        self.assertFalse(second.violations)
+        self.assertFalse(first.diagnostics)
+        self.assertFalse(second.diagnostics)
+
+    def test_xml_mybatis_dynamic_function_closer_ignores_comments_and_literals(self):
+        dynamic = (
+            "<choose>\n"
+            '    <when test="useMaximum">maximum_count</when>\n'
+            "    <otherwise>current_count</otherwise>\n"
+            "</choose>"
+        )
+        for suffix in (
+            " -- note)\n) AS total_count",
+            " /* note) */) AS total_count",
+            " + length('note)')) AS total_count",
+        ):
+            with self.subTest(suffix=suffix):
+                source = "sum(" + dynamic + suffix
+                edits, owned = multiline_dynamic_function_source_edits(
+                    source, (0, len(source)), {}
+                )
+                self.assertEqual(owned, [(0, source.index(" AS total_count"))])
+                fixed = source
+                for start, end, replacement in sorted(edits, reverse=True):
+                    fixed = fixed[:start] + replacement + fixed[end:]
+                self.assertIn(suffix.split(") AS")[0], fixed)
+                self.assertEqual(
+                    multiline_dynamic_function_source_edits(fixed, (0, len(fixed)), {})[
+                        0
+                    ],
+                    [],
+                )
+
+    def test_xml_mybatis_dynamic_function_preserves_line_comment_parenthesis(self):
+        source = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="totals">\n'
+            "        SELECT sum(<choose>\n"
+            '            <when test="useMaximum">maximum_count</when>\n'
+            "            <otherwise>current_count</otherwise>\n"
+            "        </choose> -- note)\n"
+            "        ) AS total_count\n"
+            "        FROM sample_item\n"
+            "    </select>\n"
+            "</mapper>"
+        )
+        expected = (
+            '<mapper namespace="GenericMapper">\n'
+            '    <select id="totals">\n'
+            "        SELECT\n"
+            "            sum(\n"
+            "                <choose>\n"
+            '                    <when test="useMaximum">maximum_count</when>\n'
+            "                    <otherwise>current_count</otherwise>\n"
+            "                </choose> -- note)\n"
             "            ) AS total_count\n"
             "        FROM sample_item\n"
             "    </select>\n"

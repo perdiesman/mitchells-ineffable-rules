@@ -2933,26 +2933,36 @@ def multiline_dynamic_function_source_edits(
         if close_line_end == -1:
             close_line_end = source_end
         trailing = content[close_tag_end:close_line_end]
-        function_close = re.fullmatch(r"([^)]*)\)([^)]*)", trailing)
         close_search_start = close_tag_end
-        needs_newline = True
-        if function_close is None and not trailing.strip() and close_line_end < source_end:
+        trailing_tokens = tokenize_sql(trailing)
+        if (
+            all(token["type"] in {"WHITESPACE", "COMMENT"} for token in trailing_tokens)
+            and close_line_end < source_end
+        ):
             following_line_start = close_line_end + 1
             following_line_end = content.find("\n", following_line_start)
             if following_line_end == -1:
                 following_line_end = source_end
             following_line = content[following_line_start:following_line_end]
-            following_body = following_line.lstrip(" \t")
-            function_close = re.fullmatch(r"([^)]*)\)([^)]*)", following_body)
-            close_search_start = following_line_start + (
-                len(following_line) - len(following_body)
-            )
-            if function_close is not None and not function_close.group(1).strip():
-                needs_newline = False
+            trailing_tokens = tokenize_sql(following_line)
+            close_search_start = following_line_start
+        function_close = None
+        depth = 0
+        for token in trailing_tokens:
+            if token["type"] != "PAREN":
+                continue
+            if token["value"] == "(":
+                depth += 1
+            elif depth:
+                depth -= 1
+            else:
+                function_close = token
+                break
         if function_close is not None:
-            close_offset = close_search_start + len(function_close.group(1))
+            close_offset = close_search_start + function_close["start"]
             owned_ranges.append((function_line_start, close_offset + 1))
-            if needs_newline:
+            prefix_start = content.rfind("\n", 0, close_offset) + 1
+            if content[prefix_start:close_offset].strip():
                 edits.append((close_offset, close_offset, "\n" + base_indent))
     return edits, owned_ranges
 
