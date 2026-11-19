@@ -170,6 +170,8 @@ The image includes Ruff and a Node.js runtime. Prettier and ESLint are still res
 
 The included hook runs `mir --staged --fix`. Fixes are written to the Git index; an unrelated unstaged edit remains unstaged. If an unstaged edit overlaps a formatter edit, MIR leaves the working tree alone and reports that the index-only fix must be reviewed.
 
+The portable hook supports Bash 3.2 on macOS and newer Bash versions on Linux. Source file extensions are matched without regard to case.
+
 For this repository, use the tracked hooks:
 
 ```bash
@@ -417,6 +419,6 @@ Releases are published from `main` through GitHub Actions and PyPI Trusted Publi
 
 *This package has been developed with **Antigravity** and **OpenAI Codex**.*
 
-*Total Cumulative Development Time: ~78.4 hours*
+*Total Cumulative Development Time: ~78.9 hours*
 
-*Last Developer Session: 2026-11-16T22:54:41Z*
+*Last Developer Session: 2026-11-19T21:42:44Z*
