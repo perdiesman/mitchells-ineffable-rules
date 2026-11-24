@@ -57,7 +57,7 @@ run_docker_mir() {
     index=0
     while IFS= read -r -d '' path; do
         extension=".${path##*.}"
-        extension=${extension,,}
+        extension=$(printf '%s' "$extension" | LC_ALL=C tr '[:upper:]' '[:lower:]')
         case "$extension" in
             .sql|.xml|.java|.jav|.py|.pyi|.js|.jsx|.mjs|.cjs|.ts|.tsx|.css|.scss|.html) ;;
             *) continue ;;

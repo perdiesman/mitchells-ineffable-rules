@@ -19,15 +19,48 @@ class TestDockerCommitHook(unittest.TestCase):
             text=True,
         ).stdout
 
+    def test_docker_mode_skips_empty_and_unsupported_staged_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.git(root, "init", "-q")
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            docker = fake_bin / "docker"
+            docker.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+            docker.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "MIR_EXECUTION_MODE": "docker",
+                    "PATH": f"{fake_bin}{os.pathsep}{environment['PATH']}",
+                }
+            )
+
+            for filename in (None, "README.md"):
+                with self.subTest(staged_file=filename):
+                    if filename:
+                        (root / filename).write_text("Documentation only.\n", encoding="utf-8")
+                        self.git(root, "add", filename)
+                    result = subprocess.run(
+                        ["bash", str(ROOT / "pre-commit-hook.sh")],
+                        cwd=root,
+                        env=environment,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_docker_mode_formats_index_and_preserves_unstaged_edit(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self.git(root, "init", "-q")
             self.git(root, "config", "user.email", "test@example.com")
             self.git(root, "config", "user.name", "Test User")
-            source = root / "sample.sql"
+            source = root / "sample.SQL"
             source.write_text("select item_id from sample_table;\n", encoding="utf-8")
-            self.git(root, "add", "sample.sql")
+            self.git(root, "add", "sample.SQL")
             source.write_text(
                 "select item_id from sample_table;\n-- unstaged note\n",
                 encoding="utf-8",
@@ -78,7 +111,7 @@ class TestDockerCommitHook(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
-                self.git(root, "show", ":sample.sql"),
+                self.git(root, "show", ":sample.SQL"),
                 "SELECT item_id FROM sample_table;\n",
             )
             self.assertEqual(
@@ -92,7 +125,7 @@ class TestDockerCommitHook(unittest.TestCase):
             self.assertIn("--pull\nnever", arguments)
 
             source.write_text("select item_id from sample_table;\n", encoding="utf-8")
-            self.git(root, "add", "sample.sql")
+            self.git(root, "add", "sample.SQL")
             source.write_text("select other_id from sample_table;\n", encoding="utf-8")
             overlapping = subprocess.run(
                 ["bash", str(hook)],
@@ -105,7 +138,7 @@ class TestDockerCommitHook(unittest.TestCase):
 
             self.assertEqual(overlapping.returncode, 0, overlapping.stderr)
             self.assertEqual(
-                self.git(root, "show", ":sample.sql"),
+                self.git(root, "show", ":sample.SQL"),
                 "SELECT item_id FROM sample_table;\n",
             )
             self.assertEqual(

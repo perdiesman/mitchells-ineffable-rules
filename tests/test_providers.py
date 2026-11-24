@@ -128,7 +128,7 @@ class TestProviders(unittest.TestCase):
             )
         self.assertEqual(result.content, response["content"])
         self.assertEqual(result.version, "3.6.2")
-        self.assertEqual(request.call_args.args[2]["path"], "/tmp/sample.ts")
+        self.assertEqual(request.call_args.args[2]["path"], str(Path(context.path).resolve()))
 
     def test_prettier_selected_final_line_includes_its_line_ending(self):
         for ending in ("", "\n", "\r\n"):

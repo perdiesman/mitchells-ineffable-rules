@@ -57,7 +57,7 @@ No consumer-specific SQL is stored in MIR's documentation or tests. Compatibilit
 
 ## Docker-backed hook
 
-The portable hook can keep Git and the index entirely on the host while running MIR in a locked-down container. This mode requires Git, Docker, and the standard `base64` command on the host; it does not require a host Python or MIR installation.
+The portable hook can keep Git and the index entirely on the host while running MIR in a locked-down container. This mode requires Bash 3.2 or newer, Git, Docker, and the standard `base64` and `tr` commands on the host; it does not require a host Python or MIR installation. It supports the Bash version supplied with macOS and matches source file extensions without regard to case.
 
 Build the image once and configure each consumer repository:
 
