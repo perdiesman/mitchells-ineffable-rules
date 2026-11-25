@@ -124,7 +124,7 @@ class PrettierProvider(BaseProvider):
             if response.get("ignored"):
                 return content, version
             current = str(response.get("content", current))
-        if full_format and (context.restricted or disabled) and current != content:
+        if (context.restricted or disabled) and current != content:
             changes = difflib.SequenceMatcher(
                 None,
                 content.splitlines(keepends=True),

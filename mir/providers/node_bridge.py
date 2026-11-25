@@ -23,7 +23,14 @@ class _NodeSession:
             raise NodeBridgeError("Node.js is not available")
         script = Path(__file__).with_name("node_bridge.mjs")
         self.process = subprocess.Popen(
-            [node, str(script), mode, project_root],
+            # The flag enables project-relative ESM resolution via its parent URL.
+            [
+                node,
+                "--experimental-import-meta-resolve",
+                str(script),
+                mode,
+                project_root,
+            ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

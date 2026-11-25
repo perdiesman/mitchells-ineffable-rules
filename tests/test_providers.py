@@ -23,7 +23,7 @@ from mir.engine.providers_loader import (
 from mir.engine.runner import find_files, process_document, run_linter
 from mir.providers.common import resolve_executable
 from mir.providers.eslint import EslintProvider
-from mir.providers.node_bridge import project_root_for_executable
+from mir.providers.node_bridge import NodeBridgeError, project_root_for_executable
 from mir.providers.prettier import PrettierProvider
 
 RUFF = shutil.which("ruff") or str(Path(sys.executable).with_name("ruff"))
@@ -218,6 +218,97 @@ class TestProviders(unittest.TestCase):
                         for message in result.diagnostics
                     )
                 )
+
+    def test_prettier_expanded_context_preserves_staged_and_disabled_lines(self):
+        source = "const outside=1;\nfor (const item of items) {\n  if (item.skip) { continue; }\n}\n"
+        formatted = source.replace("outside=1", "outside = 1")
+        for selected, disabled in (
+            (frozenset({3}), {}),
+            (frozenset({1, 3}), {"prettier": frozenset({1})}),
+            (frozenset({1, 3}), {"all": frozenset({1})}),
+        ):
+            with self.subTest(selected=selected, disabled=disabled):
+                context = ProviderContext(
+                    "/tmp/sample.mjs",
+                    "javascript",
+                    selected,
+                    True,
+                    True,
+                    "commit",
+                    disabled,
+                )
+                with (
+                    patch(
+                        "mir.providers.prettier.resolve_executable",
+                        return_value="/project/node_modules/.bin/prettier",
+                    ),
+                    patch(
+                        "mir.providers.prettier.node_request",
+                        return_value={"content": formatted, "version": "3.8.1"},
+                    ),
+                ):
+                    result = PrettierProvider().run(source, context, {})
+                self.assertEqual(result.content, source)
+                self.assertTrue(
+                    any(
+                        "outside the staged or enabled scope" in message
+                        for message in result.diagnostics
+                    )
+                )
+                self.assertEqual(context.selected_lines, selected)
+
+    def test_prettier_expanded_context_accepts_only_selected_edits_and_is_idempotent(
+        self,
+    ):
+        source = "for (const item of items) {\n  if(item.skip) { continue; }\n}\n"
+        formatted = source.replace("if(item.skip)", "if (item.skip)")
+        context = ProviderContext(
+            "/tmp/sample.mjs", "javascript", frozenset({2}), True, True, "commit", {}
+        )
+        with (
+            patch(
+                "mir.providers.prettier.resolve_executable",
+                return_value="/project/node_modules/.bin/prettier",
+            ),
+            patch(
+                "mir.providers.prettier.node_request",
+                return_value={"content": formatted, "version": "3.8.1"},
+            ),
+        ):
+            result = PrettierProvider().run(source, context, {})
+            repeated = PrettierProvider().run(result.content, context, {})
+        self.assertFalse(result.diagnostics)
+        self.assertEqual(result.content, formatted)
+        self.assertTrue(result.changed)
+        self.assertFalse(repeated.diagnostics)
+        self.assertFalse(repeated.changed)
+        self.assertEqual(context.selected_lines, frozenset({2}))
+
+    def test_prettier_parser_errors_remain_visible_without_error_string_retries(self):
+        source = "continue;\n"
+        context = ProviderContext(
+            "/tmp/sample.mjs", "javascript", frozenset({1}), True, True, "commit", {}
+        )
+        for message in (
+            "SyntaxError: Unexpected token",
+            "SyntaxError: Unsyntactic continue.",
+            "provider bridge timed out",
+        ):
+            with self.subTest(message=message):
+                with (
+                    patch(
+                        "mir.providers.prettier.resolve_executable",
+                        return_value="/project/node_modules/.bin/prettier",
+                    ),
+                    patch(
+                        "mir.providers.prettier.node_request",
+                        side_effect=NodeBridgeError(message),
+                    ) as request,
+                ):
+                    result = PrettierProvider().run(source, context, {})
+                self.assertEqual(request.call_count, 1)
+                self.assertTrue(result.diagnostics)
+                self.assertEqual(result.content, source)
 
     def test_prettier_ranges_use_utf16_offsets_after_non_bmp_text(self):
         source = "// 😀\nconst value = 1;\n"
