@@ -30,10 +30,24 @@ FROM users;
 
 #### ❌ Violating Example #2
 ```sql
-SELECT first_name, last_name, email, phone_number, mailing_address, date_of_birth, join_date, another_long_column_name, yet_another_one_to_be_sure FROM users;
+SELECT
+    #{item.id},
+    #{item.threshold,jdbcType=INTEGER}
+FROM sample_item;
 ```
 
 ####  Correct Example #2
+```sql
+SELECT #{item.id}, #{item.threshold,jdbcType=INTEGER}
+FROM sample_item;
+```
+
+#### ❌ Violating Example #3
+```sql
+SELECT first_name, last_name, email, phone_number, mailing_address, date_of_birth, join_date, another_long_column_name, yet_another_one_to_be_sure FROM users;
+```
+
+####  Correct Example #3
 ```sql
 SELECT
     first_name,

@@ -51,12 +51,16 @@ class ColumnLayoutRule(BaseRule):
     examples = [
         {
             "violating": "SELECT\n    id,\n    name\nFROM users;",
-            "correct": "SELECT id, name\nFROM users;"
+            "correct": "SELECT id, name\nFROM users;",
+        },
+        {
+            "violating": "SELECT\n    #{item.id},\n    #{item.threshold,jdbcType=INTEGER}\nFROM sample_item;",
+            "correct": "SELECT #{item.id}, #{item.threshold,jdbcType=INTEGER}\nFROM sample_item;",
         },
         {
             "violating": "SELECT first_name, last_name, email, phone_number, mailing_address, date_of_birth, join_date, another_long_column_name, yet_another_one_to_be_sure FROM users;",
-            "correct": "SELECT\n    first_name,\n    last_name,\n    email,\n    phone_number,\n    mailing_address,\n    date_of_birth,\n    join_date,\n    another_long_column_name,\n    yet_another_one_to_be_sure FROM users;"
-        }
+            "correct": "SELECT\n    first_name,\n    last_name,\n    email,\n    phone_number,\n    mailing_address,\n    date_of_birth,\n    join_date,\n    another_long_column_name,\n    yet_another_one_to_be_sure FROM users;",
+        },
     ]
     additional_validations = [
         "SELECT id, name FROM users;",
@@ -68,30 +72,19 @@ class ColumnLayoutRule(BaseRule):
         expressions = []
         start = 0
         depth = 0
-        quote = None
-        index = 0
-        while index < len(text):
-            char = text[index]
-            if quote:
-                if char == quote:
-                    if index + 1 < len(text) and text[index + 1] == quote:
-                        index += 2
-                        continue
-                    quote = None
-                index += 1
+        for token in tokenize_sql(text):
+            value = token["value"]
+            if token["type"] in {"PARAM", "STRING", "COMMENT"}:
                 continue
-            if char in ("'", '"'):
-                quote = char
-            elif char == "(":
+            if value == "(":
                 depth += 1
-            elif char == ")":
+            elif value == ")":
                 depth -= 1
-            elif char == "," and depth == 0:
-                expression = _normalize_inline_expression(text[start:index])
+            elif value == "," and depth == 0:
+                expression = _normalize_inline_expression(text[start : token["start"]])
                 if expression:
                     expressions.append(expression)
-                start = index + 1
-            index += 1
+                start = token["end"]
         expression = _normalize_inline_expression(text[start:])
         if expression:
             expressions.append(expression)
@@ -165,6 +158,11 @@ class ColumnLayoutRule(BaseRule):
         Returns a list of dicts.
         """
         n = len(content)
+        parameter_ends = {
+            token["start"]: token["end"]
+            for token in tokenize_sql(content)
+            if token["type"] == "PARAM"
+        }
         i = 0
         in_string = False
         string_char = None
@@ -176,6 +174,13 @@ class ColumnLayoutRule(BaseRule):
         clauses = []
         
         while i < n:
+            if i in parameter_ends:
+                end = parameter_ends[i]
+                line_number += content[i:end].count("\n")
+                if "\n" in content[i:end]:
+                    line_start_idx = content.rfind("\n", i, end) + 1
+                i = end
+                continue
             c = content[i]
             
             if c == '\n':
@@ -317,6 +322,9 @@ class ColumnLayoutRule(BaseRule):
                                         quote = None
                                         close_idx = open_idx
                                         while close_idx < n:
+                                            if close_idx in parameter_ends:
+                                                close_idx = parameter_ends[close_idx]
+                                                continue
                                             char = content[close_idx]
                                             if quote:
                                                 if char == quote:
@@ -359,6 +367,10 @@ class ColumnLayoutRule(BaseRule):
                     last_non_space_idx = list_start
                     
                     while j < n:
+                        if j in parameter_ends:
+                            j = parameter_ends[j]
+                            last_non_space_idx = j
+                            continue
                         jc = content[j]
                         
                         if list_string:

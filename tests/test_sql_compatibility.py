@@ -2327,6 +2327,28 @@ class TestSqlCompatibility(unittest.TestCase):
             "    item_name FROM sample_item;",
         )
 
+    def test_column_layout_preserves_mybatis_parameter_options(self):
+        rule = ColumnLayoutRule()
+        parameter = "#{item.threshold,jdbcType=INTEGER,javaType=int}"
+        for keyword in ("SELECT", "GROUP BY", "ORDER BY", "SELECT DISTINCT ON"):
+            with self.subTest(keyword=keyword):
+                if keyword == "SELECT DISTINCT ON":
+                    source = f"SELECT DISTINCT ON ({parameter}, item_id)\n    item_id\nFROM sample_item;"
+                    expected = f"SELECT DISTINCT ON ({parameter}, item_id) item_id\nFROM sample_item;"
+                elif keyword == "SELECT":
+                    source = f"SELECT\n    {parameter},\n    item_id\nFROM sample_item;"
+                    expected = f"SELECT {parameter}, item_id\nFROM sample_item;"
+                else:
+                    source = f"SELECT item_id FROM sample_item\n{keyword}\n    {parameter},\n    item_id;"
+                    expected = f"SELECT item_id FROM sample_item\n{keyword} {parameter}, item_id;"
+                fixed = rule.fix(source, "generic.sql", {})
+                self.assertEqual(fixed, expected)
+                self.assertEqual(
+                    protected_sql_signature(fixed), protected_sql_signature(source)
+                )
+                self.assertEqual(rule.check(fixed, "generic.sql", {}), [])
+                self.assertEqual(rule.fix(fixed, "generic.sql", {}), fixed)
+
     def test_column_layout_preserves_whitespace_inside_literals(self):
         source = (
             "SELECT DISTINCT ON (item.category, 'keep  spaces')\n"

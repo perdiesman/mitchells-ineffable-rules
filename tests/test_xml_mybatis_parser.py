@@ -1,6 +1,7 @@
 import unittest
 
 from mir.rules.xml.xml_mybatis_sql import (
+    XmlMybatisSqlRule,
     get_all_elements_recursively,
     get_mybatis_protected_signatures,
     parse_xml_elements,
@@ -9,6 +10,35 @@ from mir.rules.xml.xml_utils import tokenize_xml
 
 
 class TestXmlMybatisParser(unittest.TestCase):
+    def test_foreach_projection_preserves_parameter_options(self):
+        source = """<mapper namespace="sample.Mapper">
+    <insert id="startHistory">
+        <foreach collection="items" item="item">
+            INSERT INTO sample_history (item_id, threshold)
+            SELECT
+                #{item.id},
+                #{item.threshold,jdbcType=INTEGER}
+            FROM sample_item;
+        </foreach>
+    </insert>
+</mapper>"""
+        expected = source.replace(
+            "SELECT\n                #{item.id},\n                #{item.threshold,jdbcType=INTEGER}",
+            "SELECT #{item.id}, #{item.threshold,jdbcType=INTEGER}",
+        )
+        rule = XmlMybatisSqlRule()
+        config = {"_profile": "commit"}
+
+        fixed = rule.fix(source, "generic.xml", config)
+
+        self.assertEqual(fixed, expected)
+        self.assertEqual(
+            get_mybatis_protected_signatures(fixed),
+            get_mybatis_protected_signatures(source),
+        )
+        self.assertEqual(rule.check(fixed, "generic.xml", config), [])
+        self.assertEqual(rule.fix(fixed, "generic.xml", config), fixed)
+
     def test_nested_elements_keep_document_relative_indexes(self):
         content = """<mapper namespace="sample.Mapper">
     <select id="findItems">
